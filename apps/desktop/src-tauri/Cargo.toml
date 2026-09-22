@@ -17,8 +17,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.6.3" }
 
 [dependencies]
-serde_json = "1.0"
-serde = { version = "1.0", features = ["derive"] }
+agent-client-protocol = "2.2.0"
 log = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 tauri = { version = "2.11.6" }
 tauri-plugin-log = "2"
+thiserror = "1"
+tokio = { version = "1", features = ["sync", "macros", "rt", "rt-multi-thread"] }
+
+[dev-dependencies]
+tempfile = "3"
