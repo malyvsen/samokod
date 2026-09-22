@@ -1,0 +1,16 @@
+version: "3"
+
+tasks:
+  check:
+    desc: Run all TypeScript checks
+    deps: [typecheck, test]
+
+  typecheck:
+    desc: Check typing
+    cmds:
+      - pnpm exec tsc --noEmit
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - pnpm exec vitest run

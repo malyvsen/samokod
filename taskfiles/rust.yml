@@ -1,0 +1,21 @@
+version: "3"
+
+tasks:
+  check:
+    desc: Run all Rust checks
+    deps: [fmt, clippy, test]
+
+  fmt:
+    desc: Check formatting
+    cmds:
+      - cargo fmt --check
+
+  clippy:
+    desc: Check linting
+    cmds:
+      - cargo clippy --locked --all-targets -- -D warnings
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - cargo test --locked

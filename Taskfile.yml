@@ -1,0 +1,71 @@
+version: "3"
+
+vars:
+  DEFAULT_PROJECT: apps/desktop
+
+tasks:
+  init:
+    desc: Set up the development environment
+    deps: [prereqs]
+    vars:
+      PROJECTS:
+        sh: node scripts/workspace-projects.mjs init
+    cmds:
+      - git config core.hooksPath scripts/git-hooks
+      - pnpm install --frozen-lockfile
+      - for: { var: PROJECTS, as: PROJECT }
+        cmd: task -d {{.PROJECT}} init
+
+  check:
+    desc: Run all automated checks
+    deps: [biome, knip]
+    vars:
+      PROJECTS:
+        sh: node scripts/workspace-projects.mjs check
+    cmds:
+      - for: { var: PROJECTS, as: PROJECT }
+        cmd: task -d {{.PROJECT}} check
+
+  dev:
+    desc: Run the app in development mode
+    cmds:
+      - task -d {{.DEFAULT_PROJECT}} dev
+
+  build:
+    desc: Bundle every project that ships
+    vars:
+      PROJECTS:
+        sh: node scripts/workspace-projects.mjs build
+    cmds:
+      - for: { var: PROJECTS, as: PROJECT }
+        cmd: task -d {{.PROJECT}} build
+
+  deploy:
+    desc: Deploy every project that ships
+    vars:
+      PROJECTS:
+        sh: node scripts/workspace-projects.mjs deploy
+    cmds:
+      - for: { var: PROJECTS, as: PROJECT }
+        cmd: task -d {{.PROJECT}} deploy
+
+  fix:
+    desc: Apply safe formatting and lint fixes
+    cmds:
+      - pnpm exec biome check --write --error-on-warnings .
+      - cargo fmt --all
+
+  biome:
+    desc: Check linting and formatting across the workspace
+    cmds:
+      - pnpm exec biome check --error-on-warnings .
+
+  knip:
+    desc: Check for unused TypeScript dependencies and exports
+    cmds:
+      - pnpm exec knip
+
+  prereqs:
+    desc: Check that required programs are installed
+    cmds:
+      - bash scripts/check-prereqs.sh

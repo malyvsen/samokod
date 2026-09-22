@@ -1,0 +1,10 @@
+{
+	"$schema": "https://unpkg.com/knip@latest/schema.json",
+	"includeEntryExports": true,
+	"workspaces": {
+		".": {
+			"entry": ["scripts/**/*.mjs"],
+			"ignoreBinaries": ["ditto", "task"]
+		}
+	}
+}
