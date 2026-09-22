@@ -38,16 +38,37 @@ export interface Prefs {
 	last_repo: string | null;
 }
 
+export interface PermissionOptionView {
+	id: string;
+	kind: "allow" | "reject";
+}
+
+export interface PermissionView {
+	tool_call_id: string;
+	title: string;
+	kind: string;
+	options: PermissionOptionView[];
+	rule_hint: string;
+}
+
 export type AppEvent =
 	| { type: "agent_text"; chunk: string }
 	| { type: "tool_line"; line: ToolLineView }
 	| { type: "turn_done" }
-	| { type: "turn_failed"; raw: string };
+	| { type: "turn_failed"; raw: string }
+	| { type: "permission_asked"; permission: PermissionView }
+	| { type: "permission_resolved"; tool_call_id: string };
 
 export type TranscriptItem =
 	| { kind: "user"; id: string; text: string }
 	| { kind: "agent"; id: string; text: string }
 	| { kind: "tool"; id: string; line: ToolLineView }
+	| {
+			kind: "approval";
+			id: string;
+			permission: PermissionView;
+			resolved: boolean;
+	  }
 	| { kind: "error"; id: string; raw: string };
 
-export type AgentStatus = "idle" | "working";
+export type AgentStatus = "idle" | "working" | "approval";

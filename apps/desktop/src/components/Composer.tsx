@@ -18,9 +18,14 @@ export function Composer({
 	onStop: () => void;
 	onTypePulse: () => void;
 }) {
-	const busy = status === "working";
+	const busy = status !== "idle";
 	const canSend = draft.trim() !== "";
-	const placeholder = busy ? "Working - input disabled…" : "Ask for a change…";
+	const placeholder =
+		status === "idle"
+			? "Ask for a change…"
+			: status === "working"
+				? "Working - input disabled…"
+				: "Paused - answer the approval…";
 	return (
 		<div className="composer">
 			<div className="crow">

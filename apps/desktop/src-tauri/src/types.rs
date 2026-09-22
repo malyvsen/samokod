@@ -22,6 +22,25 @@ pub struct ToolLineView {
     pub status: String,
 }
 
+/// One one-shot permission option (`allow` or `reject`). `always` variants
+/// never reach the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PermissionOptionView {
+    pub id: String,
+    pub kind: String,
+}
+
+/// Inline permission card payload.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PermissionView {
+    pub tool_call_id: String,
+    pub title: String,
+    pub kind: String,
+    pub options: Vec<PermissionOptionView>,
+    /// Effective rule only, never the config file it came from.
+    pub rule_hint: String,
+}
+
 /// Frontend event envelope. One Tauri event name carries every variant so
 /// capabilities stay tight.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -31,6 +50,8 @@ pub enum AppEvent {
     ToolLine { line: ToolLineView },
     TurnDone,
     TurnFailed { raw: String },
+    PermissionAsked { permission: PermissionView },
+    PermissionResolved { tool_call_id: String },
 }
 
 /// One selectable value inside a generic config option.

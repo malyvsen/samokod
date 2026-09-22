@@ -1,14 +1,16 @@
 // ACP wire boundary. SDK schema types enter the app through this module;
 // nothing past it imports `agent-client-protocol` directly.
 pub use agent_client_protocol::schema::v1::{
-    CancelNotification, CloseSessionRequest, ContentBlock, PromptRequest, SessionConfigKind,
-    SessionConfigOption, SessionConfigSelectOptions, SessionId, SessionNotification, SessionUpdate,
-    TextContent, ToolCall, ToolCallUpdate, ToolKind,
+    CancelNotification, CloseSessionRequest, ContentBlock, PermissionOption, PermissionOptionId,
+    PermissionOptionKind, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
+    SessionConfigSelectOptions, SessionId, SessionNotification, SessionUpdate, TextContent,
+    ToolCall, ToolCallUpdate, ToolKind,
 };
 #[cfg(test)]
 pub use agent_client_protocol::schema::v1::{
-    ContentChunk, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SessionConfigSelectOption, SessionConfigValueId, ToolCallStatus, ToolCallUpdateFields,
+    ContentChunk, SessionConfigSelectOption, SessionConfigValueId, ToolCallStatus,
+    ToolCallUpdateFields,
 };
 use agent_client_protocol::schema::{
     ProtocolVersion,

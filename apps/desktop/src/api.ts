@@ -22,6 +22,13 @@ export function cancelTurn(): Promise<void> {
 	return invoke("cancel_turn");
 }
 
+export function answerPermission(
+	toolCallId: string,
+	optionId: string | null,
+): Promise<void> {
+	return invoke("answer_permission", { toolCallId, optionId });
+}
+
 export function onAppEvent(
 	handler: (event: AppEvent) => void,
 ): Promise<() => void> {

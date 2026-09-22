@@ -1,5 +1,6 @@
 // Agent lifecycle: spawn `opencode acp` once, initialize it, open sessions
 // bound to repository roots, and stream prompt turns as events.
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -9,7 +10,16 @@ use crate::acp::{
     self, AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, SessionConfigKind,
     SessionConfigOption, SessionConfigSelectOptions,
 };
-use crate::types::{AgentError, AppEvent, ConfigOptionView, ConfigValueView, SessionInfo};
+use crate::types::{
+    AgentError, AppEvent, ConfigOptionView, ConfigValueView, PermissionView, SessionInfo,
+};
+
+/// User decision for one permission card.
+#[derive(Debug, Clone)]
+enum PermissionDecision {
+    Selected(String),
+    Cancelled,
+}
 
 #[derive(Default)]
 struct State {
@@ -17,6 +27,7 @@ struct State {
     supports_close: bool,
     session_id: Option<String>,
     working: bool,
+    pending: HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>,
 }
 
 pub struct AgentManager {
@@ -115,18 +126,50 @@ impl AgentManager {
         Ok(())
     }
 
-    /// Stop the turn via `session/cancel`.
+    /// Stop the turn via `session/cancel`, answering every open card as
+    /// cancelled per protocol.
     pub async fn cancel_turn(&self) -> Result<(), AgentError> {
         let (connection, session_id, _) =
             self.session_snapshot()
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "no active turn".to_string(),
                 })?;
+        cancel_pending(&self.state);
         let _ = connection.send_notification(acp::build_cancel_notification(acp::SessionId::new(
             session_id,
         )));
         set_working(&self.state, false);
         Ok(())
+    }
+
+    /// Answer one permission card. `Some` selects the allow-once or reject
+    /// option; `None` answers cancelled.
+    pub fn answer_permission(
+        &self,
+        tool_call_id: &str,
+        option_id: Option<String>,
+    ) -> Result<(), AgentError> {
+        let sender = self
+            .state
+            .lock()
+            .map_err(|_| AgentError::RequestFailed {
+                raw: "permission state poisoned".to_string(),
+            })?
+            .pending
+            .remove(tool_call_id);
+        match sender {
+            Some(sender) => {
+                let decision = match option_id {
+                    Some(id) => PermissionDecision::Selected(id),
+                    None => PermissionDecision::Cancelled,
+                };
+                let _ = sender.send(decision);
+                Ok(())
+            }
+            None => Err(AgentError::RequestFailed {
+                raw: format!("no pending permission for {tool_call_id}"),
+            }),
+        }
     }
 
     /// Ensure a live, initialized connection. Spawns `opencode acp` once and
@@ -141,6 +184,8 @@ impl AgentManager {
         let slot = Arc::clone(&self.state);
         let notify_state = Arc::clone(&self.state);
         let notify_app = self.app.clone();
+        let ask_state = Arc::clone(&self.state);
+        let ask_app = self.app.clone();
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
         let ready = Arc::new(Mutex::new(Some(ready_tx)));
         let ready_for_handler = Arc::clone(&ready);
@@ -159,6 +204,17 @@ impl AgentManager {
                         }
                     },
                     agent_client_protocol::on_receive_notification!(),
+                )
+                .on_receive_request(
+                    move |request: acp::RequestPermissionRequest, responder, _cx| {
+                        let state = Arc::clone(&ask_state);
+                        let app = ask_app.clone();
+                        async move {
+                            handle_permission_request(&state, &app, request, responder).await;
+                            Ok(())
+                        }
+                    },
+                    agent_client_protocol::on_receive_request!(),
                 )
                 .connect_with(agent, |connection: ConnectionTo<Agent>| {
                     let slot = Arc::clone(&slot);
@@ -227,6 +283,82 @@ fn set_working(state: &Mutex<State>, working: bool) {
     if let Ok(mut guard) = state.lock() {
         guard.working = working;
     }
+}
+
+fn cancel_pending(state: &Mutex<State>) {
+    let senders: Vec<tokio::sync::oneshot::Sender<PermissionDecision>> = state
+        .lock()
+        .map(|mut guard| guard.pending.drain().map(|(_, sender)| sender).collect())
+        .unwrap_or_default();
+    for sender in senders {
+        let _ = sender.send(PermissionDecision::Cancelled);
+    }
+}
+
+async fn handle_permission_request(
+    state: &Mutex<State>,
+    app: &AppHandle,
+    request: acp::RequestPermissionRequest,
+    responder: agent_client_protocol::Responder<acp::RequestPermissionResponse>,
+) {
+    let current = state.lock().ok().and_then(|guard| guard.session_id.clone());
+    if let Some(current) = current
+        && request.session_id.to_string() != current
+    {
+        let _ = responder.respond(acp::RequestPermissionResponse::new(
+            acp::RequestPermissionOutcome::Cancelled,
+        ));
+        return;
+    }
+    let options = crate::permissions::to_view(&request.options);
+    if options.is_empty() {
+        let _ = responder.respond(acp::RequestPermissionResponse::new(
+            acp::RequestPermissionOutcome::Cancelled,
+        ));
+        return;
+    }
+    let tool_call_id = request.tool_call.tool_call_id.to_string();
+    let title = request
+        .tool_call
+        .fields
+        .title
+        .clone()
+        .unwrap_or_else(|| "run this action?".to_string());
+    let kind = crate::updates::kind_label(request.tool_call.fields.kind).to_string();
+    let permission = PermissionView {
+        tool_call_id: tool_call_id.clone(),
+        title,
+        kind,
+        options,
+        rule_hint: crate::permissions::rule_hint(request.tool_call.fields.name.as_deref()),
+    };
+    let (tx, rx) = tokio::sync::oneshot::channel::<PermissionDecision>();
+    if let Ok(mut guard) = state.lock() {
+        guard.pending.insert(tool_call_id.clone(), tx);
+    }
+    let _ = app.emit("samokod://event", AppEvent::PermissionAsked { permission });
+    let decision = rx.await.unwrap_or(PermissionDecision::Cancelled);
+    if let Ok(mut guard) = state.lock() {
+        guard.pending.remove(&tool_call_id);
+    }
+    match decision {
+        PermissionDecision::Selected(option_id) => {
+            let _ = responder.respond(acp::RequestPermissionResponse::new(
+                acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome::new(
+                    acp::PermissionOptionId::new(option_id),
+                )),
+            ));
+        }
+        PermissionDecision::Cancelled => {
+            let _ = responder.respond(acp::RequestPermissionResponse::new(
+                acp::RequestPermissionOutcome::Cancelled,
+            ));
+        }
+    }
+    let _ = app.emit(
+        "samokod://event",
+        AppEvent::PermissionResolved { tool_call_id },
+    );
 }
 
 fn handle_notification(

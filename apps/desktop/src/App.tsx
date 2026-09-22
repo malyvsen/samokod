@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+	answerPermission,
 	cancelTurn,
 	getPrefs,
 	onAppEvent,
@@ -34,6 +35,7 @@ export function App() {
 	const [pickerError, setPickerError] = useState<string | null>(null);
 	const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
 	const [working, setWorking] = useState(false);
+	const [awaitingApproval, setAwaitingApproval] = useState(false);
 	const [draft, setDraft] = useState("");
 	const [lastSent, setLastSent] = useState("");
 	const [typing, setTyping] = useState(false);
@@ -41,13 +43,23 @@ export function App() {
 	const appRef = useRef<HTMLDivElement>(null);
 	const transcriptRef = useRef<HTMLDivElement>(null);
 
-	const status: AgentStatus = working ? "working" : "idle";
-	const statusText = working ? "● WORKING" : "IDLE";
+	const status: AgentStatus = awaitingApproval
+		? "approval"
+		: working
+			? "working"
+			: "idle";
+	const statusText =
+		status === "idle"
+			? "IDLE"
+			: status === "working"
+				? "● WORKING"
+				: "● PAUSED - APPROVAL";
 
 	const applySession = useCallback((info: SessionInfo) => {
 		setSession(info);
 		setTranscript([]);
 		setWorking(false);
+		setAwaitingApproval(false);
 		setDraft("");
 		setLastSent("");
 		setView({ kind: "chat" });
@@ -124,10 +136,12 @@ export function App() {
 			}
 			case "turn_done": {
 				setWorking(false);
+				setAwaitingApproval(false);
 				break;
 			}
 			case "turn_failed": {
 				setWorking(false);
+				setAwaitingApproval(false);
 				setTranscript((items) => [
 					...items,
 					{
@@ -136,6 +150,30 @@ export function App() {
 						raw: event.raw,
 					},
 				]);
+				break;
+			}
+			case "permission_asked": {
+				setAwaitingApproval(true);
+				setTranscript((items) => [
+					...items,
+					{
+						kind: "approval",
+						id: crypto.randomUUID(),
+						permission: event.permission,
+						resolved: false,
+					},
+				]);
+				break;
+			}
+			case "permission_resolved": {
+				setTranscript((items) =>
+					items.map((item) =>
+						item.kind === "approval" &&
+						item.permission.tool_call_id === event.tool_call_id
+							? { ...item, resolved: true }
+							: item,
+					),
+				);
 				break;
 			}
 		}
@@ -221,7 +259,7 @@ export function App() {
 
 	async function handleSend() {
 		const text = draft.trim();
-		if (text === "" || working || session === null) return;
+		if (text === "" || status !== "idle" || session === null) return;
 		setTranscript((items) => [
 			...items,
 			{ kind: "user", id: crypto.randomUUID(), text },
@@ -236,7 +274,14 @@ export function App() {
 			await cancelTurn();
 		} finally {
 			setWorking(false);
+			setAwaitingApproval(false);
 		}
+	}
+
+	async function handleAnswer(toolCallId: string, optionId: string) {
+		await answerPermission(toolCallId, optionId);
+		setAwaitingApproval(false);
+		setWorking(true);
 	}
 
 	async function handleRetry() {
@@ -245,7 +290,7 @@ export function App() {
 	}
 
 	function handleRepoButton() {
-		if (working) return;
+		if (status !== "idle") return;
 		setView({ kind: "picker", returnToChat: true });
 	}
 
@@ -302,7 +347,7 @@ export function App() {
 					<TopBar
 						repoLabel={repoLabel}
 						branch={branch}
-						working={working}
+						working={status !== "idle"}
 						statusText={statusText}
 						onOpenPicker={handleRepoButton}
 						onNewChat={() => undefined}
@@ -314,7 +359,11 @@ export function App() {
 								no messages yet
 							</div>
 						) : (
-							<Transcript items={transcript} onRetry={handleRetry} />
+							<Transcript
+								items={transcript}
+								onRetry={handleRetry}
+								onAnswer={handleAnswer}
+							/>
 						)}
 					</div>
 					<Composer

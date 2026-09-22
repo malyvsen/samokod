@@ -1,6 +1,7 @@
 // Tauri command edge: thin impure glue over the domain modules.
 mod acp;
 mod agent;
+mod permissions;
 mod prefs;
 mod repo;
 mod types;
@@ -56,6 +57,17 @@ async fn cancel_turn(state: State<'_, AgentManager>) -> Result<(), String> {
     state.cancel_turn().await.map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn answer_permission(
+    state: State<'_, AgentManager>,
+    tool_call_id: String,
+    option_id: Option<String>,
+) -> Result<(), String> {
+    state
+        .answer_permission(&tool_call_id, option_id)
+        .map_err(|error| error.to_string())
+}
+
 fn prefs_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
@@ -82,7 +94,8 @@ pub fn run() {
             validate_repo_path,
             open_repo,
             send_prompt,
-            cancel_turn
+            cancel_turn,
+            answer_permission
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -50,6 +50,22 @@ fn tool_text(call: &ToolCall) -> String {
     format!("{kind} {}", call.title)
 }
 
+/// Human label for a tool kind in permission cards. Pure.
+pub fn kind_label(kind: Option<ToolKind>) -> &'static str {
+    match kind {
+        Some(ToolKind::Read) => "read",
+        Some(ToolKind::Edit) => "edit",
+        Some(ToolKind::Delete) => "delete",
+        Some(ToolKind::Move) => "move",
+        Some(ToolKind::Search) => "search",
+        Some(ToolKind::Execute) => "bash",
+        Some(ToolKind::Think) => "think",
+        Some(ToolKind::Fetch) => "fetch",
+        Some(ToolKind::SwitchMode) => "mode",
+        _ => "tool",
+    }
+}
+
 fn tool_verb(kind: Option<ToolKind>) -> &'static str {
     match kind {
         Some(ToolKind::Read) => "read",
