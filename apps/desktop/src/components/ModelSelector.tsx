@@ -4,9 +4,11 @@ import type { ConfigOptionView, ConfigValueView } from "../types";
 export function ModelSelector({
 	options,
 	disabled,
+	onChange,
 }: {
 	options: ConfigOptionView[];
 	disabled: boolean;
+	onChange: (id: string, value: string) => void;
 }) {
 	const model = options.find((option) => option.id === "model");
 	const extras = options.filter(
@@ -15,10 +17,19 @@ export function ModelSelector({
 	return (
 		<>
 			{model !== undefined && (
-				<OptionDropdown option={model} disabled={disabled} />
+				<OptionDropdown
+					option={model}
+					disabled={disabled}
+					onChange={onChange}
+				/>
 			)}
 			{extras.map((option) => (
-				<OptionDropdown key={option.id} option={option} disabled={disabled} />
+				<OptionDropdown
+					key={option.id}
+					option={option}
+					disabled={disabled}
+					onChange={onChange}
+				/>
 			))}
 		</>
 	);
@@ -27,9 +38,11 @@ export function ModelSelector({
 function OptionDropdown({
 	option,
 	disabled,
+	onChange,
 }: {
 	option: ConfigOptionView;
 	disabled: boolean;
+	onChange: (id: string, value: string) => void;
 }) {
 	const values: ConfigValueView[] = option.options;
 	const [open, setOpen] = useState(false);
@@ -56,7 +69,10 @@ function OptionDropdown({
 							key={value.value}
 							type="button"
 							data-value={value.value}
-							onClick={() => setOpen(false)}
+							onClick={() => {
+								onChange(option.id, value.value);
+								setOpen(false);
+							}}
 						>
 							<span className="tick">
 								{value.value === option.current ? "✓" : ""}

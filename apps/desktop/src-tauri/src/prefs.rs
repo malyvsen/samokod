@@ -1,5 +1,6 @@
-// Local preferences: recent repos and the last opened repo. Persisted as
-// JSON under the OS app-data directory resolved through the Tauri path API.
+// Local preferences: recent repos, the last opened repo, and per-repo model
+// choices. Persisted as JSON under the OS app-data directory resolved through
+// the Tauri path API.
 // All helpers are pure over an explicit directory so tests never touch the
 // real profile.
 use std::path::Path;
@@ -42,6 +43,16 @@ pub fn record_open(prefs: &mut Prefs, path: &str, branch: &str) {
     prefs.last_repo = Some(path.to_string());
 }
 
+/// Remember a per-repo model choice. Pure.
+pub fn record_model(prefs: &mut Prefs, repo: &str, model: &str) {
+    prefs.models.insert(repo.to_string(), model.to_string());
+}
+
+/// Look up the stored model for a repo. Pure.
+pub fn stored_model(prefs: &Prefs, repo: &str) -> Option<String> {
+    prefs.models.get(repo).cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,9 +83,14 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut prefs = Prefs::default();
         record_open(&mut prefs, "/repo", "main");
+        record_model(&mut prefs, "/repo", "opencode/big-pickle");
         save_prefs(dir.path(), &prefs).expect("save");
         let loaded = load_prefs(dir.path());
         assert_eq!(loaded, prefs);
+        assert_eq!(
+            stored_model(&loaded, "/repo").as_deref(),
+            Some("opencode/big-pickle")
+        );
     }
 
     #[test]

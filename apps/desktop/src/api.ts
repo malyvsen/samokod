@@ -22,6 +22,10 @@ export function cancelTurn(): Promise<void> {
 	return invoke("cancel_turn");
 }
 
+export function setConfigOption(id: string, value: string): Promise<void> {
+	return invoke("set_config_option", { id, value });
+}
+
 export function answerPermission(
 	toolCallId: string,
 	optionId: string | null,

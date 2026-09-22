@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 
 use crate::agent::AgentManager;
-use crate::prefs::{load_prefs, record_open, save_prefs};
+use crate::prefs::{load_prefs, record_model, record_open, save_prefs, stored_model};
 use crate::repo::{RepoInfo, validate_repo};
 use crate::types::{Prefs, SessionInfo};
 
@@ -33,11 +33,12 @@ async fn open_repo(
     path: String,
 ) -> Result<SessionInfo, String> {
     let info = validate_repo(&PathBuf::from(&path))?;
+    let dir = prefs_dir(&app);
+    let stored = stored_model(&load_prefs(&dir), &info.root);
     let session = state
-        .open_repo(PathBuf::from(&info.root), info.branch.clone())
+        .open_repo(PathBuf::from(&info.root), info.branch.clone(), stored)
         .await
         .map_err(|error| error.to_string())?;
-    let dir = prefs_dir(&app);
     let mut prefs = load_prefs(&dir);
     record_open(&mut prefs, &info.root, &info.branch);
     let _ = save_prefs(&dir, &prefs);
@@ -68,6 +69,28 @@ async fn answer_permission(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn set_config_option(
+    app: AppHandle,
+    state: State<'_, AgentManager>,
+    id: String,
+    value: String,
+) -> Result<(), String> {
+    state
+        .set_config_option(id.clone(), value.clone())
+        .await
+        .map_err(|error| error.to_string())?;
+    if id == "model" {
+        let dir = prefs_dir(&app);
+        let mut prefs = load_prefs(&dir);
+        if let Some(repo) = prefs.last_repo.clone() {
+            record_model(&mut prefs, &repo, &value);
+            let _ = save_prefs(&dir, &prefs);
+        }
+    }
+    Ok(())
+}
+
 fn prefs_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
@@ -95,7 +118,8 @@ pub fn run() {
             open_repo,
             send_prompt,
             cancel_turn,
-            answer_permission
+            answer_permission,
+            set_config_option
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

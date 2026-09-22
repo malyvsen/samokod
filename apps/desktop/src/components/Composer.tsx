@@ -8,6 +8,7 @@ export function Composer({
 	onDraft,
 	onSend,
 	onStop,
+	onConfigChange,
 	onTypePulse,
 }: {
 	status: AgentStatus;
@@ -16,6 +17,7 @@ export function Composer({
 	onDraft: (text: string) => void;
 	onSend: () => void;
 	onStop: () => void;
+	onConfigChange: (id: string, value: string) => void;
 	onTypePulse: () => void;
 }) {
 	const busy = status !== "idle";
@@ -44,7 +46,11 @@ export function Composer({
 						}
 					}}
 				/>
-				<ModelSelector options={configOptions} disabled={busy} />
+				<ModelSelector
+					options={configOptions}
+					disabled={busy}
+					onChange={onConfigChange}
+				/>
 				{busy ? (
 					<button className="send stop" type="button" onClick={onStop}>
 						STOP

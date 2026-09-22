@@ -44,12 +44,13 @@ impl AgentManager {
     }
 
     /// Open a repository: close the old session when the agent advertises it,
-    /// open a fresh session with `cwd` set to the repo root, and report the
-    /// agent's config options for the model selector.
+    /// open a fresh session with `cwd` set to the repo root, pin mode to
+    /// build, reapply the stored model, and report the agent's config options.
     pub async fn open_repo(
         &self,
         repo_root: PathBuf,
         branch: String,
+        stored_model: Option<String>,
     ) -> Result<SessionInfo, AgentError> {
         let connection = self.ensure_connection().await?;
         if let Some((old_connection, old_id, supports_close)) = self.session_snapshot()
@@ -70,10 +71,21 @@ impl AgentManager {
                 raw: error.to_string(),
             })?;
         let session_id = response.session_id.to_string();
-        let options = config_views(&response.config_options.unwrap_or_default());
+        let mut options = config_views(&response.config_options.unwrap_or_default());
         {
             let mut state = self.state.lock().expect("state poisoned");
             state.session_id = Some(session_id.clone());
+        }
+        pin_build_mode(&connection, &acp::SessionId::new(session_id.clone())).await;
+        if let Some(model) = stored_model
+            && set_model_value(
+                &connection,
+                &acp::SessionId::new(session_id.clone()),
+                &model,
+            )
+            .await
+        {
+            apply_model_override(&mut options, &model);
         }
         Ok(SessionInfo {
             session_id,
@@ -81,6 +93,27 @@ impl AgentManager {
             branch,
             config_options: options,
         })
+    }
+
+    /// Change one config option without restarting the session.
+    pub async fn set_config_option(&self, id: String, value: String) -> Result<(), AgentError> {
+        let (connection, session_id, _) =
+            self.session_snapshot()
+                .ok_or_else(|| AgentError::NoSession {
+                    raw: "open a repository first".to_string(),
+                })?;
+        connection
+            .send_request(acp::build_set_config_request(
+                &acp::SessionId::new(session_id),
+                &id,
+                &value,
+            ))
+            .block_task()
+            .await
+            .map_err(|error| AgentError::RequestFailed {
+                raw: error.to_string(),
+            })?;
+        Ok(())
     }
 
     /// Send one plain-text prompt. Streams arrive as events; the turn end
@@ -384,7 +417,36 @@ fn handle_notification(
             let line = crate::updates::format_tool_update(update);
             let _ = app.emit("samokod://event", AppEvent::ToolLine { line });
         }
+        acp::SessionUpdate::ConfigOptionUpdate(update) => {
+            let options = config_views(&update.config_options);
+            let _ = app.emit("samokod://event", AppEvent::ConfigOptions { options });
+        }
         _ => {}
+    }
+}
+
+async fn pin_build_mode(connection: &ConnectionTo<Agent>, session_id: &acp::SessionId) {
+    let _ = connection
+        .send_request(acp::build_set_config_request(session_id, "mode", "build"))
+        .block_task()
+        .await;
+}
+
+async fn set_model_value(
+    connection: &ConnectionTo<Agent>,
+    session_id: &acp::SessionId,
+    model: &str,
+) -> bool {
+    connection
+        .send_request(acp::build_set_config_request(session_id, "model", model))
+        .block_task()
+        .await
+        .is_ok()
+}
+
+fn apply_model_override(options: &mut [ConfigOptionView], model: &str) {
+    if let Some(option) = options.iter_mut().find(|option| option.id == "model") {
+        option.current = model.to_string();
     }
 }
 

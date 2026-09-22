@@ -7,6 +7,7 @@ import {
 	onAppEvent,
 	openRepo,
 	sendPrompt,
+	setConfigOption,
 	validateRepo,
 } from "./api";
 import { Composer } from "./components/Composer";
@@ -176,6 +177,14 @@ export function App() {
 				);
 				break;
 			}
+			case "config_options": {
+				setSession((current) =>
+					current === null
+						? current
+						: { ...current, config_options: event.options },
+				);
+				break;
+			}
 		}
 	}, []);
 
@@ -284,6 +293,21 @@ export function App() {
 		setWorking(true);
 	}
 
+	async function handleConfigChange(id: string, value: string) {
+		if (status !== "idle") return;
+		await setConfigOption(id, value);
+		setSession((current) =>
+			current === null
+				? current
+				: {
+						...current,
+						config_options: current.config_options.map((option) =>
+							option.id === id ? { ...option, current: value } : option,
+						),
+					},
+		);
+	}
+
 	async function handleRetry() {
 		if (lastSent === "" || working) return;
 		await runTurn(lastSent);
@@ -373,6 +397,7 @@ export function App() {
 						onDraft={setDraft}
 						onSend={handleSend}
 						onStop={handleStop}
+						onConfigChange={handleConfigChange}
 						onTypePulse={handleTypePulse}
 					/>
 				</>

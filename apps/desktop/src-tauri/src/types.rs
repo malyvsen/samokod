@@ -1,5 +1,7 @@
 // Backend failures for the agent lifecycle. The command edge renders these
 // as strings for the frontend.
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -52,6 +54,7 @@ pub enum AppEvent {
     TurnFailed { raw: String },
     PermissionAsked { permission: PermissionView },
     PermissionResolved { tool_call_id: String },
+    ConfigOptions { options: Vec<ConfigOptionView> },
 }
 
 /// One selectable value inside a generic config option.
@@ -93,6 +96,8 @@ pub struct Prefs {
     pub recent: Vec<RecentRepo>,
     #[serde(default)]
     pub last_repo: Option<String>,
+    #[serde(default)]
+    pub models: HashMap<String, String>,
 }
 
 #[cfg(test)]

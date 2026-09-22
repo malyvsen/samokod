@@ -3,14 +3,14 @@
 pub use agent_client_protocol::schema::v1::{
     CancelNotification, CloseSessionRequest, ContentBlock, PermissionOption, PermissionOptionId,
     PermissionOptionKind, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
-    SessionConfigSelectOptions, SessionId, SessionNotification, SessionUpdate, TextContent,
-    ToolCall, ToolCallUpdate, ToolKind,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigId, SessionConfigKind,
+    SessionConfigOption, SessionConfigOptionValue, SessionConfigSelectOptions,
+    SessionConfigValueId, SessionId, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, TextContent, ToolCall, ToolCallUpdate, ToolKind,
 };
 #[cfg(test)]
 pub use agent_client_protocol::schema::v1::{
-    ContentChunk, SessionConfigSelectOption, SessionConfigValueId, ToolCallStatus,
-    ToolCallUpdateFields,
+    ContentChunk, SessionConfigSelectOption, ToolCallStatus, ToolCallUpdateFields,
 };
 use agent_client_protocol::schema::{
     ProtocolVersion,
@@ -40,6 +40,19 @@ pub fn build_initialize_request() -> InitializeRequest {
 /// are passed; OpenCode owns them.
 pub fn build_new_session_request(cwd: &Path) -> NewSessionRequest {
     NewSessionRequest::new(cwd)
+}
+
+/// Build a `session/set_config_option` request from string ids.
+pub fn build_set_config_request(
+    session_id: &SessionId,
+    config_id: &str,
+    value: &str,
+) -> SetSessionConfigOptionRequest {
+    SetSessionConfigOptionRequest::new(
+        session_id.clone(),
+        SessionConfigId::new(config_id),
+        SessionConfigOptionValue::value_id(SessionConfigValueId::new(value)),
+    )
 }
 
 /// Build the ACP `session/cancel` notification payload for a session.

@@ -57,7 +57,8 @@ export type AppEvent =
 	| { type: "turn_done" }
 	| { type: "turn_failed"; raw: string }
 	| { type: "permission_asked"; permission: PermissionView }
-	| { type: "permission_resolved"; tool_call_id: string };
+	| { type: "permission_resolved"; tool_call_id: string }
+	| { type: "config_options"; options: ConfigOptionView[] };
 
 export type TranscriptItem =
 	| { kind: "user"; id: string; text: string }
