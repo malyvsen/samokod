@@ -4,6 +4,7 @@ mod agent;
 mod prefs;
 mod repo;
 mod types;
+mod updates;
 
 use std::path::PathBuf;
 
@@ -42,6 +43,19 @@ async fn open_repo(
     Ok(session)
 }
 
+#[tauri::command]
+async fn send_prompt(state: State<'_, AgentManager>, text: String) -> Result<(), String> {
+    state
+        .send_prompt(text)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn cancel_turn(state: State<'_, AgentManager>) -> Result<(), String> {
+    state.cancel_turn().await.map_err(|error| error.to_string())
+}
+
 fn prefs_dir(app: &AppHandle) -> PathBuf {
     app.path()
         .app_data_dir()
@@ -51,9 +65,9 @@ fn prefs_dir(app: &AppHandle) -> PathBuf {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(AgentManager::default())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            app.manage(AgentManager::new(app.handle().clone()));
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -66,7 +80,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_prefs,
             validate_repo_path,
-            open_repo
+            open_repo,
+            send_prompt,
+            cancel_turn
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,10 +1,25 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getPrefs, openRepo, validateRepo } from "./api";
+import {
+	cancelTurn,
+	getPrefs,
+	onAppEvent,
+	openRepo,
+	sendPrompt,
+	validateRepo,
+} from "./api";
 import { Composer } from "./components/Composer";
 import { RepoPicker } from "./components/RepoPicker";
 import { TopBar } from "./components/TopBar";
-import type { Prefs, RecentRepo, SessionInfo } from "./types";
+import { Transcript } from "./components/Transcript";
+import type {
+	AgentStatus,
+	AppEvent,
+	Prefs,
+	RecentRepo,
+	SessionInfo,
+	TranscriptItem,
+} from "./types";
 import "./App.css";
 
 type View = { kind: "picker"; returnToChat: boolean } | { kind: "chat" };
@@ -17,14 +32,24 @@ export function App() {
 	const [session, setSession] = useState<SessionInfo | null>(null);
 	const [recent, setRecent] = useState<RecentRepo[]>([]);
 	const [pickerError, setPickerError] = useState<string | null>(null);
+	const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
+	const [working, setWorking] = useState(false);
 	const [draft, setDraft] = useState("");
+	const [lastSent, setLastSent] = useState("");
 	const [typing, setTyping] = useState(false);
 	const typeTimer = useRef<number | null>(null);
 	const appRef = useRef<HTMLDivElement>(null);
+	const transcriptRef = useRef<HTMLDivElement>(null);
+
+	const status: AgentStatus = working ? "working" : "idle";
+	const statusText = working ? "● WORKING" : "IDLE";
 
 	const applySession = useCallback((info: SessionInfo) => {
 		setSession(info);
+		setTranscript([]);
+		setWorking(false);
 		setDraft("");
+		setLastSent("");
 		setView({ kind: "chat" });
 		setPickerError(null);
 	}, []);
@@ -56,6 +81,84 @@ export function App() {
 		};
 	}, [applySession]);
 
+	const handleEvent = useCallback((event: AppEvent) => {
+		switch (event.type) {
+			case "agent_text": {
+				setWorking(true);
+				setTranscript((items) => {
+					const last = items[items.length - 1];
+					if (last !== undefined && last.kind === "agent") {
+						return [
+							...items.slice(0, -1),
+							{ ...last, text: last.text + event.chunk },
+						];
+					}
+					return [
+						...items,
+						{ kind: "agent", id: crypto.randomUUID(), text: event.chunk },
+					];
+				});
+				break;
+			}
+			case "tool_line": {
+				setWorking(true);
+				setTranscript((items) => {
+					const index = items.findIndex(
+						(item) => item.kind === "tool" && item.line.id === event.line.id,
+					);
+					if (index >= 0) {
+						const copy = [...items];
+						copy[index] = {
+							kind: "tool",
+							id: copy[index]?.id ?? crypto.randomUUID(),
+							line: event.line,
+						};
+						return copy;
+					}
+					return [
+						...items,
+						{ kind: "tool", id: crypto.randomUUID(), line: event.line },
+					];
+				});
+				break;
+			}
+			case "turn_done": {
+				setWorking(false);
+				break;
+			}
+			case "turn_failed": {
+				setWorking(false);
+				setTranscript((items) => [
+					...items,
+					{
+						kind: "error",
+						id: crypto.randomUUID(),
+						raw: event.raw,
+					},
+				]);
+				break;
+			}
+		}
+	}, []);
+
+	useEffect(() => {
+		let unlisten: (() => void) | undefined;
+		onAppEvent(handleEvent).then((stop) => {
+			unlisten = stop;
+		});
+		return () => {
+			unlisten?.();
+		};
+	}, [handleEvent]);
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: re-scroll whenever the transcript identity changes
+	useEffect(() => {
+		const node = transcriptRef.current;
+		if (node !== null) {
+			node.scrollTop = node.scrollHeight;
+		}
+	}, [transcript]);
+
 	useEffect(() => {
 		function onPointerMove(event: MouseEvent) {
 			const node = appRef.current;
@@ -80,6 +183,10 @@ export function App() {
 		setPickerError(null);
 		try {
 			const info = await validateRepo(path);
+			if (info.root === session?.repo_root) {
+				setView({ kind: "chat" });
+				return;
+			}
 			const opened = await openRepo(info.root);
 			applySession(opened);
 			setRecent((await getPrefs()).recent);
@@ -93,6 +200,53 @@ export function App() {
 		const picked = await open({ directory: true, multiple: false });
 		if (picked === null || Array.isArray(picked)) return;
 		await handleOpenPath(picked);
+	}
+
+	function appendError(raw: string) {
+		setTranscript((items) => [
+			...items,
+			{ kind: "error", id: crypto.randomUUID(), raw },
+		]);
+	}
+
+	async function runTurn(text: string) {
+		setWorking(true);
+		try {
+			await sendPrompt(text);
+		} catch (error) {
+			setWorking(false);
+			appendError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	async function handleSend() {
+		const text = draft.trim();
+		if (text === "" || working || session === null) return;
+		setTranscript((items) => [
+			...items,
+			{ kind: "user", id: crypto.randomUUID(), text },
+		]);
+		setDraft("");
+		setLastSent(text);
+		await runTurn(text);
+	}
+
+	async function handleStop() {
+		try {
+			await cancelTurn();
+		} finally {
+			setWorking(false);
+		}
+	}
+
+	async function handleRetry() {
+		if (lastSent === "" || working) return;
+		await runTurn(lastSent);
+	}
+
+	function handleRepoButton() {
+		if (working) return;
+		setView({ kind: "picker", returnToChat: true });
 	}
 
 	function handleTypePulse() {
@@ -109,7 +263,7 @@ export function App() {
 	return (
 		<div
 			className={`app${typing ? " typing" : ""}`}
-			data-state="idle"
+			data-state={status}
 			ref={appRef}
 		>
 			<div className="aurora a" />
@@ -148,24 +302,28 @@ export function App() {
 					<TopBar
 						repoLabel={repoLabel}
 						branch={branch}
-						working={false}
-						statusText="IDLE"
-						onOpenPicker={() => {
-							setView({ kind: "picker", returnToChat: true });
-						}}
+						working={working}
+						statusText={statusText}
+						onOpenPicker={handleRepoButton}
 						onNewChat={() => undefined}
 					/>
-					<div className="transcript">
-						<div className="empty-hint">
-							<b>{repoLabel} · fresh session</b>
-							no messages yet
-						</div>
+					<div className="transcript" ref={transcriptRef}>
+						{transcript.length === 0 ? (
+							<div className="empty-hint">
+								<b>{repoLabel} · fresh session</b>
+								no messages yet
+							</div>
+						) : (
+							<Transcript items={transcript} onRetry={handleRetry} />
+						)}
 					</div>
 					<Composer
+						status={status}
 						draft={draft}
 						configOptions={configOptions}
-						wired={false}
 						onDraft={setDraft}
+						onSend={handleSend}
+						onStop={handleStop}
 						onTypePulse={handleTypePulse}
 					/>
 				</>

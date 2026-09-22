@@ -10,6 +10,27 @@ pub enum AgentError {
     AgentExited { raw: String },
     #[error("request failed: {raw}")]
     RequestFailed { raw: String },
+    #[error("no session: {raw}")]
+    NoSession { raw: String },
+}
+
+/// One `▸` tool status line regardless of tool kind.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolLineView {
+    pub id: String,
+    pub text: String,
+    pub status: String,
+}
+
+/// Frontend event envelope. One Tauri event name carries every variant so
+/// capabilities stay tight.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AppEvent {
+    AgentText { chunk: String },
+    ToolLine { line: ToolLineView },
+    TurnDone,
+    TurnFailed { raw: String },
 }
 
 /// One selectable value inside a generic config option.

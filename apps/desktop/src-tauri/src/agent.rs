@@ -1,27 +1,37 @@
-// Agent lifecycle: spawn `opencode acp` once, initialize it, and open
-// sessions bound to repository roots.
+// Agent lifecycle: spawn `opencode acp` once, initialize it, open sessions
+// bound to repository roots, and stream prompt turns as events.
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+
+use tauri::{AppHandle, Emitter};
 
 use crate::acp::{
     self, AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, SessionConfigKind,
     SessionConfigOption, SessionConfigSelectOptions,
 };
-use crate::types::{AgentError, ConfigOptionView, ConfigValueView, SessionInfo};
+use crate::types::{AgentError, AppEvent, ConfigOptionView, ConfigValueView, SessionInfo};
 
 #[derive(Default)]
 struct State {
     connection: Option<ConnectionTo<Agent>>,
     supports_close: bool,
     session_id: Option<String>,
+    working: bool,
 }
 
-#[derive(Default)]
 pub struct AgentManager {
     state: Arc<Mutex<State>>,
+    app: AppHandle,
 }
 
 impl AgentManager {
+    pub fn new(app: AppHandle) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(State::default())),
+            app,
+        }
+    }
+
     /// Open a repository: close the old session when the agent advertises it,
     /// open a fresh session with `cwd` set to the repo root, and report the
     /// agent's config options for the model selector.
@@ -62,6 +72,63 @@ impl AgentManager {
         })
     }
 
+    /// Send one plain-text prompt. Streams arrive as events; the turn end
+    /// arrives as done or failed.
+    pub async fn send_prompt(&self, text: String) -> Result<(), AgentError> {
+        let (connection, session_id, _) =
+            self.session_snapshot()
+                .ok_or_else(|| AgentError::NoSession {
+                    raw: "open a repository first".to_string(),
+                })?;
+        {
+            let mut state = self.state.lock().expect("state poisoned");
+            if state.working {
+                return Err(AgentError::RequestFailed {
+                    raw: "a turn is already running".to_string(),
+                });
+            }
+            state.working = true;
+        }
+        let state = Arc::clone(&self.state);
+        let app = self.app.clone();
+        tauri::async_runtime::spawn(async move {
+            let prompt = acp::PromptRequest::new(
+                acp::SessionId::new(session_id),
+                vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
+            );
+            match connection.send_request(prompt).block_task().await {
+                Ok(_) => {
+                    set_working(&state, false);
+                    let _ = app.emit("samokod://event", AppEvent::TurnDone);
+                }
+                Err(error) => {
+                    set_working(&state, false);
+                    let _ = app.emit(
+                        "samokod://event",
+                        AppEvent::TurnFailed {
+                            raw: error.to_string(),
+                        },
+                    );
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// Stop the turn via `session/cancel`.
+    pub async fn cancel_turn(&self) -> Result<(), AgentError> {
+        let (connection, session_id, _) =
+            self.session_snapshot()
+                .ok_or_else(|| AgentError::NoSession {
+                    raw: "no active turn".to_string(),
+                })?;
+        let _ = connection.send_notification(acp::build_cancel_notification(acp::SessionId::new(
+            session_id,
+        )));
+        set_working(&self.state, false);
+        Ok(())
+    }
+
     /// Ensure a live, initialized connection. Spawns `opencode acp` once and
     /// reuses it for every later session.
     pub async fn ensure_connection(&self) -> Result<ConnectionTo<Agent>, AgentError> {
@@ -72,6 +139,8 @@ impl AgentManager {
         let config = AcpAgentConfig::new(binary).arg("acp");
         let agent = AcpAgent::new(config);
         let slot = Arc::clone(&self.state);
+        let notify_state = Arc::clone(&self.state);
+        let notify_app = self.app.clone();
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
         let ready = Arc::new(Mutex::new(Some(ready_tx)));
         let ready_for_handler = Arc::clone(&ready);
@@ -80,6 +149,17 @@ impl AgentManager {
         tauri::async_runtime::spawn(async move {
             let result = Client
                 .builder()
+                .on_receive_notification(
+                    move |notification: acp::SessionNotification, _cx| {
+                        let state = Arc::clone(&notify_state);
+                        let app = notify_app.clone();
+                        async move {
+                            handle_notification(&state, &app, &notification);
+                            Ok(())
+                        }
+                    },
+                    agent_client_protocol::on_receive_notification!(),
+                )
                 .connect_with(agent, |connection: ConnectionTo<Agent>| {
                     let slot = Arc::clone(&slot);
                     let ready = Arc::clone(&ready_for_handler);
@@ -140,6 +220,39 @@ impl AgentManager {
             state.session_id.clone()?,
             state.supports_close,
         ))
+    }
+}
+
+fn set_working(state: &Mutex<State>, working: bool) {
+    if let Ok(mut guard) = state.lock() {
+        guard.working = working;
+    }
+}
+
+fn handle_notification(
+    state: &Mutex<State>,
+    app: &AppHandle,
+    notification: &acp::SessionNotification,
+) {
+    let current = state.lock().ok().and_then(|guard| guard.session_id.clone());
+    if let Some(current) = current
+        && notification.session_id.to_string() != current
+    {
+        return;
+    }
+    if let Some(chunk) = crate::updates::agent_text_of(&notification.update) {
+        let _ = app.emit("samokod://event", AppEvent::AgentText { chunk });
+    }
+    match &notification.update {
+        acp::SessionUpdate::ToolCall(call) => {
+            let line = crate::updates::format_tool_line(call);
+            let _ = app.emit("samokod://event", AppEvent::ToolLine { line });
+        }
+        acp::SessionUpdate::ToolCallUpdate(update) => {
+            let line = crate::updates::format_tool_update(update);
+            let _ = app.emit("samokod://event", AppEvent::ToolLine { line });
+        }
+        _ => {}
     }
 }
 

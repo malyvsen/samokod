@@ -1,13 +1,14 @@
 // ACP wire boundary. SDK schema types enter the app through this module;
 // nothing past it imports `agent-client-protocol` directly.
 pub use agent_client_protocol::schema::v1::{
-    CloseSessionRequest, SessionConfigKind, SessionConfigOption, SessionConfigSelectOptions,
-    SessionId,
+    CancelNotification, CloseSessionRequest, ContentBlock, PromptRequest, SessionConfigKind,
+    SessionConfigOption, SessionConfigSelectOptions, SessionId, SessionNotification, SessionUpdate,
+    TextContent, ToolCall, ToolCallUpdate, ToolKind,
 };
 #[cfg(test)]
 pub use agent_client_protocol::schema::v1::{
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SessionConfigSelectOption, SessionConfigValueId, SessionNotification,
+    ContentChunk, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SessionConfigSelectOption, SessionConfigValueId, ToolCallStatus, ToolCallUpdateFields,
 };
 use agent_client_protocol::schema::{
     ProtocolVersion,
@@ -37,6 +38,11 @@ pub fn build_initialize_request() -> InitializeRequest {
 /// are passed; OpenCode owns them.
 pub fn build_new_session_request(cwd: &Path) -> NewSessionRequest {
     NewSessionRequest::new(cwd)
+}
+
+/// Build the ACP `session/cancel` notification payload for a session.
+pub fn build_cancel_notification(session_id: SessionId) -> CancelNotification {
+    CancelNotification::new(session_id)
 }
 
 /// Wrap a failure as an ACP internal error for handler closures.
