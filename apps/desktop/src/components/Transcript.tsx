@@ -83,11 +83,13 @@ export function Transcript({
 					<div className="errbar" key={item.id}>
 						<div className="erow">
 							<span data-full={item.raw}>✕ {item.raw}</span>
-							<button className="tbtn" type="button" onClick={onRetry}>
-								retry
-							</button>
+							{item.retryable && (
+								<button className="tbtn" type="button" onClick={onRetry}>
+									retry
+								</button>
+							)}
 						</div>
-						<div className="ehint">retry the turn</div>
+						<div className="ehint">{item.hint}</div>
 					</div>
 				);
 			})}

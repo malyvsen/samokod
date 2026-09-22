@@ -14,16 +14,20 @@ export function openRepo(path: string): Promise<SessionInfo> {
 	return invoke<SessionInfo>("open_repo", { path });
 }
 
+export function newChat(): Promise<SessionInfo> {
+	return invoke<SessionInfo>("new_chat");
+}
+
 export function sendPrompt(text: string): Promise<void> {
 	return invoke("send_prompt", { text });
 }
 
-export function cancelTurn(): Promise<void> {
-	return invoke("cancel_turn");
+export function retryLast(): Promise<boolean> {
+	return invoke<boolean>("retry_last");
 }
 
-export function setConfigOption(id: string, value: string): Promise<void> {
-	return invoke("set_config_option", { id, value });
+export function cancelTurn(): Promise<void> {
+	return invoke("cancel_turn");
 }
 
 export function answerPermission(
@@ -31,6 +35,10 @@ export function answerPermission(
 	optionId: string | null,
 ): Promise<void> {
 	return invoke("answer_permission", { toolCallId, optionId });
+}
+
+export function setConfigOption(id: string, value: string): Promise<void> {
+	return invoke("set_config_option", { id, value });
 }
 
 export function onAppEvent(

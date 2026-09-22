@@ -1,6 +1,7 @@
 // Tauri command edge: thin impure glue over the domain modules.
 mod acp;
 mod agent;
+mod error_hint;
 mod permissions;
 mod prefs;
 mod repo;
@@ -46,11 +47,30 @@ async fn open_repo(
 }
 
 #[tauri::command]
+async fn new_chat(app: AppHandle, state: State<'_, AgentManager>) -> Result<SessionInfo, String> {
+    let dir = prefs_dir(&app);
+    let prefs = load_prefs(&dir);
+    let stored = prefs
+        .last_repo
+        .as_ref()
+        .and_then(|repo| stored_model(&prefs, repo));
+    state
+        .new_chat(stored)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn send_prompt(state: State<'_, AgentManager>, text: String) -> Result<(), String> {
     state
         .send_prompt(text)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn retry_last(state: State<'_, AgentManager>) -> Result<bool, String> {
+    state.retry_last().await.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -116,7 +136,9 @@ pub fn run() {
             get_prefs,
             validate_repo_path,
             open_repo,
+            new_chat,
             send_prompt,
+            retry_last,
             cancel_turn,
             answer_permission,
             set_config_option

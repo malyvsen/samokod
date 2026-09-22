@@ -55,7 +55,8 @@ export type AppEvent =
 	| { type: "agent_text"; chunk: string }
 	| { type: "tool_line"; line: ToolLineView }
 	| { type: "turn_done" }
-	| { type: "turn_failed"; raw: string }
+	| { type: "turn_failed"; raw: string; hint: string; retryable: boolean }
+	| { type: "agent_exited"; raw: string; hint: string; retryable: boolean }
 	| { type: "permission_asked"; permission: PermissionView }
 	| { type: "permission_resolved"; tool_call_id: string }
 	| { type: "config_options"; options: ConfigOptionView[] };
@@ -70,6 +71,12 @@ export type TranscriptItem =
 			permission: PermissionView;
 			resolved: boolean;
 	  }
-	| { kind: "error"; id: string; raw: string };
+	| {
+			kind: "error";
+			id: string;
+			raw: string;
+			hint: string;
+			retryable: boolean;
+	  };
 
 export type AgentStatus = "idle" | "working" | "approval";

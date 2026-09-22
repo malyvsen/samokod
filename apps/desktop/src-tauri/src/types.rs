@@ -48,13 +48,32 @@ pub struct PermissionView {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AppEvent {
-    AgentText { chunk: String },
-    ToolLine { line: ToolLineView },
+    AgentText {
+        chunk: String,
+    },
+    ToolLine {
+        line: ToolLineView,
+    },
     TurnDone,
-    TurnFailed { raw: String },
-    PermissionAsked { permission: PermissionView },
-    PermissionResolved { tool_call_id: String },
-    ConfigOptions { options: Vec<ConfigOptionView> },
+    TurnFailed {
+        raw: String,
+        hint: String,
+        retryable: bool,
+    },
+    AgentExited {
+        raw: String,
+        hint: String,
+        retryable: bool,
+    },
+    PermissionAsked {
+        permission: PermissionView,
+    },
+    PermissionResolved {
+        tool_call_id: String,
+    },
+    ConfigOptions {
+        options: Vec<ConfigOptionView>,
+    },
 }
 
 /// One selectable value inside a generic config option.

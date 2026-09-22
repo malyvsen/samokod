@@ -10,6 +10,7 @@ use crate::acp::{
     self, AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, SessionConfigKind,
     SessionConfigOption, SessionConfigSelectOptions,
 };
+use crate::error_hint::{classify_error, is_transport_error};
 use crate::types::{
     AgentError, AppEvent, ConfigOptionView, ConfigValueView, PermissionView, SessionInfo,
 };
@@ -26,7 +27,11 @@ struct State {
     connection: Option<ConnectionTo<Agent>>,
     supports_close: bool,
     session_id: Option<String>,
+    repo_root: Option<PathBuf>,
+    branch: String,
     working: bool,
+    last_prompt: Option<String>,
+    last_model: Option<String>,
     pending: HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>,
 }
 
@@ -72,11 +77,8 @@ impl AgentManager {
             })?;
         let session_id = response.session_id.to_string();
         let mut options = config_views(&response.config_options.unwrap_or_default());
-        {
-            let mut state = self.state.lock().expect("state poisoned");
-            state.session_id = Some(session_id.clone());
-        }
         pin_build_mode(&connection, &acp::SessionId::new(session_id.clone())).await;
+        let mut applied_model: Option<String> = None;
         if let Some(model) = stored_model
             && set_model_value(
                 &connection,
@@ -86,6 +88,17 @@ impl AgentManager {
             .await
         {
             apply_model_override(&mut options, &model);
+            applied_model = Some(model);
+        }
+        {
+            let mut state = self.state.lock().expect("state poisoned");
+            state.session_id = Some(session_id.clone());
+            state.repo_root = Some(repo_root.clone());
+            state.branch = branch.clone();
+            state.working = false;
+            state.last_prompt = None;
+            state.last_model = applied_model;
+            state.pending.clear();
         }
         Ok(SessionInfo {
             session_id,
@@ -113,7 +126,49 @@ impl AgentManager {
             .map_err(|error| AgentError::RequestFailed {
                 raw: error.to_string(),
             })?;
+        if id == "model"
+            && let Ok(mut state) = self.state.lock()
+        {
+            state.last_model = Some(value);
+        }
         Ok(())
+    }
+
+    /// Open a fresh session on the same root, closing the old one when the
+    /// agent advertises it.
+    pub async fn new_chat(&self, stored_model: Option<String>) -> Result<SessionInfo, AgentError> {
+        let (repo_root, branch, _) =
+            self.reopen_snapshot()
+                .ok_or_else(|| AgentError::NoSession {
+                    raw: "open a repository first".to_string(),
+                })?;
+        self.open_repo(repo_root, branch, stored_model).await
+    }
+
+    /// Resend the last prompt. When the transport is closed, reopen the
+    /// session on the same root first. Returns false when nothing ran.
+    pub async fn retry_last(&self) -> Result<bool, AgentError> {
+        let text = self
+            .state
+            .lock()
+            .ok()
+            .and_then(|state| state.last_prompt.clone());
+        let Some(text) = text else {
+            return Ok(false);
+        };
+        let live = self
+            .session_snapshot()
+            .is_some_and(|(connection, _, _)| !connection.is_incoming_closed());
+        if !live {
+            let (repo_root, branch, model) =
+                self.reopen_snapshot()
+                    .ok_or_else(|| AgentError::NoSession {
+                        raw: "open a repository first".to_string(),
+                    })?;
+            self.open_repo(repo_root, branch, model).await?;
+        }
+        self.send_prompt(text).await?;
+        Ok(true)
     }
 
     /// Send one plain-text prompt. Streams arrive as events; the turn end
@@ -132,6 +187,7 @@ impl AgentManager {
                 });
             }
             state.working = true;
+            state.last_prompt = Some(text.clone());
         }
         let state = Arc::clone(&self.state);
         let app = self.app.clone();
@@ -146,11 +202,20 @@ impl AgentManager {
                     let _ = app.emit("samokod://event", AppEvent::TurnDone);
                 }
                 Err(error) => {
+                    let raw = error.to_string();
+                    let transport_gone = is_transport_error(&raw);
                     set_working(&state, false);
+                    if transport_gone && let Ok(mut guard) = state.lock() {
+                        guard.connection = None;
+                        guard.session_id = None;
+                    }
+                    let hint = classify_error(&raw);
                     let _ = app.emit(
                         "samokod://event",
                         AppEvent::TurnFailed {
-                            raw: error.to_string(),
+                            raw,
+                            hint: hint.text,
+                            retryable: hint.retryable,
                         },
                     );
                 }
@@ -205,11 +270,16 @@ impl AgentManager {
         }
     }
 
-    /// Ensure a live, initialized connection. Spawns `opencode acp` once and
-    /// reuses it for every later session.
+    /// Ensure a live, initialized connection. Spawns `opencode acp` once,
+    /// reuses it for later sessions, and respawns after a closed transport.
     pub async fn ensure_connection(&self) -> Result<ConnectionTo<Agent>, AgentError> {
         if let Some(connection) = self.connection_snapshot() {
-            return Ok(connection);
+            if !connection.is_incoming_closed() {
+                return Ok(connection);
+            }
+            if let Ok(mut state) = self.state.lock() {
+                state.connection = None;
+            }
         }
         let binary = acp::resolve_opencode_binary()?;
         let config = AcpAgentConfig::new(binary).arg("acp");
@@ -219,6 +289,7 @@ impl AgentManager {
         let notify_app = self.app.clone();
         let ask_state = Arc::clone(&self.state);
         let ask_app = self.app.clone();
+        let exit_app = self.app.clone();
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
         let ready = Arc::new(Mutex::new(Some(ready_tx)));
         let ready_for_handler = Arc::clone(&ready);
@@ -278,7 +349,17 @@ impl AgentManager {
             if let Err(error) = result
                 && let Some(tx) = ready_for_error.lock().expect("ready poisoned").take()
             {
-                let _ = tx.send(Err(error.to_string()));
+                let raw = error.to_string();
+                let hint = classify_error(&raw);
+                let _ = exit_app.emit(
+                    "samokod://event",
+                    AppEvent::AgentExited {
+                        raw: raw.clone(),
+                        hint: hint.text,
+                        retryable: hint.retryable,
+                    },
+                );
+                let _ = tx.send(Err(raw));
             }
         });
 
@@ -293,6 +374,15 @@ impl AgentManager {
                 raw: "agent startup was cancelled".to_string(),
             }),
         }
+    }
+
+    fn reopen_snapshot(&self) -> Option<(PathBuf, String, Option<String>)> {
+        let state = self.state.lock().ok()?;
+        Some((
+            state.repo_root.clone()?,
+            state.branch.clone(),
+            state.last_model.clone(),
+        ))
     }
 
     fn connection_snapshot(&self) -> Option<ConnectionTo<Agent>> {

@@ -4,8 +4,10 @@ import {
 	answerPermission,
 	cancelTurn,
 	getPrefs,
+	newChat,
 	onAppEvent,
 	openRepo,
+	retryLast,
 	sendPrompt,
 	setConfigOption,
 	validateRepo,
@@ -38,7 +40,6 @@ export function App() {
 	const [working, setWorking] = useState(false);
 	const [awaitingApproval, setAwaitingApproval] = useState(false);
 	const [draft, setDraft] = useState("");
-	const [lastSent, setLastSent] = useState("");
 	const [typing, setTyping] = useState(false);
 	const typeTimer = useRef<number | null>(null);
 	const appRef = useRef<HTMLDivElement>(null);
@@ -62,7 +63,6 @@ export function App() {
 		setWorking(false);
 		setAwaitingApproval(false);
 		setDraft("");
-		setLastSent("");
 		setView({ kind: "chat" });
 		setPickerError(null);
 	}, []);
@@ -140,16 +140,13 @@ export function App() {
 				setAwaitingApproval(false);
 				break;
 			}
-			case "turn_failed": {
+			case "turn_failed":
+			case "agent_exited": {
 				setWorking(false);
 				setAwaitingApproval(false);
 				setTranscript((items) => [
 					...items,
-					{
-						kind: "error",
-						id: crypto.randomUUID(),
-						raw: event.raw,
-					},
+					failureItem(event.raw, event.hint, event.retryable),
 				]);
 				break;
 			}
@@ -249,11 +246,12 @@ export function App() {
 		await handleOpenPath(picked);
 	}
 
+	function appendFailure(raw: string, hint: string, retryable: boolean) {
+		setTranscript((items) => [...items, failureItem(raw, hint, retryable)]);
+	}
+
 	function appendError(raw: string) {
-		setTranscript((items) => [
-			...items,
-			{ kind: "error", id: crypto.randomUUID(), raw },
-		]);
+		appendFailure(raw, "retry the turn", true);
 	}
 
 	async function runTurn(text: string) {
@@ -274,7 +272,6 @@ export function App() {
 			{ kind: "user", id: crypto.randomUUID(), text },
 		]);
 		setDraft("");
-		setLastSent(text);
 		await runTurn(text);
 	}
 
@@ -309,13 +306,24 @@ export function App() {
 	}
 
 	async function handleRetry() {
-		if (lastSent === "" || working) return;
-		await runTurn(lastSent);
+		if (status !== "idle") return;
+		try {
+			const retried = await retryLast();
+			if (retried) setWorking(true);
+		} catch (error) {
+			appendError(error instanceof Error ? error.message : String(error));
+		}
 	}
 
 	function handleRepoButton() {
 		if (status !== "idle") return;
 		setView({ kind: "picker", returnToChat: true });
+	}
+
+	async function handleNewChat() {
+		if (status !== "idle") return;
+		const info = await newChat();
+		applySession(info);
 	}
 
 	function handleTypePulse() {
@@ -374,7 +382,7 @@ export function App() {
 						working={status !== "idle"}
 						statusText={statusText}
 						onOpenPicker={handleRepoButton}
-						onNewChat={() => undefined}
+						onNewChat={handleNewChat}
 					/>
 					<div className="transcript" ref={transcriptRef}>
 						{transcript.length === 0 ? (
@@ -404,6 +412,14 @@ export function App() {
 			)}
 		</div>
 	);
+}
+
+function failureItem(
+	raw: string,
+	hint: string,
+	retryable: boolean,
+): TranscriptItem {
+	return { kind: "error", id: crypto.randomUUID(), raw, hint, retryable };
 }
 
 function shortPath(path: string): string {
