@@ -17,7 +17,7 @@ export function Composer({
 	onDraft: (text: string) => void;
 	onSend: () => void;
 	onStop: () => void;
-	onConfigChange: (id: string, value: string) => void;
+	onConfigChange: (configId: string, value: string) => void;
 	onEdit: () => void;
 }) {
 	const busy = status !== "idle";

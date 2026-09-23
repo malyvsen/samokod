@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ConfigOptionView, ConfigValueView } from "../types";
+import type { ConfigOptionValueView, ConfigOptionView } from "../types";
 
 export function ModelSelector({
 	options,
@@ -8,7 +8,7 @@ export function ModelSelector({
 }: {
 	options: ConfigOptionView[];
 	disabled: boolean;
-	onChange: (id: string, value: string) => void;
+	onChange: (configId: string, value: string) => void;
 }) {
 	const model = options.find((option) => option.id === "model");
 	const extras = options.filter(
@@ -42,13 +42,14 @@ function OptionDropdown({
 }: {
 	option: ConfigOptionView;
 	disabled: boolean;
-	onChange: (id: string, value: string) => void;
+	onChange: (configId: string, value: string) => void;
 }) {
-	const values: ConfigValueView[] = option.options;
 	const [open, setOpen] = useState(false);
-	const current = values.find((value) => value.value === option.current);
+	const selected: ConfigOptionValueView | undefined = option.options.find(
+		(value) => value.value === option.currentValue,
+	);
 	const label =
-		current !== undefined ? `${option.name} / ${current.name}` : option.name;
+		selected !== undefined ? `${option.name} / ${selected.name}` : option.name;
 	return (
 		<span className="mwrap">
 			<button
@@ -63,7 +64,7 @@ function OptionDropdown({
 			</button>
 			{open && !disabled && (
 				<span className="mpop">
-					{values.map((value: ConfigValueView) => (
+					{option.options.map((value) => (
 						<button
 							className="mop"
 							key={value.value}
@@ -75,7 +76,7 @@ function OptionDropdown({
 							}}
 						>
 							<span className="tick">
-								{value.value === option.current ? "✓" : ""}
+								{value.value === option.currentValue ? "✓" : ""}
 							</span>
 							{value.name}
 						</button>

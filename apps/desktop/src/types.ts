@@ -1,4 +1,4 @@
-export interface ConfigValueView {
+export interface ConfigOptionValueView {
 	value: string;
 	name: string;
 }
@@ -6,8 +6,8 @@ export interface ConfigValueView {
 export interface ConfigOptionView {
 	id: string;
 	name: string;
-	current: string;
-	options: ConfigValueView[];
+	currentValue: string;
+	options: ConfigOptionValueView[];
 }
 
 export interface ToolLineView {

@@ -314,16 +314,18 @@ export function App() {
 		setWorking(true);
 	}
 
-	async function handleConfigChange(id: string, value: string) {
+	async function handleConfigChange(configId: string, value: string) {
 		if (status !== "idle") return;
-		await setConfigOption(id, value);
+		await setConfigOption(configId, value);
 		setSession((current) =>
 			current === null
 				? current
 				: {
 						...current,
 						config_options: current.config_options.map((option) =>
-							option.id === id ? { ...option, current: value } : option,
+							option.id === configId
+								? { ...option, currentValue: value }
+								: option,
 						),
 					},
 		);

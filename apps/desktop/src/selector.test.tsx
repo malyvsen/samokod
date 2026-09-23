@@ -8,7 +8,7 @@ const options: ConfigOptionView[] = [
 	{
 		id: "model",
 		name: "Model",
-		current: "opencode/big-pickle",
+		currentValue: "opencode/big-pickle",
 		options: [
 			{ value: "opencode/big-pickle", name: "Big Pickle" },
 			{ value: "opencode/muse-spark-1.3", name: "Muse Spark 1.3" },
@@ -21,7 +21,7 @@ const options: ConfigOptionView[] = [
 	{
 		id: "thought_level",
 		name: "Thought",
-		current: "high",
+		currentValue: "high",
 		options: [
 			{ value: "low", name: "low" },
 			{ value: "high", name: "high" },

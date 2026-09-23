@@ -95,14 +95,14 @@ async fn answer_permission(
 async fn set_config_option(
     app: AppHandle,
     state: State<'_, AgentManager>,
-    id: String,
+    config_id: String,
     value: String,
 ) -> Result<(), String> {
     state
-        .set_config_option(id.clone(), value.clone())
+        .set_config_option(config_id.clone(), value.clone())
         .await
         .map_err(|error| error.to_string())?;
-    if id == "model" {
+    if config_id == "model" {
         let dir = prefs_dir(&app);
         let mut prefs = load_prefs(&dir);
         if let Some(repo) = prefs.last_repo.clone() {

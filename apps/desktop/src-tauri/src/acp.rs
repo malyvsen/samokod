@@ -43,7 +43,7 @@ pub fn build_new_session_request(cwd: &Path) -> NewSessionRequest {
     NewSessionRequest::new(cwd)
 }
 
-/// Build a `session/set_config_option` request from string ids.
+/// Build a `session/set_config_option` request from a string config id and value id.
 pub fn build_set_config_request(
     session_id: &SessionId,
     config_id: &str,

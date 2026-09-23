@@ -37,8 +37,11 @@ export function answerPermission(
 	return invoke("answer_permission", { toolCallId, optionId });
 }
 
-export function setConfigOption(id: string, value: string): Promise<void> {
-	return invoke("set_config_option", { id, value });
+export function setConfigOption(
+	configId: string,
+	value: string,
+): Promise<void> {
+	return invoke("set_config_option", { config_id: configId, value });
 }
 
 export function onAppEvent(handler: (event: AppEvent) => void): () => void {

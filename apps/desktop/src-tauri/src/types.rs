@@ -102,20 +102,21 @@ pub struct TodoChangeView {
     pub status: String,
 }
 
-/// One selectable value inside a generic config option.
+/// One value inside a session config option (ACP `ConfigOptionValue`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ConfigValueView {
+pub struct ConfigOptionValueView {
     pub value: String,
     pub name: String,
 }
 
-/// Generic agent config option.
+/// Session config option (ACP `ConfigOption`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ConfigOptionView {
     pub id: String,
     pub name: String,
-    pub current: String,
-    pub options: Vec<ConfigValueView>,
+    pub current_value: String,
+    pub options: Vec<ConfigOptionValueView>,
 }
 
 /// Session info returned after opening a repo.

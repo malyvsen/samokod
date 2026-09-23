@@ -14,7 +14,8 @@ use crate::error_hint::{classify_error, is_transport_error};
 use crate::spend::{TokenSums, context_pct};
 use crate::todos::{diff_todos, is_todowrite, parse_todos};
 use crate::types::{
-    AgentError, AppEvent, ConfigOptionView, ConfigValueView, PermissionView, SessionInfo, TodoView,
+    AgentError, AppEvent, ConfigOptionValueView, ConfigOptionView, PermissionView, SessionInfo,
+    TodoView,
 };
 
 /// User decision for one permission card.
@@ -135,8 +136,12 @@ impl AgentManager {
         })
     }
 
-    /// Change one config option without restarting the session.
-    pub async fn set_config_option(&self, id: String, value: String) -> Result<(), AgentError> {
+    /// Set one session config option without restarting the session.
+    pub async fn set_config_option(
+        &self,
+        config_id: String,
+        value: String,
+    ) -> Result<(), AgentError> {
         let (connection, session_id, _) =
             self.session_snapshot()
                 .ok_or_else(|| AgentError::NoSession {
@@ -145,7 +150,7 @@ impl AgentManager {
         connection
             .send_request(acp::build_set_config_request(
                 &acp::SessionId::new(session_id),
-                &id,
+                &config_id,
                 &value,
             ))
             .block_task()
@@ -153,7 +158,7 @@ impl AgentManager {
             .map_err(|error| AgentError::RequestFailed {
                 raw: error.to_string(),
             })?;
-        if id == "model"
+        if config_id == "model"
             && let Ok(mut state) = self.state.lock()
         {
             state.last_model = Some(value);
@@ -659,16 +664,16 @@ async fn set_model_value(
 
 fn apply_model_override(options: &mut [ConfigOptionView], model: &str) {
     if let Some(option) = options.iter_mut().find(|option| option.id == "model") {
-        option.current = model.to_string();
+        option.current_value = model.to_string();
     }
 }
 
-/// Convert wire config options to generic views.
+/// Convert wire session config options to views.
 pub fn config_views(options: &[SessionConfigOption]) -> Vec<ConfigOptionView> {
     options
         .iter()
         .map(|option| {
-            let (current, values) = match &option.kind {
+            let (current_value, values) = match &option.kind {
                 SessionConfigKind::Select(select) => (
                     select.current_value.to_string(),
                     select_values(&select.options),
@@ -676,11 +681,11 @@ pub fn config_views(options: &[SessionConfigOption]) -> Vec<ConfigOptionView> {
                 SessionConfigKind::Boolean(boolean) => (
                     boolean.current_value.to_string(),
                     vec![
-                        ConfigValueView {
+                        ConfigOptionValueView {
                             value: "true".to_string(),
                             name: "true".to_string(),
                         },
-                        ConfigValueView {
+                        ConfigOptionValueView {
                             value: "false".to_string(),
                             name: "false".to_string(),
                         },
@@ -691,18 +696,18 @@ pub fn config_views(options: &[SessionConfigOption]) -> Vec<ConfigOptionView> {
             ConfigOptionView {
                 id: option.id.to_string(),
                 name: option.name.clone(),
-                current,
+                current_value,
                 options: values,
             }
         })
         .collect()
 }
 
-fn select_values(options: &SessionConfigSelectOptions) -> Vec<ConfigValueView> {
+fn select_values(options: &SessionConfigSelectOptions) -> Vec<ConfigOptionValueView> {
     match options {
         SessionConfigSelectOptions::Ungrouped(values) => values
             .iter()
-            .map(|value| ConfigValueView {
+            .map(|value| ConfigOptionValueView {
                 value: value.value.to_string(),
                 name: value.name.clone(),
             })
@@ -710,7 +715,7 @@ fn select_values(options: &SessionConfigSelectOptions) -> Vec<ConfigValueView> {
         SessionConfigSelectOptions::Grouped(groups) => groups
             .iter()
             .flat_map(|group| {
-                group.options.iter().map(|value| ConfigValueView {
+                group.options.iter().map(|value| ConfigOptionValueView {
                     value: value.value.to_string(),
                     name: value.name.clone(),
                 })
@@ -755,7 +760,7 @@ mod tests {
         let views = config_views(std::slice::from_ref(&option));
         assert_eq!(views.len(), 1);
         assert_eq!(views[0].id, "model");
-        assert_eq!(views[0].current, "opencode/big-pickle");
+        assert_eq!(views[0].current_value, "opencode/big-pickle");
         assert_eq!(views[0].options.len(), 1);
     }
 
