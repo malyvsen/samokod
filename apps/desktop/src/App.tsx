@@ -14,6 +14,7 @@ import {
 } from "./api";
 import { Composer } from "./components/Composer";
 import { RepoPicker } from "./components/RepoPicker";
+import { SidePanel } from "./components/SidePanel";
 import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
 import type {
@@ -22,6 +23,8 @@ import type {
 	Prefs,
 	RecentRepo,
 	SessionInfo,
+	SpendView,
+	TodoView,
 	TranscriptItem,
 } from "./types";
 import "./App.css";
@@ -37,6 +40,8 @@ export function App() {
 	const [recent, setRecent] = useState<RecentRepo[]>([]);
 	const [pickerError, setPickerError] = useState<string | null>(null);
 	const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
+	const [todos, setTodos] = useState<TodoView[]>([]);
+	const [spend, setSpend] = useState<SpendView | null>(null);
 	const [working, setWorking] = useState(false);
 	const [awaitingApproval, setAwaitingApproval] = useState(false);
 	const [draft, setDraft] = useState("");
@@ -60,6 +65,8 @@ export function App() {
 	const applySession = useCallback((info: SessionInfo) => {
 		setSession(info);
 		setTranscript([]);
+		setTodos([]);
+		setSpend(null);
 		setWorking(false);
 		setAwaitingApproval(false);
 		setDraft("");
@@ -180,6 +187,30 @@ export function App() {
 						? current
 						: { ...current, config_options: event.options },
 				);
+				break;
+			}
+			case "todos_changed": {
+				setTodos(event.todos);
+				if (event.changes.length > 0) {
+					setTranscript((items) => [
+						...items,
+						{ kind: "todos", id: crypto.randomUUID(), changes: event.changes },
+					]);
+				}
+				break;
+			}
+			case "spend_tick": {
+				setSpend({
+					cost: event.cost,
+					tokensIn: event.tokens_in,
+					tokensOut: event.tokens_out,
+					contextPct: event.ctx_pct,
+				});
+				break;
+			}
+			case "session_reset": {
+				setTodos([]);
+				setSpend(null);
 				break;
 			}
 		}
@@ -384,30 +415,39 @@ export function App() {
 						onOpenPicker={handleRepoButton}
 						onNewChat={handleNewChat}
 					/>
-					<div className="transcript" ref={transcriptRef}>
-						{transcript.length === 0 ? (
-							<div className="empty-hint">
-								<b>{repoLabel} · fresh session</b>
-								no messages yet
+					<div className="mainrow">
+						<div className="chatcol">
+							<div className="transcript" ref={transcriptRef}>
+								{transcript.length === 0 ? (
+									<div className="empty-hint">
+										<b>{repoLabel} · fresh session</b>
+										no messages yet
+									</div>
+								) : (
+									<Transcript
+										items={transcript}
+										onRetry={handleRetry}
+										onAnswer={handleAnswer}
+									/>
+								)}
 							</div>
-						) : (
-							<Transcript
-								items={transcript}
-								onRetry={handleRetry}
-								onAnswer={handleAnswer}
+							<Composer
+								status={status}
+								draft={draft}
+								configOptions={configOptions}
+								onDraft={setDraft}
+								onSend={handleSend}
+								onStop={handleStop}
+								onConfigChange={handleConfigChange}
+								onTypePulse={handleTypePulse}
 							/>
-						)}
+						</div>
+						<SidePanel
+							todos={todos}
+							spend={spend}
+							sessionId={session?.session_id ?? ""}
+						/>
 					</div>
-					<Composer
-						status={status}
-						draft={draft}
-						configOptions={configOptions}
-						onDraft={setDraft}
-						onSend={handleSend}
-						onStop={handleStop}
-						onConfigChange={handleConfigChange}
-						onTypePulse={handleTypePulse}
-					/>
 				</>
 			)}
 		</div>

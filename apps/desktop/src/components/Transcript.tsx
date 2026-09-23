@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import { todoMark, todoRowClass } from "../todos";
 import type {
 	PermissionOptionView,
 	PermissionView,
@@ -36,6 +37,25 @@ export function Transcript({
 				}
 				if (item.kind === "tool") {
 					return <ToolRow key={item.id} line={item.line} />;
+				}
+				if (item.kind === "todos") {
+					return (
+						<div className="todo" key={item.id}>
+							<div className="head">
+								<span>TODOS</span>
+							</div>
+							{item.changes.map((change) => (
+								<div
+									className={`row ${todoRowClass(change.status)}`}
+									data-full={change.content}
+									key={change.content}
+								>
+									<span className="mark">[{todoMark(change.status)}]</span>
+									{change.content}
+								</div>
+							))}
+						</div>
+					);
 				}
 				if (item.kind === "approval") {
 					const permission: PermissionView = item.permission;

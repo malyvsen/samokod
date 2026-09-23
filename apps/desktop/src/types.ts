@@ -51,7 +51,7 @@ export interface PermissionView {
 	rule_hint: string;
 }
 
-interface TodoView {
+export interface TodoView {
 	content: string;
 	status: string;
 	priority: string;
@@ -60,6 +60,13 @@ interface TodoView {
 interface TodoChangeView {
 	content: string;
 	status: string;
+}
+
+export interface SpendView {
+	cost: number;
+	tokensIn: number;
+	tokensOut: number;
+	contextPct: number;
 }
 
 export type AppEvent =
@@ -85,6 +92,7 @@ export type TranscriptItem =
 	| { kind: "user"; id: string; text: string }
 	| { kind: "agent"; id: string; text: string }
 	| { kind: "tool"; id: string; line: ToolLineView }
+	| { kind: "todos"; id: string; changes: TodoChangeView[] }
 	| {
 			kind: "approval";
 			id: string;
