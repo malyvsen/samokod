@@ -10,9 +10,9 @@ export function ModelSelector({
 	disabled: boolean;
 	onChange: (configId: string, value: string) => void;
 }) {
-	const model = options.find((option) => option.id === "model");
+	const model = options.find((option) => categoryOf(option) === "model");
 	const extras = options.filter(
-		(option) => option.id !== "model" && option.id !== "mode",
+		(option) => categoryOf(option) !== "model" && categoryOf(option) !== "mode",
 	);
 	return (
 		<>
@@ -33,6 +33,10 @@ export function ModelSelector({
 			))}
 		</>
 	);
+}
+
+function categoryOf(option: ConfigOptionView): string {
+	return option.category ?? option.id;
 }
 
 function OptionDropdown({

@@ -4,10 +4,10 @@ pub use agent_client_protocol::schema::v1::{
     CancelNotification, CloseSessionRequest, ContentBlock, PermissionOption, PermissionOptionId,
     PermissionOptionKind, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigId, SessionConfigKind,
-    SessionConfigOption, SessionConfigOptionValue, SessionConfigSelectOptions,
-    SessionConfigValueId, SessionId, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind,
-    Usage, UsageUpdate,
+    SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
+    SessionConfigSelectOptions, SessionConfigValueId, SessionId, SessionNotification,
+    SessionUpdate, SetSessionConfigOptionRequest, TextContent, ToolCall, ToolCallStatus,
+    ToolCallUpdate, ToolKind, Usage, UsageUpdate,
 };
 #[cfg(test)]
 pub use agent_client_protocol::schema::v1::{

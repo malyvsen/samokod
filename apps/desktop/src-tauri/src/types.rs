@@ -117,6 +117,9 @@ pub struct ConfigOptionView {
     pub name: String,
     pub current_value: String,
     pub options: Vec<ConfigOptionValueView>,
+    /// Spec `category`, absent when the agent omits it.
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 /// Session info returned after opening a repo.

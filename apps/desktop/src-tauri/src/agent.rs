@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::acp::{
     self, AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, SessionConfigKind,
-    SessionConfigOption, SessionConfigSelectOptions, ToolCallStatus,
+    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOptions, ToolCallStatus,
 };
 use crate::error_hint::{classify_error, is_transport_error};
 use crate::spend::{TokenSums, context_pct};
@@ -698,9 +698,24 @@ pub fn config_views(options: &[SessionConfigOption]) -> Vec<ConfigOptionView> {
                 name: option.name.clone(),
                 current_value,
                 options: values,
+                category: option_category(&option.category),
             }
         })
         .collect()
+}
+
+/// Spec `category` as a plain string, absent when the agent omits it.
+fn option_category(category: &Option<SessionConfigOptionCategory>) -> Option<String> {
+    match category {
+        None => None,
+        Some(SessionConfigOptionCategory::Mode) => Some("mode".to_string()),
+        Some(SessionConfigOptionCategory::Model) => Some("model".to_string()),
+        Some(SessionConfigOptionCategory::ModelConfig) => Some("model_config".to_string()),
+        Some(SessionConfigOptionCategory::ThoughtLevel) => Some("thought_level".to_string()),
+        Some(SessionConfigOptionCategory::Other(name)) => Some(name.clone()),
+        // Future SDK variants surface as absent.
+        Some(_) => None,
+    }
 }
 
 fn select_values(options: &SessionConfigSelectOptions) -> Vec<ConfigOptionValueView> {
@@ -742,7 +757,9 @@ fn map_startup_error(raw: &str) -> AgentError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp::{SessionConfigSelectOption, SessionConfigValueId};
+    use crate::acp::{
+        SessionConfigOptionCategory, SessionConfigSelectOption, SessionConfigValueId,
+    };
     use std::collections::HashMap;
     use std::path::Path;
 
@@ -756,12 +773,70 @@ mod tests {
                 SessionConfigValueId::new("opencode/big-pickle"),
                 "Big Pickle",
             )],
-        );
+        )
+        .category(SessionConfigOptionCategory::Model);
         let views = config_views(std::slice::from_ref(&option));
         assert_eq!(views.len(), 1);
         assert_eq!(views[0].id, "model");
+        assert_eq!(views[0].category.as_deref(), Some("model"));
         assert_eq!(views[0].current_value, "opencode/big-pickle");
         assert_eq!(views[0].options.len(), 1);
+    }
+
+    fn select_fixture(
+        id: &'static str,
+        name: &'static str,
+        category: impl Into<Option<SessionConfigOptionCategory>>,
+    ) -> SessionConfigOption {
+        let category: Option<SessionConfigOptionCategory> = category.into();
+        SessionConfigOption::select(
+            id,
+            name,
+            SessionConfigValueId::new("v"),
+            vec![SessionConfigSelectOption::new(
+                SessionConfigValueId::new("v"),
+                "V",
+            )],
+        )
+        .category(category)
+    }
+
+    #[test]
+    fn config_views_maps_categories() {
+        let options = vec![
+            select_fixture("llm", "LLM", SessionConfigOptionCategory::Model),
+            select_fixture("mode", "Session Mode", SessionConfigOptionCategory::Mode),
+            select_fixture(
+                "effort",
+                "Effort",
+                SessionConfigOptionCategory::ThoughtLevel,
+            ),
+            select_fixture("ctx", "Context", SessionConfigOptionCategory::ModelConfig),
+            select_fixture(
+                "custom",
+                "Custom",
+                SessionConfigOptionCategory::Other("_custom".to_string()),
+            ),
+            select_fixture(
+                "legacy",
+                "Legacy",
+                Option::<SessionConfigOptionCategory>::None,
+            ),
+        ];
+        let views = config_views(&options);
+        let categories: Vec<Option<&str>> =
+            views.iter().map(|view| view.category.as_deref()).collect();
+        assert_eq!(
+            categories,
+            [
+                Some("model"),
+                Some("mode"),
+                Some("thought_level"),
+                Some("model_config"),
+                Some("_custom"),
+                None,
+            ]
+        );
     }
 
     async fn open_test_session(

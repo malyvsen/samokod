@@ -8,6 +8,8 @@ export interface ConfigOptionView {
 	name: string;
 	currentValue: string;
 	options: ConfigOptionValueView[];
+	/** Spec `category`, absent when the agent omits it. */
+	category?: string | null;
 }
 
 export interface ToolLineView {
