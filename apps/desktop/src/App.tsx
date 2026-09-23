@@ -56,12 +56,6 @@ export function App() {
 		: working
 			? "working"
 			: "idle";
-	const statusText =
-		status === "idle"
-			? "IDLE"
-			: status === "working"
-				? "● WORKING"
-				: "● PAUSED - APPROVAL";
 
 	const applySession = useCallback((info: SessionInfo) => {
 		setSession(info);
@@ -395,8 +389,7 @@ export function App() {
 					<TopBar
 						repoLabel={repoLabel}
 						branch={branch}
-						working={status !== "idle"}
-						statusText={statusText}
+						status={status}
 						onOpenPicker={handleRepoButton}
 						onNewChat={handleNewChat}
 					/>
