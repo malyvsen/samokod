@@ -1,5 +1,5 @@
 [package]
-name = "desktop"
+name = "samokod"
 version = "0.1.0"
 description = "A git-heavy AI code editor."
 authors = ["you"]
@@ -10,7 +10,7 @@ edition = "2024"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-name = "desktop_lib"
+name = "samokod_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

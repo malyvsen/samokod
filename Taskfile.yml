@@ -1,62 +1,41 @@
 version: "3"
 
-vars:
-  DEFAULT_PROJECT: apps/desktop
+includes:
+  tauri:
+    taskfile: taskfiles/tauri.yml
+    flatten: true
+    vars:
+      ARTIFACT_NAME: "samokod"
+  rust:
+    taskfile: taskfiles/rust.yml
+    dir: src-tauri
+  typescript: taskfiles/typescript.yml
 
 tasks:
   init:
     desc: Set up the development environment
     deps: [prereqs]
-    vars:
-      PROJECTS:
-        sh: node scripts/workspace-projects.mjs init
     cmds:
       - git config core.hooksPath scripts/git-hooks
       - pnpm install --frozen-lockfile
-      - for: { var: PROJECTS, as: PROJECT }
-        cmd: task -d {{.PROJECT}} init
-
-  check:
-    desc: Run all automated checks
-    deps: [biome, knip]
-    vars:
-      PROJECTS:
-        sh: node scripts/workspace-projects.mjs check
-    cmds:
-      - for: { var: PROJECTS, as: PROJECT }
-        cmd: task -d {{.PROJECT}} check
 
   dev:
     desc: Run the app in development mode
     cmds:
-      - task -d {{.DEFAULT_PROJECT}} dev
+      - pnpm tauri dev
 
-  build:
-    desc: Bundle every project that ships
-    vars:
-      PROJECTS:
-        sh: node scripts/workspace-projects.mjs build
-    cmds:
-      - for: { var: PROJECTS, as: PROJECT }
-        cmd: task -d {{.PROJECT}} build
-
-  deploy:
-    desc: Deploy every project that ships
-    vars:
-      PROJECTS:
-        sh: node scripts/workspace-projects.mjs deploy
-    cmds:
-      - for: { var: PROJECTS, as: PROJECT }
-        cmd: task -d {{.PROJECT}} deploy
+  check:
+    desc: Run all checks
+    deps: [biome, knip, rust:check, typescript:check]
 
   fix:
     desc: Apply safe formatting and lint fixes
     cmds:
       - pnpm exec biome check --write --error-on-warnings .
-      - cargo fmt --all
+      - cargo fmt --manifest-path src-tauri/Cargo.toml
 
   biome:
-    desc: Check linting and formatting across the workspace
+    desc: Check linting and formatting across the repo
     cmds:
       - pnpm exec biome check --error-on-warnings .
 

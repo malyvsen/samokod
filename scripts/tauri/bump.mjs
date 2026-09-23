@@ -1,26 +1,19 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
 
 const KINDS = new Set(["patch", "minor", "major"]);
-const [kind, appDirArg, ...extraArgs] = process.argv.slice(2);
-if (
-	!KINDS.has(kind) ||
-	appDirArg === undefined ||
-	appDirArg === "" ||
-	extraArgs.length > 0
-) {
-	throw new Error("usage: bump.mjs <patch|minor|major> <app-dir>");
+const [kind, ...extraArgs] = process.argv.slice(2);
+if (!KINDS.has(kind) || extraArgs.length > 0) {
+	throw new Error("usage: bump.mjs <patch|minor|major>");
 }
 
-const appDir = resolve(appDirArg);
-const cargoPath = join(appDir, "src-tauri", "Cargo.toml");
-const tauriPath = join(appDir, "src-tauri", "tauri.conf.json");
+const cargoPath = "src-tauri/Cargo.toml";
+const tauriPath = "src-tauri/tauri.conf.json";
 if (!existsSync(cargoPath)) {
-	throw new Error(`no src-tauri/Cargo.toml in ${appDir}`);
+	throw new Error(`no ${cargoPath} in the repository root`);
 }
 if (!existsSync(tauriPath)) {
-	throw new Error(`no src-tauri/tauri.conf.json in ${appDir}`);
+	throw new Error(`no ${tauriPath} in the repository root`);
 }
 
 const cargo = readFileSync(cargoPath, "utf8");

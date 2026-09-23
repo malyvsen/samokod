@@ -11,7 +11,7 @@ if (
 	throw new Error("usage: build.mjs <artifact-dir>");
 }
 
-const workspace = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+const repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
 	encoding: "utf8",
 }).trim();
 const metadata = JSON.parse(
@@ -30,12 +30,10 @@ const metadata = JSON.parse(
 	),
 );
 const bundle = join(metadata.target_directory, "release", "bundle");
-const releaseRoot = join(workspace, "release");
+const releaseRoot = join(repoRoot, "release");
 const artifactDir = resolve(artifactDirArg);
 if (dirname(artifactDir) !== releaseRoot) {
-	throw new Error(
-		`artifact directory must name one project under ${releaseRoot}`,
-	);
+	throw new Error(`artifact directory must be under ${releaseRoot}`);
 }
 
 rmSync(bundle, { force: true, recursive: true });

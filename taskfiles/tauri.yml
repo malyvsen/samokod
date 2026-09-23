@@ -1,24 +1,22 @@
 version: "3"
 
 vars:
-  WORKSPACE:
-    sh: git rev-parse --show-toplevel
-  ARTIFACT_DIR: "{{.WORKSPACE}}/release/{{.ARTIFACT_NAME}}"
+  ARTIFACT_DIR: "release/{{.ARTIFACT_NAME}}"
 
 tasks:
   build:
     desc: Bundle the app for distribution
     cmds:
-      - node "{{.WORKSPACE}}/scripts/tauri/build.mjs" "{{.ARTIFACT_DIR}}"
+      - node scripts/tauri/build.mjs "{{.ARTIFACT_DIR}}"
 
   deploy:
     desc: Put the release app in /Applications
     deps: [build]
     platforms: [darwin]
     cmds:
-      - node "{{.WORKSPACE}}/scripts/tauri/install-macos.mjs" "{{.ARTIFACT_DIR}}" /Applications
+      - node scripts/tauri/install-macos.mjs "{{.ARTIFACT_DIR}}" /Applications
 
   bump:
-    desc: Raise this app's version (patch, minor, or major)
+    desc: Raise the app's version (patch, minor, or major)
     cmds:
-      - node "{{.WORKSPACE}}/scripts/tauri/bump.mjs" {{.CLI_ARGS}} .
+      - node scripts/tauri/bump.mjs {{.CLI_ARGS}}

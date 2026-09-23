@@ -30,9 +30,7 @@ Where OpenCode does not expose something directly, the app infers it from agent 
 
 # Commit messages
 
-Format: `type(scope): message`. Keep messages short — no extended descriptions.
-
-The scope is the affected project folder (the one containing the relevant Taskfile), comma-separated if multiple, i.e. `path/to/folder, path/to/other/folder`. Omit it when changes are repo-wide, i.e. write `type: message` in such cases.
+Format: `type: message`. Keep messages short — no extended descriptions.
 
 | Type       | Use for                                  |
 | ---------- | ---------------------------------------- |
