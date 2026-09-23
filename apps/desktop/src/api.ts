@@ -41,10 +41,20 @@ export function setConfigOption(id: string, value: string): Promise<void> {
 	return invoke("set_config_option", { id, value });
 }
 
-export function onAppEvent(
-	handler: (event: AppEvent) => void,
-): Promise<() => void> {
-	return listen<AppEvent>("samokod://event", (event) => {
+export function onAppEvent(handler: (event: AppEvent) => void): () => void {
+	let cancelled = false;
+	let unlisten: (() => void) | undefined;
+	listen<AppEvent>("samokod://event", (event) => {
 		handler(event.payload);
+	}).then((stop) => {
+		if (cancelled) {
+			stop();
+		} else {
+			unlisten = stop;
+		}
 	});
+	return () => {
+		cancelled = true;
+		unlisten?.();
+	};
 }

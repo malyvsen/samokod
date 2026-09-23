@@ -216,15 +216,7 @@ export function App() {
 		}
 	}, []);
 
-	useEffect(() => {
-		let unlisten: (() => void) | undefined;
-		onAppEvent(handleEvent).then((stop) => {
-			unlisten = stop;
-		});
-		return () => {
-			unlisten?.();
-		};
-	}, [handleEvent]);
+	useEffect(() => onAppEvent(handleEvent), [handleEvent]);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: re-scroll whenever the transcript identity changes
 	useEffect(() => {
