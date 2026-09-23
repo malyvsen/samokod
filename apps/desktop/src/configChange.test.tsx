@@ -119,7 +119,7 @@ describe("config change", () => {
 		await user.click(screen.getByText("GPT-5"));
 		expect(api.setConfigOption).toHaveBeenCalledWith("model", "openai/gpt-5");
 		await screen.findByLabelText("Effort");
-		expect(screen.getByText("Model / GPT-5")).toBeInTheDocument();
+		expect(screen.getByText("GPT-5")).toBeInTheDocument();
 	});
 
 	test("ignores a stale earlier response", async () => {
@@ -143,7 +143,7 @@ describe("config change", () => {
 			modeOption(),
 		]);
 		second.resolve([modelOption("openai/gpt-4o"), modeOption()]);
-		await screen.findByText("Model / GPT-4o");
+		await screen.findByText("GPT-4o");
 		expect(screen.queryByLabelText("Effort")).not.toBeInTheDocument();
 	});
 
@@ -156,7 +156,7 @@ describe("config change", () => {
 		api.setConfigOption.mockRejectedValue(new Error("denied"));
 		await user.click(screen.getByLabelText("Effort"));
 		await user.click(screen.getByText("Medium"));
-		await screen.findByText("Effort / Low");
-		expect(screen.getByText("Model / GPT-5")).toBeInTheDocument();
+		await screen.findByText("Low");
+		expect(screen.getByText("GPT-5")).toBeInTheDocument();
 	});
 });

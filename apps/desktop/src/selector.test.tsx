@@ -4,7 +4,7 @@ import { describe, expect, test, vi } from "vitest";
 import { ModelSelector } from "./components/ModelSelector";
 import type { ConfigOptionView } from "./types";
 
-const options: ConfigOptionView[] = [
+const standard: ConfigOptionView[] = [
 	{
 		id: "model",
 		name: "Model",
@@ -31,7 +31,7 @@ const options: ConfigOptionView[] = [
 	},
 ];
 
-const renamed: ConfigOptionView[] = [
+const customIds: ConfigOptionView[] = [
 	{
 		id: "llm",
 		name: "LLM",
@@ -55,7 +55,7 @@ const renamed: ConfigOptionView[] = [
 	},
 ];
 
-const uncategorized: ConfigOptionView[] = [
+const idOnly: ConfigOptionView[] = [
 	{
 		id: "model",
 		name: "Model",
@@ -73,21 +73,21 @@ const uncategorized: ConfigOptionView[] = [
 describe("model selector", () => {
 	test("shows current model", () => {
 		render(
-			<ModelSelector options={options} disabled={false} onChange={vi.fn()} />,
+			<ModelSelector options={standard} disabled={false} onChange={vi.fn()} />,
 		);
-		expect(screen.getByText("Model / Big Pickle")).toBeInTheDocument();
+		expect(screen.getByText("Big Pickle")).toBeInTheDocument();
 	});
 
 	test("shows other options beside the model", () => {
 		render(
-			<ModelSelector options={options} disabled={false} onChange={vi.fn()} />,
+			<ModelSelector options={standard} disabled={false} onChange={vi.fn()} />,
 		);
 		expect(screen.getByLabelText("Thought")).toBeInTheDocument();
 	});
 
 	test("disables while working", () => {
 		render(
-			<ModelSelector options={options} disabled={true} onChange={vi.fn()} />,
+			<ModelSelector options={standard} disabled={true} onChange={vi.fn()} />,
 		);
 		for (const button of screen.getAllByRole("button")) {
 			expect(button).toBeDisabled();
@@ -98,7 +98,7 @@ describe("model selector", () => {
 		const onChange = vi.fn();
 		const user = userEvent.setup();
 		render(
-			<ModelSelector options={options} disabled={false} onChange={onChange} />,
+			<ModelSelector options={standard} disabled={false} onChange={onChange} />,
 		);
 		await user.click(screen.getByLabelText("Model"));
 		await user.click(screen.getByText("Muse Spark 1.3"));
@@ -107,34 +107,94 @@ describe("model selector", () => {
 
 	test("finds the model option by category", () => {
 		render(
-			<ModelSelector options={renamed} disabled={false} onChange={vi.fn()} />,
+			<ModelSelector options={customIds} disabled={false} onChange={vi.fn()} />,
 		);
-		expect(screen.getByText("LLM / A")).toBeInTheDocument();
+		expect(screen.getByText("A")).toBeInTheDocument();
 	});
 
 	test("hides the mode option", () => {
 		render(
-			<ModelSelector options={renamed} disabled={false} onChange={vi.fn()} />,
+			<ModelSelector options={customIds} disabled={false} onChange={vi.fn()} />,
 		);
 		expect(screen.queryByLabelText("Session Mode")).not.toBeInTheDocument();
 	});
 
 	test("shows remaining categories as extras", () => {
 		render(
-			<ModelSelector options={renamed} disabled={false} onChange={vi.fn()} />,
+			<ModelSelector options={customIds} disabled={false} onChange={vi.fn()} />,
 		);
 		expect(screen.getByLabelText("Effort")).toBeInTheDocument();
 	});
 
 	test("falls back to option id without a category", () => {
 		render(
-			<ModelSelector
-				options={uncategorized}
-				disabled={false}
-				onChange={vi.fn()}
-			/>,
+			<ModelSelector options={idOnly} disabled={false} onChange={vi.fn()} />,
 		);
-		expect(screen.getByText("Model / A")).toBeInTheDocument();
+		expect(screen.getByText("A")).toBeInTheDocument();
 		expect(screen.queryByLabelText("Mode")).not.toBeInTheDocument();
+	});
+
+	test("disables a dropdown with a single value", async () => {
+		const user = userEvent.setup();
+		render(
+			<ModelSelector options={customIds} disabled={false} onChange={vi.fn()} />,
+		);
+		const button = screen.getByLabelText("Effort");
+		expect(button).toBeDisabled();
+		await user.click(button);
+		expect(
+			screen.queryByRole("button", { name: /Low/ }),
+		).not.toBeInTheDocument();
+	});
+
+	test("shows a placeholder without an effort option", () => {
+		render(
+			<ModelSelector options={idOnly} disabled={false} onChange={vi.fn()} />,
+		);
+		const placeholder = screen.getByText("Effort unavailable");
+		expect(placeholder.closest("button")).toBeDisabled();
+	});
+
+	test("sorts models alphabetically while keeping effort order", async () => {
+		const user = userEvent.setup();
+		const unsorted: ConfigOptionView[] = [
+			{
+				id: "model",
+				name: "Model",
+				category: "model",
+				currentValue: "b",
+				options: [
+					{ value: "b", name: "Zulu" },
+					{ value: "a", name: "alpha" },
+					{ value: "c", name: "Mike" },
+				],
+			},
+			{
+				id: "effort",
+				name: "Effort",
+				category: "thought_level",
+				currentValue: "high",
+				options: [
+					{ value: "low", name: "Low" },
+					{ value: "high", name: "High" },
+				],
+			},
+		];
+		render(
+			<ModelSelector options={unsorted} disabled={false} onChange={vi.fn()} />,
+		);
+		await user.click(screen.getByLabelText("Model"));
+		const items = screen.getAllByRole("button", { name: /alpha|Mike|Zulu/ });
+		expect(items.map((item) => item.textContent)).toEqual([
+			expect.stringContaining("alpha"),
+			expect.stringContaining("Mike"),
+			expect.stringContaining("Zulu"),
+		]);
+		await user.click(screen.getByLabelText("Effort"));
+		const efforts = screen.getAllByRole("button", { name: /Low|High/ });
+		expect(efforts.map((item) => item.textContent)).toEqual([
+			expect.stringContaining("Low"),
+			expect.stringContaining("High"),
+		]);
 	});
 });
