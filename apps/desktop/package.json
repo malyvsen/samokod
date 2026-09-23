@@ -10,6 +10,7 @@
 	"dependencies": {
 		"@tauri-apps/api": "catalog:",
 		"@tauri-apps/plugin-dialog": "catalog:",
+		"@tauri-apps/plugin-log": "catalog:",
 		"react": "catalog:",
 		"react-dom": "catalog:",
 		"react-markdown": "catalog:"

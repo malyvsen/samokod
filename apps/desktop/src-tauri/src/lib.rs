@@ -14,6 +14,7 @@ mod updates;
 use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_log::{Target, TargetKind};
 
 use crate::agent::AgentManager;
 use crate::prefs::{load_prefs, record_model, record_open, save_prefs, stored_model};
@@ -134,13 +135,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             app.manage(AgentManager::new(app.handle().clone()));
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            app.handle().plugin(
+                tauri_plugin_log::Builder::new()
+                    .level(log::LevelFilter::Info)
+                    .target(Target::new(TargetKind::Stdout))
+                    .target(Target::new(TargetKind::Webview))
+                    .build(),
+            )?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
