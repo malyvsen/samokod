@@ -12,6 +12,7 @@ import {
 	setConfigOption,
 	validateRepo,
 } from "./api";
+import { reducedMotion, useAuroraMotion } from "./auroraMotion";
 import { Composer } from "./components/Composer";
 import { RepoPicker } from "./components/RepoPicker";
 import { SidePanel } from "./components/SidePanel";
@@ -45,9 +46,8 @@ export function App() {
 	const [working, setWorking] = useState(false);
 	const [awaitingApproval, setAwaitingApproval] = useState(false);
 	const [draft, setDraft] = useState("");
-	const [typing, setTyping] = useState(false);
-	const typeTimer = useRef<number | null>(null);
 	const appRef = useRef<HTMLDivElement>(null);
+	const notifyEdit = useAuroraMotion(appRef);
 	const transcriptRef = useRef<HTMLDivElement>(null);
 
 	const status: AgentStatus = awaitingApproval
@@ -228,6 +228,7 @@ export function App() {
 
 	useEffect(() => {
 		function onPointerMove(event: MouseEvent) {
+			if (reducedMotion()) return;
 			const node = appRef.current;
 			if (node === null) return;
 			const rect = node.getBoundingClientRect();
@@ -349,23 +350,13 @@ export function App() {
 		applySession(info);
 	}
 
-	function handleTypePulse() {
-		setTyping(true);
-		if (typeTimer.current !== null) window.clearTimeout(typeTimer.current);
-		typeTimer.current = window.setTimeout(() => setTyping(false), 450);
-	}
-
 	const repoLabel = session === null ? "no repo" : shortPath(session.repo_root);
 	const branch = session?.branch ?? "HEAD";
 	const configOptions = session?.config_options ?? [];
 	const returnToChat = view.kind === "picker" && view.returnToChat;
 
 	return (
-		<div
-			className={`app${typing ? " typing" : ""}`}
-			data-state={status}
-			ref={appRef}
-		>
+		<div className="app" data-state={status} ref={appRef}>
 			<div className="aurora a" />
 			<div className="rays">
 				<i />
@@ -431,7 +422,7 @@ export function App() {
 								onSend={handleSend}
 								onStop={handleStop}
 								onConfigChange={handleConfigChange}
-								onTypePulse={handleTypePulse}
+								onEdit={notifyEdit}
 							/>
 						</div>
 						<SidePanel

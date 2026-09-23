@@ -9,7 +9,7 @@ export function Composer({
 	onSend,
 	onStop,
 	onConfigChange,
-	onTypePulse,
+	onEdit,
 }: {
 	status: AgentStatus;
 	draft: string;
@@ -18,7 +18,7 @@ export function Composer({
 	onSend: () => void;
 	onStop: () => void;
 	onConfigChange: (id: string, value: string) => void;
-	onTypePulse: () => void;
+	onEdit: () => void;
 }) {
 	const busy = status !== "idle";
 	const canSend = draft.trim() !== "";
@@ -38,7 +38,7 @@ export function Composer({
 					value={draft}
 					onChange={(event) => {
 						onDraft(event.target.value);
-						onTypePulse();
+						onEdit();
 					}}
 					onKeyDown={(event) => {
 						if (event.key === "Enter" && !busy && canSend) {

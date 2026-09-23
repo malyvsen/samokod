@@ -325,10 +325,6 @@ body {
 	animation-duration: 19.5s;
 }
 
-.app.typing .aurora.a {
-	filter: blur(24px) brightness(1.6);
-}
-
 @keyframes drift {
 	from {
 		transform: translate3d(-2%, 1%, 0) scale(1);
