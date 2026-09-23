@@ -89,12 +89,14 @@ export function App() {
 						if (cancelled) return;
 						applySession(opened);
 						setRecent((await getPrefs()).recent);
-					} catch {
+					} catch (error) {
+						console.warn("failed to reopen last repo", error);
 						if (!cancelled) setView({ kind: "picker", returnToChat: false });
 					}
 				}
 			})
-			.catch(() => {
+			.catch((error: unknown) => {
+				console.warn("failed to load prefs", error);
 				if (!cancelled) setView({ kind: "picker", returnToChat: false });
 			});
 		return () => {
@@ -323,7 +325,8 @@ export function App() {
 			setSession((current) =>
 				current === null ? current : { ...current, config_options: options },
 			);
-		} catch {
+		} catch (error) {
+			console.warn(`set_config_option ${configId}=${value} failed`, error);
 			return;
 		}
 	}

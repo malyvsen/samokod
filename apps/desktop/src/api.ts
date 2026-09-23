@@ -55,13 +55,17 @@ export function onAppEvent(handler: (event: AppEvent) => void): () => void {
 	let unlisten: (() => void) | undefined;
 	listen<AppEvent>("samokod://event", (event) => {
 		handler(event.payload);
-	}).then((stop) => {
-		if (cancelled) {
-			stop();
-		} else {
-			unlisten = stop;
-		}
-	});
+	})
+		.then((stop) => {
+			if (cancelled) {
+				stop();
+			} else {
+				unlisten = stop;
+			}
+		})
+		.catch((error: unknown) => {
+			console.warn("failed to subscribe to app events", error);
+		});
 	return () => {
 		cancelled = true;
 		unlisten?.();

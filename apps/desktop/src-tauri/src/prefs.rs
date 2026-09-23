@@ -1,8 +1,8 @@
 // Local preferences: recent repos, the last opened repo, and per-repo model
 // choices. Persisted as JSON under the OS app-data directory resolved through
 // the Tauri path API.
-// All helpers are pure over an explicit directory so tests never touch the
-// real profile.
+// Record and lookup helpers stay pure over an explicit directory so tests
+// never touch the real profile; loading logs its failures and falls back.
 use std::path::Path;
 
 use crate::types::{Prefs, RecentRepo};
@@ -10,14 +10,31 @@ use crate::types::{Prefs, RecentRepo};
 const PREFS_FILE: &str = "samokod-prefs.json";
 const MAX_RECENT: usize = 10;
 
-/// Load prefs from a directory. Missing or corrupt files yield defaults.
+/// Load prefs from a directory. Missing files yield defaults quietly; read
+/// and parse failures are logged and also yield defaults.
 pub fn load_prefs(dir: &Path) -> Prefs {
     let path = dir.join(PREFS_FILE);
-    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            log::debug!("no prefs file at {}, using defaults", path.display());
+            return Prefs::default();
+        }
+        Err(error) => {
+            log::warn!("failed to read {}: {error}", path.display());
+            return Prefs::default();
+        }
+    };
     if text.trim().is_empty() {
         return Prefs::default();
     }
-    serde_json::from_str(&text).unwrap_or_default()
+    match serde_json::from_str(&text) {
+        Ok(prefs) => prefs,
+        Err(error) => {
+            log::warn!("failed to parse {}: {error}", path.display());
+            Prefs::default()
+        }
+    }
 }
 
 /// Save prefs to a directory. Creates the directory when needed.

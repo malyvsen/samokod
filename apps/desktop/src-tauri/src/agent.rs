@@ -100,13 +100,14 @@ impl AgentManager {
         let connection = self.ensure_connection().await?;
         if let Some((old_connection, old_id, supports_close)) = self.session_snapshot()
             && supports_close
-        {
-            let _ = old_connection
+            && let Err(error) = old_connection
                 .send_request(acp::CloseSessionRequest::new(acp::SessionId::new(
                     old_id.as_str(),
                 )))
                 .block_task()
-                .await;
+                .await
+        {
+            log::warn!("failed to close previous session {old_id}: {error}");
         }
         let response = connection
             .send_request(acp::build_new_session_request(&repo_root))
@@ -139,7 +140,7 @@ impl AgentManager {
                 applied_model,
             );
         }
-        let _ = self.app.emit("samokod://event", AppEvent::SessionReset);
+        emit_event(&self.app, AppEvent::SessionReset);
         Ok(SessionInfo {
             session_id,
             repo_root: repo_root.to_string_lossy().to_string(),
@@ -171,10 +172,15 @@ impl AgentManager {
             .map_err(|error| AgentError::RequestFailed {
                 raw: error.to_string(),
             })?;
-        if config_id == "model"
-            && let Ok(mut state) = self.state.lock()
-        {
-            state.last_model = Some(value);
+        if config_id == "model" {
+            match self.state.lock() {
+                Ok(mut state) => {
+                    state.last_model = Some(value);
+                }
+                Err(error) => {
+                    log::warn!("failed to remember model choice: {error}");
+                }
+            }
         }
         Ok(config_views(&response.config_options))
     }
@@ -193,11 +199,13 @@ impl AgentManager {
     /// Resend the last prompt. When the transport is closed, reopen the
     /// session on the same root first. Returns false when nothing ran.
     pub async fn retry_last(&self) -> Result<bool, AgentError> {
-        let text = self
-            .state
-            .lock()
-            .ok()
-            .and_then(|state| state.last_prompt.clone());
+        let text = match self.state.lock() {
+            Ok(state) => state.last_prompt.clone(),
+            Err(error) => {
+                log::warn!("failed to read last prompt: {error}");
+                None
+            }
+        };
         let Some(text) = text else {
             return Ok(false);
         };
@@ -244,19 +252,26 @@ impl AgentManager {
             match connection.send_request(prompt).block_task().await {
                 Ok(_) => {
                     set_working(&state, false);
-                    let _ = app.emit("samokod://event", AppEvent::TurnDone);
+                    emit_event(&app, AppEvent::TurnDone);
                 }
                 Err(error) => {
                     let raw = error.to_string();
                     let transport_gone = is_transport_error(&raw);
                     set_working(&state, false);
-                    if transport_gone && let Ok(mut guard) = state.lock() {
-                        guard.connection = None;
-                        guard.session_id = None;
+                    if transport_gone {
+                        match state.lock() {
+                            Ok(mut guard) => {
+                                guard.connection = None;
+                                guard.session_id = None;
+                            }
+                            Err(error) => {
+                                log::warn!("failed to drop dead agent connection: {error}");
+                            }
+                        }
                     }
                     let hint = classify_error(&raw);
-                    let _ = app.emit(
-                        "samokod://event",
+                    emit_event(
+                        &app,
                         AppEvent::TurnFailed {
                             raw,
                             hint: hint.text,
@@ -278,9 +293,11 @@ impl AgentManager {
                     raw: "no active turn".to_string(),
                 })?;
         cancel_pending(&self.state);
-        let _ = connection.send_notification(acp::build_cancel_notification(acp::SessionId::new(
-            session_id,
-        )));
+        if let Err(error) = connection.send_notification(acp::build_cancel_notification(
+            acp::SessionId::new(session_id),
+        )) {
+            log::warn!("failed to send session cancel: {error}");
+        }
         set_working(&self.state, false);
         Ok(())
     }
@@ -306,7 +323,9 @@ impl AgentManager {
                     Some(id) => PermissionDecision::Selected(id),
                     None => PermissionDecision::Cancelled,
                 };
-                let _ = sender.send(decision);
+                if sender.send(decision).is_err() {
+                    log::debug!("permission decision receiver gone for {tool_call_id}");
+                }
                 Ok(())
             }
             None => Err(AgentError::RequestFailed {
@@ -322,8 +341,13 @@ impl AgentManager {
             if !connection.is_incoming_closed() {
                 return Ok(connection);
             }
-            if let Ok(mut state) = self.state.lock() {
-                state.connection = None;
+            match self.state.lock() {
+                Ok(mut state) => {
+                    state.connection = None;
+                }
+                Err(error) => {
+                    log::warn!("failed to drop closed agent connection: {error}");
+                }
             }
         }
         let binary = acp::resolve_opencode_binary()?;
@@ -383,28 +407,34 @@ impl AgentManager {
                                 .close
                                 .is_some();
                         }
-                        if let Some(tx) = ready.lock().expect("ready poisoned").take() {
-                            let _ = tx.send(Ok(()));
+                        if let Some(tx) = ready.lock().expect("ready poisoned").take()
+                            && tx.send(Ok(())).is_err()
+                        {
+                            log::debug!("agent ready receiver gone during initialize");
                         }
                         connection.incoming_closed().await;
                         Ok(())
                     }
                 })
                 .await;
-            if let Err(error) = result
-                && let Some(tx) = ready_for_error.lock().expect("ready poisoned").take()
-            {
+            if let Err(error) = result {
                 let raw = error.to_string();
-                let hint = classify_error(&raw);
-                let _ = exit_app.emit(
-                    "samokod://event",
-                    AppEvent::AgentExited {
-                        raw: raw.clone(),
-                        hint: hint.text,
-                        retryable: hint.retryable,
-                    },
-                );
-                let _ = tx.send(Err(raw));
+                if let Some(tx) = ready_for_error.lock().expect("ready poisoned").take() {
+                    let hint = classify_error(&raw);
+                    emit_event(
+                        &exit_app,
+                        AppEvent::AgentExited {
+                            raw: raw.clone(),
+                            hint: hint.text,
+                            retryable: hint.retryable,
+                        },
+                    );
+                    if tx.send(Err(raw)).is_err() {
+                        log::debug!("agent startup receiver gone");
+                    }
+                } else {
+                    log::warn!("agent task failed after startup: {raw}");
+                }
             }
         });
 
@@ -422,7 +452,7 @@ impl AgentManager {
     }
 
     fn reopen_snapshot(&self) -> Option<(PathBuf, String, Option<String>)> {
-        let state = self.state.lock().ok()?;
+        let state = lock_state(&self.state)?;
         Some((
             state.repo_root.clone()?,
             state.branch.clone(),
@@ -431,14 +461,11 @@ impl AgentManager {
     }
 
     fn connection_snapshot(&self) -> Option<ConnectionTo<Agent>> {
-        self.state
-            .lock()
-            .ok()
-            .and_then(|state| state.connection.clone())
+        lock_state(&self.state).and_then(|state| state.connection.clone())
     }
 
     fn session_snapshot(&self) -> Option<(ConnectionTo<Agent>, String, bool)> {
-        let state = self.state.lock().ok()?;
+        let state = lock_state(&self.state)?;
         Some((
             state.connection.clone()?,
             state.session_id.clone()?,
@@ -447,19 +474,45 @@ impl AgentManager {
     }
 }
 
-fn set_working(state: &Mutex<State>, working: bool) {
-    if let Ok(mut guard) = state.lock() {
-        guard.set_working(working);
+/// Emit one app event. Emissions are fire-and-forget, but a failure desyncs
+/// the UI from the agent, so it is always logged.
+fn emit_event(app: &AppHandle, event: AppEvent) {
+    if let Err(error) = app.emit("samokod://event", event) {
+        log::warn!("failed to emit app event: {error}");
     }
 }
 
+/// Lock agent state. A poisoned mutex means a prior panic elsewhere; log it
+/// instead of silently dropping the update.
+fn lock_state(state: &Mutex<State>) -> Option<std::sync::MutexGuard<'_, State>> {
+    match state.lock() {
+        Ok(guard) => Some(guard),
+        Err(error) => {
+            log::warn!("agent state lock poisoned: {error}");
+            None
+        }
+    }
+}
+
+fn set_working(state: &Mutex<State>, working: bool) {
+    let Some(mut guard) = lock_state(state) else {
+        return;
+    };
+    guard.set_working(working);
+}
+
 fn cancel_pending(state: &Mutex<State>) {
-    let senders: Vec<tokio::sync::oneshot::Sender<PermissionDecision>> = state
-        .lock()
-        .map(|mut guard| guard.pending.drain().map(|(_, sender)| sender).collect())
-        .unwrap_or_default();
+    let senders: Vec<tokio::sync::oneshot::Sender<PermissionDecision>> = match state.lock() {
+        Ok(mut guard) => guard.pending.drain().map(|(_, sender)| sender).collect(),
+        Err(error) => {
+            log::warn!("failed to cancel pending permissions: {error}");
+            Vec::new()
+        }
+    };
     for sender in senders {
-        let _ = sender.send(PermissionDecision::Cancelled);
+        if sender.send(PermissionDecision::Cancelled).is_err() {
+            log::debug!("pending permission receiver gone during cancel");
+        }
     }
 }
 
@@ -469,20 +522,30 @@ async fn handle_permission_request(
     request: acp::RequestPermissionRequest,
     responder: agent_client_protocol::Responder<acp::RequestPermissionResponse>,
 ) {
-    let current = state.lock().ok().and_then(|guard| guard.session_id.clone());
+    let current = lock_state(state).and_then(|guard| guard.session_id.clone());
     if let Some(current) = current
         && request.session_id.to_string() != current
     {
-        let _ = responder.respond(acp::RequestPermissionResponse::new(
-            acp::RequestPermissionOutcome::Cancelled,
-        ));
+        if responder
+            .respond(acp::RequestPermissionResponse::new(
+                acp::RequestPermissionOutcome::Cancelled,
+            ))
+            .is_err()
+        {
+            log::debug!("permission responder gone for stale session");
+        }
         return;
     }
     let options = crate::permissions::to_view(&request.options);
     if options.is_empty() {
-        let _ = responder.respond(acp::RequestPermissionResponse::new(
-            acp::RequestPermissionOutcome::Cancelled,
-        ));
+        if responder
+            .respond(acp::RequestPermissionResponse::new(
+                acp::RequestPermissionOutcome::Cancelled,
+            ))
+            .is_err()
+        {
+            log::debug!("permission responder gone for empty options");
+        }
         return;
     }
     let tool_call_id = request.tool_call.tool_call_id.to_string();
@@ -501,32 +564,56 @@ async fn handle_permission_request(
         rule_hint: crate::permissions::rule_hint(request.tool_call.fields.name.as_deref()),
     };
     let (tx, rx) = tokio::sync::oneshot::channel::<PermissionDecision>();
-    if let Ok(mut guard) = state.lock() {
+    {
+        let Some(mut guard) = lock_state(state) else {
+            if responder
+                .respond(acp::RequestPermissionResponse::new(
+                    acp::RequestPermissionOutcome::Cancelled,
+                ))
+                .is_err()
+            {
+                log::debug!("permission responder gone while state locked");
+            }
+            return;
+        };
         guard.pending.insert(tool_call_id.clone(), tx);
     }
-    let _ = app.emit("samokod://event", AppEvent::PermissionAsked { permission });
-    let decision = rx.await.unwrap_or(PermissionDecision::Cancelled);
-    if let Ok(mut guard) = state.lock() {
+    emit_event(app, AppEvent::PermissionAsked { permission });
+    let decision = match rx.await {
+        Ok(decision) => decision,
+        Err(_) => {
+            log::debug!("permission decision sender gone; treating as cancelled");
+            PermissionDecision::Cancelled
+        }
+    };
+    if let Some(mut guard) = lock_state(state) {
         guard.pending.remove(&tool_call_id);
     }
     match decision {
         PermissionDecision::Selected(option_id) => {
-            let _ = responder.respond(acp::RequestPermissionResponse::new(
-                acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome::new(
-                    acp::PermissionOptionId::new(option_id),
-                )),
-            ));
+            if responder
+                .respond(acp::RequestPermissionResponse::new(
+                    acp::RequestPermissionOutcome::Selected(acp::SelectedPermissionOutcome::new(
+                        acp::PermissionOptionId::new(option_id),
+                    )),
+                ))
+                .is_err()
+            {
+                log::debug!("permission responder gone after allow");
+            }
         }
         PermissionDecision::Cancelled => {
-            let _ = responder.respond(acp::RequestPermissionResponse::new(
-                acp::RequestPermissionOutcome::Cancelled,
-            ));
+            if responder
+                .respond(acp::RequestPermissionResponse::new(
+                    acp::RequestPermissionOutcome::Cancelled,
+                ))
+                .is_err()
+            {
+                log::debug!("permission responder gone after cancel");
+            }
         }
     }
-    let _ = app.emit(
-        "samokod://event",
-        AppEvent::PermissionResolved { tool_call_id },
-    );
+    emit_event(app, AppEvent::PermissionResolved { tool_call_id });
 }
 
 fn handle_notification(
@@ -534,32 +621,32 @@ fn handle_notification(
     app: &AppHandle,
     notification: &acp::SessionNotification,
 ) {
-    let current = state.lock().ok().and_then(|guard| guard.session_id.clone());
+    let current = lock_state(state).and_then(|guard| guard.session_id.clone());
     if let Some(current) = current
         && notification.session_id.to_string() != current
     {
         return;
     }
     if let Some(chunk) = crate::updates::agent_text_of(&notification.update) {
-        let _ = app.emit("samokod://event", AppEvent::AgentText { chunk });
+        emit_event(app, AppEvent::AgentText { chunk });
     }
     match &notification.update {
         acp::SessionUpdate::ToolCall(call) => {
             let line = crate::updates::format_tool_line(call);
-            let _ = app.emit("samokod://event", AppEvent::ToolLine { line });
+            emit_event(app, AppEvent::ToolLine { line });
             track_tool_call(state, app, call);
         }
         acp::SessionUpdate::ToolCallUpdate(update) => {
             let line = crate::updates::format_tool_update(update);
-            let _ = app.emit("samokod://event", AppEvent::ToolLine { line });
+            emit_event(app, AppEvent::ToolLine { line });
             track_tool_update(state, app, update);
         }
         acp::SessionUpdate::UsageUpdate(update) => {
-            let _ = app.emit("samokod://event", spend_tick(update));
+            emit_event(app, spend_tick(update));
         }
         acp::SessionUpdate::ConfigOptionUpdate(update) => {
             let options = config_views(&update.config_options);
-            let _ = app.emit("samokod://event", AppEvent::ConfigOptions { options });
+            emit_event(app, AppEvent::ConfigOptions { options });
         }
         _ => {}
     }
@@ -571,7 +658,7 @@ fn track_tool_call(state: &Mutex<State>, app: &AppHandle, call: &acp::ToolCall) 
     let id = call.tool_call_id.to_string();
     let name = call.name.clone();
     if let Some(tool) = name.as_ref()
-        && let Ok(mut guard) = state.lock()
+        && let Some(mut guard) = lock_state(state)
     {
         guard.tool_names.insert(id.clone(), tool.clone());
     }
@@ -601,24 +688,21 @@ fn track_tool_update(state: &Mutex<State>, app: &AppHandle, update: &acp::ToolCa
     if matches!(
         update.fields.status,
         Some(ToolCallStatus::Completed) | Some(ToolCallStatus::Failed)
-    ) && let Ok(mut guard) = state.lock()
+    ) && let Some(mut guard) = lock_state(state)
     {
         guard.tool_names.remove(&id);
     }
 }
 
 fn tool_name(state: &Mutex<State>, tool_call_id: &str) -> Option<String> {
-    state
-        .lock()
-        .ok()
-        .and_then(|guard| guard.tool_names.get(tool_call_id).cloned())
+    lock_state(state).and_then(|guard| guard.tool_names.get(tool_call_id).cloned())
 }
 
 /// Replace the held list with a fresh `todowrite` payload and emit when it
 /// moved. Identical lists stay silent.
 fn update_todos(state: &Mutex<State>, app: &AppHandle, payload: &serde_json::Value) {
     let fresh = parse_todos(payload);
-    let Ok(mut guard) = state.lock() else {
+    let Some(mut guard) = lock_state(state) else {
         return;
     };
     if fresh == guard.todos {
@@ -627,8 +711,8 @@ fn update_todos(state: &Mutex<State>, app: &AppHandle, payload: &serde_json::Val
     let changes = diff_todos(&guard.todos, &fresh);
     guard.todos = fresh.clone();
     drop(guard);
-    let _ = app.emit(
-        "samokod://event",
+    emit_event(
+        app,
         AppEvent::TodosChanged {
             todos: fresh,
             changes,
@@ -645,10 +729,13 @@ fn spend_tick(update: &acp::UsageUpdate) -> AppEvent {
 }
 
 async fn pin_build_mode(connection: &ConnectionTo<Agent>, session_id: &acp::SessionId) {
-    let _ = connection
+    if let Err(error) = connection
         .send_request(acp::build_set_config_request(session_id, "mode", "build"))
         .block_task()
-        .await;
+        .await
+    {
+        log::warn!("failed to pin session {session_id} to build mode: {error}");
+    }
 }
 
 async fn set_model_value(
@@ -656,11 +743,17 @@ async fn set_model_value(
     session_id: &acp::SessionId,
     model: &str,
 ) -> bool {
-    connection
+    match connection
         .send_request(acp::build_set_config_request(session_id, "model", model))
         .block_task()
         .await
-        .is_ok()
+    {
+        Ok(_) => true,
+        Err(error) => {
+            log::warn!("failed to reapply stored model {model}: {error}");
+            false
+        }
+    }
 }
 
 fn apply_model_override(options: &mut [ConfigOptionView], model: &str) {

@@ -45,7 +45,9 @@ async fn open_repo(
         .map_err(|error| error.to_string())?;
     let mut prefs = load_prefs(&dir);
     record_open(&mut prefs, &info.root, &info.branch);
-    let _ = save_prefs(&dir, &prefs);
+    if let Err(error) = save_prefs(&dir, &prefs) {
+        log::warn!("failed to save prefs after opening {}: {error}", info.root);
+    }
     Ok(session)
 }
 
@@ -108,16 +110,22 @@ async fn set_config_option(
         let mut prefs = load_prefs(&dir);
         if let Some(repo) = prefs.last_repo.clone() {
             record_model(&mut prefs, &repo, &value);
-            let _ = save_prefs(&dir, &prefs);
+            if let Err(error) = save_prefs(&dir, &prefs) {
+                log::warn!("failed to save model choice for {repo}: {error}");
+            }
         }
     }
     Ok(options)
 }
 
 fn prefs_dir(app: &AppHandle) -> PathBuf {
-    app.path()
-        .app_data_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
+    match app.path().app_data_dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            log::warn!("failed to resolve app data dir, using cwd: {error}");
+            PathBuf::from(".")
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
