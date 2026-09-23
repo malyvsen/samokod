@@ -8,11 +8,13 @@ use tauri::{AppHandle, Emitter};
 
 use crate::acp::{
     self, AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, SessionConfigKind,
-    SessionConfigOption, SessionConfigSelectOptions,
+    SessionConfigOption, SessionConfigSelectOptions, ToolCallStatus,
 };
 use crate::error_hint::{classify_error, is_transport_error};
+use crate::spend::{TokenSums, context_pct};
+use crate::todos::{diff_todos, is_todowrite, parse_todos};
 use crate::types::{
-    AgentError, AppEvent, ConfigOptionView, ConfigValueView, PermissionView, SessionInfo,
+    AgentError, AppEvent, ConfigOptionView, ConfigValueView, PermissionView, SessionInfo, TodoView,
 };
 
 /// User decision for one permission card.
@@ -33,6 +35,31 @@ struct State {
     last_prompt: Option<String>,
     last_model: Option<String>,
     pending: HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>,
+    todos: Vec<TodoView>,
+    tokens: TokenSums,
+    tool_names: HashMap<String, String>,
+}
+
+impl State {
+    /// Reset every session-scoped field, keeping the agent connection.
+    fn reset_session(
+        &mut self,
+        session_id: String,
+        repo_root: PathBuf,
+        branch: String,
+        model: Option<String>,
+    ) {
+        self.session_id = Some(session_id);
+        self.repo_root = Some(repo_root);
+        self.branch = branch;
+        self.working = false;
+        self.last_prompt = None;
+        self.last_model = model;
+        self.pending.clear();
+        self.todos.clear();
+        self.tokens = TokenSums::default();
+        self.tool_names.clear();
+    }
 }
 
 pub struct AgentManager {
@@ -92,14 +119,14 @@ impl AgentManager {
         }
         {
             let mut state = self.state.lock().expect("state poisoned");
-            state.session_id = Some(session_id.clone());
-            state.repo_root = Some(repo_root.clone());
-            state.branch = branch.clone();
-            state.working = false;
-            state.last_prompt = None;
-            state.last_model = applied_model;
-            state.pending.clear();
+            state.reset_session(
+                session_id.clone(),
+                repo_root.clone(),
+                branch.clone(),
+                applied_model,
+            );
         }
+        let _ = self.app.emit("samokod://event", AppEvent::SessionReset);
         Ok(SessionInfo {
             session_id,
             repo_root: repo_root.to_string_lossy().to_string(),
@@ -197,7 +224,12 @@ impl AgentManager {
                 vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
             );
             match connection.send_request(prompt).block_task().await {
-                Ok(_) => {
+                Ok(response) => {
+                    if let Some(usage) = response.usage
+                        && let Ok(mut guard) = state.lock()
+                    {
+                        crate::spend::add_usage(&mut guard.tokens, &usage);
+                    }
                     set_working(&state, false);
                     let _ = app.emit("samokod://event", AppEvent::TurnDone);
                 }
@@ -502,10 +534,15 @@ fn handle_notification(
         acp::SessionUpdate::ToolCall(call) => {
             let line = crate::updates::format_tool_line(call);
             let _ = app.emit("samokod://event", AppEvent::ToolLine { line });
+            track_tool_call(state, app, call);
         }
         acp::SessionUpdate::ToolCallUpdate(update) => {
             let line = crate::updates::format_tool_update(update);
             let _ = app.emit("samokod://event", AppEvent::ToolLine { line });
+            track_tool_update(state, app, update);
+        }
+        acp::SessionUpdate::UsageUpdate(update) => {
+            emit_spend(state, app, update);
         }
         acp::SessionUpdate::ConfigOptionUpdate(update) => {
             let options = config_views(&update.config_options);
@@ -513,6 +550,92 @@ fn handle_notification(
         }
         _ => {}
     }
+}
+
+/// Remember the programmatic tool name for later updates, and refresh the
+/// todo list from `todowrite` input when present.
+fn track_tool_call(state: &Mutex<State>, app: &AppHandle, call: &acp::ToolCall) {
+    let id = call.tool_call_id.to_string();
+    let name = call.name.clone();
+    if let Some(tool) = name.as_ref()
+        && let Ok(mut guard) = state.lock()
+    {
+        guard.tool_names.insert(id.clone(), tool.clone());
+    }
+    if let Some(raw) = call.raw_input.as_ref()
+        && is_todowrite(name.as_deref())
+    {
+        update_todos(state, app, raw);
+    }
+}
+
+/// Attribute a tool update via the tracked name (falling back to the update's
+/// own), refresh the todo list from `todowrite` results, and forget finished
+/// calls.
+fn track_tool_update(state: &Mutex<State>, app: &AppHandle, update: &acp::ToolCallUpdate) {
+    let id = update.tool_call_id.to_string();
+    let name = update.fields.name.clone().or_else(|| tool_name(state, &id));
+    if is_todowrite(name.as_deref()) {
+        let payload = update
+            .fields
+            .raw_output
+            .as_ref()
+            .or(update.fields.raw_input.as_ref());
+        if let Some(raw) = payload {
+            update_todos(state, app, raw);
+        }
+    }
+    if matches!(
+        update.fields.status,
+        Some(ToolCallStatus::Completed) | Some(ToolCallStatus::Failed)
+    ) && let Ok(mut guard) = state.lock()
+    {
+        guard.tool_names.remove(&id);
+    }
+}
+
+fn tool_name(state: &Mutex<State>, tool_call_id: &str) -> Option<String> {
+    state
+        .lock()
+        .ok()
+        .and_then(|guard| guard.tool_names.get(tool_call_id).cloned())
+}
+
+/// Replace the held list with a fresh `todowrite` payload and emit when it
+/// moved. Identical lists stay silent.
+fn update_todos(state: &Mutex<State>, app: &AppHandle, payload: &serde_json::Value) {
+    let fresh = parse_todos(payload);
+    let Ok(mut guard) = state.lock() else {
+        return;
+    };
+    if fresh == guard.todos {
+        return;
+    }
+    let changes = diff_todos(&guard.todos, &fresh);
+    guard.todos = fresh.clone();
+    drop(guard);
+    let _ = app.emit(
+        "samokod://event",
+        AppEvent::TodosChanged {
+            todos: fresh,
+            changes,
+        },
+    );
+}
+
+/// Fold a `usage_update` into a spend tick with the latest token totals.
+fn emit_spend(state: &Mutex<State>, app: &AppHandle, update: &acp::UsageUpdate) {
+    let Ok(guard) = state.lock() else {
+        return;
+    };
+    let tick = AppEvent::SpendTick {
+        cost: update.cost.as_ref().map(|cost| cost.amount).unwrap_or(0.0),
+        tokens_in: guard.tokens.input,
+        tokens_out: guard.tokens.output,
+        ctx_pct: context_pct(update.used, update.size),
+    };
+    drop(guard);
+    let _ = app.emit("samokod://event", tick);
 }
 
 async fn pin_build_mode(connection: &ConnectionTo<Agent>, session_id: &acp::SessionId) {

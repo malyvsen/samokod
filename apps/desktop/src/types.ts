@@ -51,6 +51,17 @@ export interface PermissionView {
 	rule_hint: string;
 }
 
+interface TodoView {
+	content: string;
+	status: string;
+	priority: string;
+}
+
+interface TodoChangeView {
+	content: string;
+	status: string;
+}
+
 export type AppEvent =
 	| { type: "agent_text"; chunk: string }
 	| { type: "tool_line"; line: ToolLineView }
@@ -59,7 +70,16 @@ export type AppEvent =
 	| { type: "agent_exited"; raw: string; hint: string; retryable: boolean }
 	| { type: "permission_asked"; permission: PermissionView }
 	| { type: "permission_resolved"; tool_call_id: string }
-	| { type: "config_options"; options: ConfigOptionView[] };
+	| { type: "config_options"; options: ConfigOptionView[] }
+	| { type: "todos_changed"; todos: TodoView[]; changes: TodoChangeView[] }
+	| {
+			type: "spend_tick";
+			cost: number;
+			tokens_in: number;
+			tokens_out: number;
+			ctx_pct: number;
+	  }
+	| { type: "session_reset" };
 
 export type TranscriptItem =
 	| { kind: "user"; id: string; text: string }

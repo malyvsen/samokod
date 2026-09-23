@@ -6,11 +6,12 @@ pub use agent_client_protocol::schema::v1::{
     RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigId, SessionConfigKind,
     SessionConfigOption, SessionConfigOptionValue, SessionConfigSelectOptions,
     SessionConfigValueId, SessionId, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, TextContent, ToolCall, ToolCallUpdate, ToolKind,
+    SetSessionConfigOptionRequest, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind,
+    Usage, UsageUpdate,
 };
 #[cfg(test)]
 pub use agent_client_protocol::schema::v1::{
-    ContentChunk, SessionConfigSelectOption, ToolCallStatus, ToolCallUpdateFields,
+    ContentChunk, PromptResponse, SessionConfigSelectOption, ToolCallUpdateFields,
 };
 use agent_client_protocol::schema::{
     ProtocolVersion,
@@ -128,5 +129,23 @@ mod tests {
             return;
         }
         assert!(resolve_opencode_binary().is_ok());
+    }
+
+    #[test]
+    fn prompt_response_without_usage_decodes_to_none() {
+        let response: PromptResponse =
+            serde_json::from_value(serde_json::json!({"stopReason": "end_turn"}))
+                .expect("older agents omit usage");
+        assert!(response.usage.is_none());
+    }
+
+    #[test]
+    fn usage_update_without_cost_decodes_to_none() {
+        let update: UsageUpdate = serde_json::from_value(
+            serde_json::json!({"sessionUpdate": "usage_update", "used": 1, "size": 2}),
+        )
+        .expect("cost is optional");
+        assert!(update.cost.is_none());
+        assert_eq!(update.used, 1);
     }
 }

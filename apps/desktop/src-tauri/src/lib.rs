@@ -5,6 +5,8 @@ mod error_hint;
 mod permissions;
 mod prefs;
 mod repo;
+mod spend;
+mod todos;
 mod types;
 mod updates;
 

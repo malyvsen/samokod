@@ -45,7 +45,7 @@ pub struct PermissionView {
 
 /// Frontend event envelope. One Tauri event name carries every variant so
 /// capabilities stay tight.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AppEvent {
     AgentText {
@@ -74,6 +74,32 @@ pub enum AppEvent {
     ConfigOptions {
         options: Vec<ConfigOptionView>,
     },
+    TodosChanged {
+        todos: Vec<TodoView>,
+        changes: Vec<TodoChangeView>,
+    },
+    SpendTick {
+        cost: f64,
+        tokens_in: u64,
+        tokens_out: u64,
+        ctx_pct: f64,
+    },
+    SessionReset,
+}
+
+/// One todo row mirrored from the agent's list.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TodoView {
+    pub content: String,
+    pub status: String,
+    pub priority: String,
+}
+
+/// Changed rows since the previous list: added rows plus status changes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TodoChangeView {
+    pub content: String,
+    pub status: String,
 }
 
 /// One selectable value inside a generic config option.
