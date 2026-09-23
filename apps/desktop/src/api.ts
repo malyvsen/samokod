@@ -47,7 +47,7 @@ export function setConfigOption(
 	configId: string,
 	value: string,
 ): Promise<ConfigOptionView[]> {
-	return invoke("set_config_option", { config_id: configId, value });
+	return invoke("set_config_option", { configId, value });
 }
 
 export function onAppEvent(handler: (event: AppEvent) => void): () => void {

@@ -118,17 +118,21 @@ impl AgentManager {
             })?;
         let session_id = response.session_id.to_string();
         let mut options = config_views(&response.config_options.unwrap_or_default());
-        pin_build_mode(&connection, &acp::SessionId::new(session_id.clone())).await;
+        if let Some(pinned) =
+            pin_build_mode(&connection, &acp::SessionId::new(session_id.clone())).await
+        {
+            options = pinned;
+        }
         let mut applied_model: Option<String> = None;
         if let Some(model) = stored_model
-            && set_model_value(
+            && let Some(updated) = set_model_value(
                 &connection,
                 &acp::SessionId::new(session_id.clone()),
                 &model,
             )
             .await
         {
-            apply_model_override(&mut options, &model);
+            options = updated;
             applied_model = Some(model);
         }
         {
@@ -728,13 +732,20 @@ fn spend_tick(update: &acp::UsageUpdate) -> AppEvent {
     }
 }
 
-async fn pin_build_mode(connection: &ConnectionTo<Agent>, session_id: &acp::SessionId) {
-    if let Err(error) = connection
+async fn pin_build_mode(
+    connection: &ConnectionTo<Agent>,
+    session_id: &acp::SessionId,
+) -> Option<Vec<ConfigOptionView>> {
+    match connection
         .send_request(acp::build_set_config_request(session_id, "mode", "build"))
         .block_task()
         .await
     {
-        log::warn!("failed to pin session {session_id} to build mode: {error}");
+        Ok(response) => Some(config_views(&response.config_options)),
+        Err(error) => {
+            log::warn!("failed to pin session {session_id} to build mode: {error}");
+            None
+        }
     }
 }
 
@@ -742,23 +753,17 @@ async fn set_model_value(
     connection: &ConnectionTo<Agent>,
     session_id: &acp::SessionId,
     model: &str,
-) -> bool {
+) -> Option<Vec<ConfigOptionView>> {
     match connection
         .send_request(acp::build_set_config_request(session_id, "model", model))
         .block_task()
         .await
     {
-        Ok(_) => true,
+        Ok(response) => Some(config_views(&response.config_options)),
         Err(error) => {
             log::warn!("failed to reapply stored model {model}: {error}");
-            false
+            None
         }
-    }
-}
-
-fn apply_model_override(options: &mut [ConfigOptionView], model: &str) {
-    if let Some(option) = options.iter_mut().find(|option| option.id == "model") {
-        option.current_value = model.to_string();
     }
 }
 
