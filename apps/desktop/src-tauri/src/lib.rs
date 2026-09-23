@@ -139,7 +139,6 @@ pub fn run() {
                 tauri_plugin_log::Builder::new()
                     .level(log::LevelFilter::Info)
                     .target(Target::new(TargetKind::Stdout))
-                    .target(Target::new(TargetKind::Webview))
                     .build(),
             )?;
             Ok(())
