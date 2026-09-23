@@ -1,6 +1,7 @@
 // Tauri command edge: thin impure glue over the domain modules.
 mod acp;
 mod agent;
+mod awake;
 mod error_hint;
 mod permissions;
 mod prefs;

@@ -10,6 +10,7 @@ use crate::acp::{
     self, AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, SessionConfigKind,
     SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOptions, ToolCallStatus,
 };
+use crate::awake;
 use crate::error_hint::{classify_error, is_transport_error};
 use crate::spend::context_pct;
 use crate::todos::{diff_todos, is_todowrite, parse_todos};
@@ -33,6 +34,7 @@ struct State {
     repo_root: Option<PathBuf>,
     branch: String,
     working: bool,
+    awake: Option<awake::Guard>,
     last_prompt: Option<String>,
     last_model: Option<String>,
     pending: HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>,
@@ -41,6 +43,18 @@ struct State {
 }
 
 impl State {
+    /// Working and the sleep lock move together.
+    fn set_working(&mut self, working: bool) {
+        self.working = working;
+        if working {
+            if self.awake.is_none() {
+                self.awake = awake::acquire();
+            }
+        } else {
+            self.awake = None;
+        }
+    }
+
     /// Reset every session-scoped field, keeping the agent connection.
     fn reset_session(
         &mut self,
@@ -52,7 +66,7 @@ impl State {
         self.session_id = Some(session_id);
         self.repo_root = Some(repo_root);
         self.branch = branch;
-        self.working = false;
+        self.set_working(false);
         self.last_prompt = None;
         self.last_model = model;
         self.pending.clear();
@@ -217,7 +231,7 @@ impl AgentManager {
                     raw: "a turn is already running".to_string(),
                 });
             }
-            state.working = true;
+            state.set_working(true);
             state.last_prompt = Some(text.clone());
         }
         let state = Arc::clone(&self.state);
@@ -435,7 +449,7 @@ impl AgentManager {
 
 fn set_working(state: &Mutex<State>, working: bool) {
     if let Ok(mut guard) = state.lock() {
-        guard.working = working;
+        guard.set_working(working);
     }
 }
 
@@ -824,6 +838,39 @@ mod tests {
                 None,
             ]
         );
+    }
+
+    #[test]
+    fn working_releases_awake_guard() {
+        let state = Mutex::new(State::default());
+        set_working(&state, true);
+        {
+            let guard = state.lock().expect("state poisoned");
+            assert!(guard.working);
+        }
+        set_working(&state, false);
+        {
+            let guard = state.lock().expect("state poisoned");
+            assert!(!guard.working);
+            assert!(guard.awake.is_none());
+        }
+    }
+
+    #[test]
+    fn reset_session_releases_awake_guard() {
+        let mut state = State {
+            working: true,
+            awake: awake::acquire(),
+            ..Default::default()
+        };
+        state.reset_session(
+            "session".to_string(),
+            PathBuf::from("/tmp"),
+            "main".to_string(),
+            None,
+        );
+        assert!(!state.working);
+        assert!(state.awake.is_none());
     }
 
     async fn open_test_session(
