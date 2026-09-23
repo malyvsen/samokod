@@ -11,15 +11,11 @@ const TODOS: TodoView[] = [
 
 const SPEND_A: SpendView = {
 	cost: 0.42,
-	tokensIn: 148223,
-	tokensOut: 2100,
 	contextPct: 38.4,
 };
 
 const SPEND_B: SpendView = {
 	cost: 0.45,
-	tokensIn: 152223,
-	tokensOut: 2300,
 	contextPct: 41.2,
 };
 
@@ -50,7 +46,6 @@ describe("side panel", () => {
 		expect(screen.getByText("1/3")).toBeInTheDocument();
 		expect(screen.getByText("Add retry")).toBeInTheDocument();
 		expect(screen.getByText("$0.42")).toBeInTheDocument();
-		expect(screen.getByText("148k in / 2.1k out")).toBeInTheDocument();
 		expect(screen.getByText("38% context")).toBeInTheDocument();
 	});
 
@@ -61,7 +56,6 @@ describe("side panel", () => {
 		view.rerender(<SidePanel todos={TODOS} spend={SPEND_B} sessionId="s1" />);
 		settle();
 		expect(screen.getByText("$0.45")).toBeInTheDocument();
-		expect(screen.getByText("152k in / 2.3k out")).toBeInTheDocument();
 		expect(screen.getByText("41% context")).toBeInTheDocument();
 	});
 

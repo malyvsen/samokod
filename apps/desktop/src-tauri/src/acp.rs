@@ -7,11 +7,11 @@ pub use agent_client_protocol::schema::v1::{
     SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
     SessionConfigSelectOptions, SessionConfigValueId, SessionId, SessionNotification,
     SessionUpdate, SetSessionConfigOptionRequest, TextContent, ToolCall, ToolCallStatus,
-    ToolCallUpdate, ToolKind, Usage, UsageUpdate,
+    ToolCallUpdate, ToolKind, UsageUpdate,
 };
 #[cfg(test)]
 pub use agent_client_protocol::schema::v1::{
-    ContentChunk, PromptResponse, SessionConfigSelectOption, ToolCallUpdateFields,
+    ContentChunk, SessionConfigSelectOption, ToolCallUpdateFields,
 };
 use agent_client_protocol::schema::{
     ProtocolVersion,
@@ -129,14 +129,6 @@ mod tests {
             return;
         }
         assert!(resolve_opencode_binary().is_ok());
-    }
-
-    #[test]
-    fn prompt_response_without_usage_decodes_to_none() {
-        let response: PromptResponse =
-            serde_json::from_value(serde_json::json!({"stopReason": "end_turn"}))
-                .expect("older agents omit usage");
-        assert!(response.usage.is_none());
     }
 
     #[test]

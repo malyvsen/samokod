@@ -80,8 +80,6 @@ pub enum AppEvent {
     },
     SpendTick {
         cost: f64,
-        tokens_in: u64,
-        tokens_out: u64,
         ctx_pct: f64,
     },
     SessionReset,

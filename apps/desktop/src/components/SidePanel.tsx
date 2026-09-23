@@ -3,12 +3,8 @@ import { spendLines } from "../spend";
 import { doneCount, todoMark, todoRowClass } from "../todos";
 import type { SpendView, TodoView } from "../types";
 
-const LINE_SPEEDS = [70, 28, 28];
-const EMPTY_LINES: [string, string, string] = [
-	"$0.00",
-	"0 in / 0 out",
-	"0% context",
-];
+const LINE_SPEEDS = [70, 28];
+const EMPTY_LINES: [string, string] = ["$0.00", "0% context"];
 
 export function SidePanel({
 	todos,
@@ -29,13 +25,9 @@ export function SidePanel({
 					{shown[0] ?? ""}
 					{typing === 0 && <Caret />}
 				</b>
-				<span>
+				<span className="context">
 					{shown[1] ?? ""}
 					{typing === 1 && <Caret />}
-				</span>
-				<span className="context">
-					{shown[2] ?? ""}
-					{typing === 2 && <Caret />}
 				</span>
 			</div>
 			<div className="head">

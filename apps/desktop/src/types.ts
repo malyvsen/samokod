@@ -66,8 +66,6 @@ interface TodoChangeView {
 
 export interface SpendView {
 	cost: number;
-	tokensIn: number;
-	tokensOut: number;
 	contextPct: number;
 }
 
@@ -84,8 +82,6 @@ export type AppEvent =
 	| {
 			type: "spend_tick";
 			cost: number;
-			tokens_in: number;
-			tokens_out: number;
 			ctx_pct: number;
 	  }
 	| { type: "session_reset" };

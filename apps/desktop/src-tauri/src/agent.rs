@@ -11,7 +11,7 @@ use crate::acp::{
     SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOptions, ToolCallStatus,
 };
 use crate::error_hint::{classify_error, is_transport_error};
-use crate::spend::{TokenSums, context_pct};
+use crate::spend::context_pct;
 use crate::todos::{diff_todos, is_todowrite, parse_todos};
 use crate::types::{
     AgentError, AppEvent, ConfigOptionValueView, ConfigOptionView, PermissionView, SessionInfo,
@@ -37,7 +37,6 @@ struct State {
     last_model: Option<String>,
     pending: HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>,
     todos: Vec<TodoView>,
-    tokens: TokenSums,
     tool_names: HashMap<String, String>,
 }
 
@@ -58,7 +57,6 @@ impl State {
         self.last_model = model;
         self.pending.clear();
         self.todos.clear();
-        self.tokens = TokenSums::default();
         self.tool_names.clear();
     }
 }
@@ -230,12 +228,7 @@ impl AgentManager {
                 vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
             );
             match connection.send_request(prompt).block_task().await {
-                Ok(response) => {
-                    if let Some(usage) = response.usage
-                        && let Ok(mut guard) = state.lock()
-                    {
-                        crate::spend::add_usage(&mut guard.tokens, &usage);
-                    }
+                Ok(_) => {
                     set_working(&state, false);
                     let _ = app.emit("samokod://event", AppEvent::TurnDone);
                 }
@@ -548,7 +541,7 @@ fn handle_notification(
             track_tool_update(state, app, update);
         }
         acp::SessionUpdate::UsageUpdate(update) => {
-            emit_spend(state, app, update);
+            let _ = app.emit("samokod://event", spend_tick(update));
         }
         acp::SessionUpdate::ConfigOptionUpdate(update) => {
             let options = config_views(&update.config_options);
@@ -629,19 +622,12 @@ fn update_todos(state: &Mutex<State>, app: &AppHandle, payload: &serde_json::Val
     );
 }
 
-/// Fold a `usage_update` into a spend tick with the latest token totals.
-fn emit_spend(state: &Mutex<State>, app: &AppHandle, update: &acp::UsageUpdate) {
-    let Ok(guard) = state.lock() else {
-        return;
-    };
-    let tick = AppEvent::SpendTick {
+/// Spend tick from a `usage_update`. Pure.
+fn spend_tick(update: &acp::UsageUpdate) -> AppEvent {
+    AppEvent::SpendTick {
         cost: update.cost.as_ref().map(|cost| cost.amount).unwrap_or(0.0),
-        tokens_in: guard.tokens.input,
-        tokens_out: guard.tokens.output,
         ctx_pct: context_pct(update.used, update.size),
-    };
-    drop(guard);
-    let _ = app.emit("samokod://event", tick);
+    }
 }
 
 async fn pin_build_mode(connection: &ConnectionTo<Agent>, session_id: &acp::SessionId) {

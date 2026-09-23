@@ -203,8 +203,6 @@ export function App() {
 			case "spend_tick": {
 				setSpend({
 					cost: event.cost,
-					tokensIn: event.tokens_in,
-					tokensOut: event.tokens_out,
 					contextPct: event.ctx_pct,
 				});
 				break;
