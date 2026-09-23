@@ -6,6 +6,12 @@ Run `task init` after creating a fresh worktree.
 
 If pre-commit reports formatting or lint errors, run `task fix`; otherwise fix the underlying error.
 
+# Ownership
+
+OpenCode owns agent state, the app owns the window. The app renders agent capabilities and relays user decisions, but reimplements none of them.
+
+Where OpenCode does not expose something directly, the app infers it from agent state instead of duplicating the capability (e.g. cumulative token counts summed from per-turn usage).
+
 # Coding conventions
 
 1. Follow newspaper style: the most important things in a file should land at its top. This can typically be achieved by placing the top-level callers at the top, and utilities they use below them.
@@ -14,6 +20,12 @@ If pre-commit reports formatting or lint errors, run `task fix`; otherwise fix t
 4. Use the type system to your advantage. Use features such as discriminated unions, exhaustiveness checks, and return type inference. Avoid heavy use of optionals, it's code smell for "you probably should split this type into multiple cases".
 5. Stay at the cutting edge, using new language features and shiny new packages, but don't use pre-release features.
 6. Do not preserve backwards compatibility unless explicitly asked. Update dependents and remove obsolete paths so the codebase stays lean.
+
+# UI conventions
+
+1. UI copy should not use em dashes - if you want to write an em dash, use a hyphen instead.
+2. When the UI names something the coding agent owns, use the agent's terminology (e.g. the panel says TODOS because OpenCode's tool deals in todos).
+3. Text of arbitrary length must never break the layout - rows truncate to single-line ellipsis with the full text in a custom-styled hover tooltip, message bodies wrap instead.
 
 # Commit messages
 
