@@ -20,6 +20,7 @@ Where OpenCode does not expose something directly, the app infers it from agent 
 4. Use the type system to your advantage. Use features such as discriminated unions, exhaustiveness checks, and return type inference. Avoid heavy use of optionals, it's code smell for "you probably should split this type into multiple cases".
 5. Stay at the cutting edge, using new language features and shiny new packages, but don't use pre-release features.
 6. Do not preserve backwards compatibility unless explicitly asked. Update dependents and remove obsolete paths so the codebase stays lean.
+7. Preserve evidence: if you don't propagate an error, log it.
 
 # UI conventions
 
