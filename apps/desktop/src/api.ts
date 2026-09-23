@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AppEvent, Prefs, RepoInfo, SessionInfo } from "./types";
+import type {
+	AppEvent,
+	ConfigOptionView,
+	Prefs,
+	RepoInfo,
+	SessionInfo,
+} from "./types";
 
 export function getPrefs(): Promise<Prefs> {
 	return invoke<Prefs>("get_prefs");
@@ -40,7 +46,7 @@ export function answerPermission(
 export function setConfigOption(
 	configId: string,
 	value: string,
-): Promise<void> {
+): Promise<ConfigOptionView[]> {
 	return invoke("set_config_option", { config_id: configId, value });
 }
 

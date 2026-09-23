@@ -17,7 +17,7 @@ use tauri::{AppHandle, Manager, State};
 use crate::agent::AgentManager;
 use crate::prefs::{load_prefs, record_model, record_open, save_prefs, stored_model};
 use crate::repo::{RepoInfo, validate_repo};
-use crate::types::{Prefs, SessionInfo};
+use crate::types::{ConfigOptionView, Prefs, SessionInfo};
 
 #[tauri::command]
 fn get_prefs(app: AppHandle) -> Result<Prefs, String> {
@@ -97,8 +97,8 @@ async fn set_config_option(
     state: State<'_, AgentManager>,
     config_id: String,
     value: String,
-) -> Result<(), String> {
-    state
+) -> Result<Vec<ConfigOptionView>, String> {
+    let options = state
         .set_config_option(config_id.clone(), value.clone())
         .await
         .map_err(|error| error.to_string())?;
@@ -110,7 +110,7 @@ async fn set_config_option(
             let _ = save_prefs(&dir, &prefs);
         }
     }
-    Ok(())
+    Ok(options)
 }
 
 fn prefs_dir(app: &AppHandle) -> PathBuf {

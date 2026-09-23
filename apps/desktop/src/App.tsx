@@ -49,6 +49,7 @@ export function App() {
 	const appRef = useRef<HTMLDivElement>(null);
 	const notifyEdit = useAuroraMotion(appRef);
 	const transcriptRef = useRef<HTMLDivElement>(null);
+	const configGeneration = useRef(0);
 
 	const status: AgentStatus = awaitingApproval
 		? "approval"
@@ -316,19 +317,17 @@ export function App() {
 
 	async function handleConfigChange(configId: string, value: string) {
 		if (status !== "idle") return;
-		await setConfigOption(configId, value);
-		setSession((current) =>
-			current === null
-				? current
-				: {
-						...current,
-						config_options: current.config_options.map((option) =>
-							option.id === configId
-								? { ...option, currentValue: value }
-								: option,
-						),
-					},
-		);
+		configGeneration.current += 1;
+		const generation = configGeneration.current;
+		try {
+			const options = await setConfigOption(configId, value);
+			if (configGeneration.current !== generation) return;
+			setSession((current) =>
+				current === null ? current : { ...current, config_options: options },
+			);
+		} catch {
+			return;
+		}
 	}
 
 	async function handleRetry() {

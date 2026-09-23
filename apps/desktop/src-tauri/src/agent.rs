@@ -137,17 +137,18 @@ impl AgentManager {
     }
 
     /// Set one session config option without restarting the session.
+    /// Returns the agent's complete option list, including dependent updates.
     pub async fn set_config_option(
         &self,
         config_id: String,
         value: String,
-    ) -> Result<(), AgentError> {
+    ) -> Result<Vec<ConfigOptionView>, AgentError> {
         let (connection, session_id, _) =
             self.session_snapshot()
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "open a repository first".to_string(),
                 })?;
-        connection
+        let response = connection
             .send_request(acp::build_set_config_request(
                 &acp::SessionId::new(session_id),
                 &config_id,
@@ -163,7 +164,7 @@ impl AgentManager {
         {
             state.last_model = Some(value);
         }
-        Ok(())
+        Ok(config_views(&response.config_options))
     }
 
     /// Open a fresh session on the same root, closing the old one when the
