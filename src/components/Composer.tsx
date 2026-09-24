@@ -1,23 +1,18 @@
-import type { AgentStatus, ConfigOptionView } from "../types";
-import { ModelSelector } from "./ModelSelector";
+import type { AgentStatus } from "../types";
 
 export function Composer({
 	status,
 	draft,
-	configOptions,
 	onDraft,
 	onSend,
 	onStop,
-	onConfigChange,
 	onEdit,
 }: {
 	status: AgentStatus;
 	draft: string;
-	configOptions: ConfigOptionView[];
 	onDraft: (text: string) => void;
 	onSend: () => void;
 	onStop: () => void;
-	onConfigChange: (configId: string, value: string) => void;
 	onEdit: () => void;
 }) {
 	const busy = status !== "idle";
@@ -45,11 +40,6 @@ export function Composer({
 							onSend();
 						}
 					}}
-				/>
-				<ModelSelector
-					options={configOptions}
-					disabled={busy}
-					onChange={onConfigChange}
 				/>
 				{busy ? (
 					<button className="send stop" type="button" onClick={onStop}>

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { spendLines } from "../spend";
 import { doneCount, todoMark, todoRowClass } from "../todos";
-import type { SpendView, TodoView } from "../types";
+import type { ConfigOptionView, SpendView, TodoView } from "../types";
+import { EffortPlaceholder, OptionDropdown, splitOptions } from "./selectors";
 
 const LINE_SPEEDS = [70, 28];
 const EMPTY_LINES: [string, string] = ["$0.00", "0% context"];
@@ -10,14 +11,23 @@ export function SidePanel({
 	todos,
 	spend,
 	sessionId,
+	options,
+	disabled,
+	onChange,
 }: {
 	todos: TodoView[];
 	spend: SpendView | null;
 	sessionId: string;
+	options: ConfigOptionView[];
+	disabled: boolean;
+	onChange: (configId: string, value: string) => void;
 }) {
 	const target = spend === null ? EMPTY_LINES : spendLines(spend);
 	const [shown, typing] = useTypedLines(target, sessionId);
 	const done = doneCount(todos);
+	const { model, effort, extras } = splitOptions(options);
+	const hasSelectors =
+		model !== undefined || effort !== undefined || extras.length > 0;
 	return (
 		<div className="side">
 			<div className="cost">
@@ -54,6 +64,40 @@ export function SidePanel({
 						<span className="prio">{todo.priority}</span>
 					</div>
 				))
+			)}
+			{hasSelectors && (
+				<div className="pin">
+					{model !== undefined && (
+						<div className="sect">
+							<div className="slabel">MODEL</div>
+							<OptionDropdown
+								option={model}
+								disabled={disabled}
+								onChange={onChange}
+							/>
+						</div>
+					)}
+					<div className="sect">
+						<div className="slabel">EFFORT</div>
+						{effort !== undefined ? (
+							<OptionDropdown
+								option={effort}
+								disabled={disabled}
+								onChange={onChange}
+							/>
+						) : (
+							<EffortPlaceholder />
+						)}
+					</div>
+					{extras.map((option) => (
+						<OptionDropdown
+							key={option.id}
+							option={option}
+							disabled={disabled}
+							onChange={onChange}
+						/>
+					))}
+				</div>
 			)}
 		</div>
 	);

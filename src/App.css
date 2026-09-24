@@ -987,6 +987,29 @@ body {
 	background: rgba(6, 14, 10, 0.55);
 	padding: 16px 14px;
 	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+}
+
+.side .pin {
+	margin-top: auto;
+	display: grid;
+	gap: 10px;
+}
+
+.side .sect {
+	display: grid;
+	gap: 6px;
+}
+
+.side .slabel {
+	font-size: 11px;
+	letter-spacing: 0.14em;
+	color: #7dffc4;
+}
+
+.side .msel {
+	width: 100%;
 }
 
 .side .head {

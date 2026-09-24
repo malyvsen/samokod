@@ -1,48 +1,21 @@
 import { useState } from "react";
 import type { ConfigOptionValueView, ConfigOptionView } from "../types";
 
-export function ModelSelector({
-	options,
-	disabled,
-	onChange,
-}: {
-	options: ConfigOptionView[];
-	disabled: boolean;
-	onChange: (configId: string, value: string) => void;
-}) {
+export function splitOptions(options: ConfigOptionView[]): {
+	model: ConfigOptionView | undefined;
+	effort: ConfigOptionView | undefined;
+	extras: ConfigOptionView[];
+} {
 	const model = options.find(isModel);
 	const effort = options.find(isEffort);
 	const extras = options.filter(
 		(option) => !isModel(option) && !isEffort(option) && !isMode(option),
 	);
-	return (
-		<>
-			{model !== undefined && (
-				<OptionDropdown
-					option={withSortedValues(model)}
-					disabled={disabled}
-					onChange={onChange}
-				/>
-			)}
-			{effort !== undefined ? (
-				<OptionDropdown
-					option={effort}
-					disabled={disabled}
-					onChange={onChange}
-				/>
-			) : (
-				<EffortPlaceholder />
-			)}
-			{extras.map((option) => (
-				<OptionDropdown
-					key={option.id}
-					option={option}
-					disabled={disabled}
-					onChange={onChange}
-				/>
-			))}
-		</>
-	);
+	return {
+		model: model === undefined ? undefined : withSortedValues(model),
+		effort,
+		extras,
+	};
 }
 
 function categoryOf(option: ConfigOptionView): string {
@@ -70,7 +43,7 @@ function withSortedValues(option: ConfigOptionView): ConfigOptionView {
 	};
 }
 
-function OptionDropdown({
+export function OptionDropdown({
 	option,
 	disabled,
 	onChange,
@@ -121,7 +94,7 @@ function OptionDropdown({
 	);
 }
 
-function EffortPlaceholder() {
+export function EffortPlaceholder() {
 	return (
 		<span className="mwrap">
 			<button className="msel" type="button" disabled>

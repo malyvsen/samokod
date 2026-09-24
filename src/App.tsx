@@ -412,11 +412,9 @@ export function App() {
 							<Composer
 								status={status}
 								draft={draft}
-								configOptions={configOptions}
 								onDraft={setDraft}
 								onSend={handleSend}
 								onStop={handleStop}
-								onConfigChange={handleConfigChange}
 								onEdit={notifyEdit}
 							/>
 						</div>
@@ -424,6 +422,9 @@ export function App() {
 							todos={todos}
 							spend={spend}
 							sessionId={session?.session_id ?? ""}
+							options={configOptions}
+							disabled={status !== "idle"}
+							onChange={handleConfigChange}
 						/>
 					</div>
 				</>
