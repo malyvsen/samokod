@@ -31,7 +31,8 @@ export function RepoPicker({
 					<div className={`rrow${isCurrent ? " current" : ""}`} key={repo.path}>
 						<span>{repo.path}</span>
 						<small>
-							{repo.branch} · {isCurrent ? "current chat" : ""}
+							{repo.branch}
+							{isCurrent ? " · current chat" : ""}
 						</small>
 						{isCurrent ? (
 							<span className="curtag">current</span>
