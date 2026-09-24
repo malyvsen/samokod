@@ -20,6 +20,7 @@ use agent_client_protocol::schema::{
 pub use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo};
 #[cfg(test)]
 pub use agent_client_protocol::{on_receive_notification, on_receive_request};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::types::AgentError;
@@ -31,17 +32,11 @@ pub fn resolve_opencode_binary() -> Result<PathBuf, AgentError> {
     resolve_in_dirs(&candidate_dirs())
 }
 
-/// PATH value for spawning the agent: restored shell dirs first, then
-/// whatever the app process already has, deduplicated. Finding the binary
-/// is not enough; agent tools inherit this environment too.
+/// PATH value for spawning the agent: the search dirs joined back
+/// together. Finding the binary is not enough; agent tools inherit this
+/// environment too.
 pub fn agent_path_value() -> String {
-    let mut seen = std::collections::HashSet::new();
-    let dirs: Vec<PathBuf> = candidate_dirs()
-        .into_iter()
-        .filter(|dir| !dir.as_os_str().is_empty())
-        .filter(|dir| seen.insert(dir.clone()))
-        .collect();
-    std::env::join_paths(dirs)
+    std::env::join_paths(candidate_dirs())
         .map(|paths| paths.to_string_lossy().to_string())
         .unwrap_or_default()
 }
@@ -81,19 +76,23 @@ pub fn internal_error(message: impl ToString) -> agent_client_protocol::Error {
     agent_client_protocol::util::internal_error(message)
 }
 
+/// Shell dirs to search, in priority order: the app process PATH first,
+/// then the macOS path helper and login shells to cover launcher spawns
+/// with a minimal system PATH. Unique and non-empty so both lookup and
+/// PATH construction share one source.
 fn candidate_dirs() -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
     process_path_dirs()
         .into_iter()
         .chain(path_helper_dirs())
         .chain(login_shell_dirs())
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .filter(|dir| seen.insert(dir.clone()))
         .collect()
 }
 
 fn resolve_in_dirs(dirs: &[PathBuf]) -> Result<PathBuf, AgentError> {
-    let mut seen = std::collections::HashSet::new();
     dirs.iter()
-        .filter(|dir| !dir.as_os_str().is_empty())
-        .filter(|dir| seen.insert(dir.as_path()))
         .find_map(|dir| executable_in(dir))
         .ok_or(AgentError::MissingBinary)
 }
@@ -307,17 +306,9 @@ mod tests {
 
     #[test]
     fn agent_path_covers_candidate_dirs_in_order() {
-        let expected = {
-            let mut seen = std::collections::HashSet::new();
-            candidate_dirs()
-                .into_iter()
-                .filter(|dir| !dir.as_os_str().is_empty())
-                .filter(|dir| seen.insert(dir.clone()))
-                .collect::<Vec<_>>()
-        };
         let actual = split_path_value(&agent_path_value());
         assert!(!actual.is_empty());
-        assert_eq!(actual, expected);
+        assert_eq!(actual, candidate_dirs());
     }
 
     #[test]
