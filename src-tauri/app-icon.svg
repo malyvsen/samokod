@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- s glyph outlined from Menlo Bold U+0073; gradient matches the App.css aurora palette. -->
+  <defs>
+    <linearGradient id="beam" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#2b4bff"/>
+      <stop offset="0.38" stop-color="#a05aff"/>
+      <stop offset="0.68" stop-color="#40e0b4"/>
+      <stop offset="1" stop-color="#ffc83c"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" fill="#050508"/>
+  <path d="M13.68 12.4V14.9Q12.89 14.4 12.03 14.14Q11.18 13.88 10.32 13.88Q9.36 13.88 8.87 14.16Q8.38 14.44 8.38 14.98Q8.38 15.76 10.47 16.25L10.58 16.28L11.4 16.48Q12.96 16.85 13.69 17.67Q14.42 18.5 14.42 19.9Q14.42 21.59 13.31 22.44Q12.2 23.28 9.98 23.28Q8.99 23.28 7.96 23.11Q6.92 22.94 5.86 22.6V20.1Q6.8 20.64 7.78 20.92Q8.77 21.2 9.68 21.2Q10.69 21.2 11.21 20.91Q11.72 20.62 11.72 20.06Q11.72 19.51 11.36 19.22Q10.99 18.93 9.62 18.6L8.82 18.42Q7.18 18.05 6.43 17.26Q5.68 16.47 5.68 15.14Q5.68 13.56 6.82 12.68Q7.96 11.8 10.04 11.8Q10.96 11.8 11.89 11.95Q12.81 12.1 13.68 12.4Z" fill="#e8e6e1"/>
+  <rect x="19" y="6" width="8" height="20" fill="url(#beam)"/>
+</svg>
