@@ -1,31 +1,43 @@
-// Todo list derived from `todowrite` tool payloads.
+// Todo list read off tool payloads by shape.
 use crate::types::{TodoChangeView, TodoView};
 
-/// Case-insensitive `todowrite` match on the programmatic tool name.
-pub fn is_todowrite(name: Option<&str>) -> bool {
-    name.is_some_and(|name| name.eq_ignore_ascii_case("todowrite"))
+/// Extract a todo list from a `tool_call` raw input, if it carries one.
+pub fn todos_from_call(raw_input: Option<&serde_json::Value>) -> Option<Vec<TodoView>> {
+    raw_input.and_then(parse_todos)
+}
+
+/// Extract a todo list from a `tool_call_update`, preferring the raw output
+/// over the raw input, if either carries one.
+pub fn todos_from_update(
+    raw_input: Option<&serde_json::Value>,
+    raw_output: Option<&serde_json::Value>,
+) -> Option<Vec<TodoView>> {
+    raw_output
+        .and_then(parse_todos)
+        .or_else(|| raw_input.and_then(parse_todos))
 }
 
 /// Parse a todo list from a raw tool payload. Both shapes are accepted: the
 /// call input (`{todos: [...]}`) and the completed output (`{metadata:
-/// {todos: [...]}}`). Rows missing a field are skipped.
-pub fn parse_todos(payload: &serde_json::Value) -> Vec<TodoView> {
-    let Some(list) = payload
+/// {todos: [...]}}`). Returns `None` when no list is present so callers can
+/// tell "not a todo payload" apart from "cleared list". Rows missing a field
+/// are skipped.
+fn parse_todos(payload: &serde_json::Value) -> Option<Vec<TodoView>> {
+    let list = payload
         .get("todos")
-        .or_else(|| payload.get("metadata").and_then(|meta| meta.get("todos")))
-        .and_then(|todos| todos.as_array())
-    else {
-        return Vec::new();
-    };
-    list.iter()
-        .filter_map(|item| {
-            Some(TodoView {
-                content: item.get("content")?.as_str()?.to_string(),
-                status: item.get("status")?.as_str()?.to_string(),
-                priority: item.get("priority")?.as_str()?.to_string(),
+        .or_else(|| payload.get("metadata").and_then(|meta| meta.get("todos")))?
+        .as_array()?;
+    Some(
+        list.iter()
+            .filter_map(|item| {
+                Some(TodoView {
+                    content: item.get("content")?.as_str()?.to_string(),
+                    status: item.get("status")?.as_str()?.to_string(),
+                    priority: item.get("priority")?.as_str()?.to_string(),
+                })
             })
-        })
-        .collect()
+            .collect(),
+    )
 }
 
 /// Diff a fresh list against the previous one: added rows plus rows whose
@@ -57,12 +69,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn todowrite_name_matches_case_insensitively() {
-        assert!(is_todowrite(Some("todowrite")));
-        assert!(is_todowrite(Some("TodoWrite")));
-        assert!(!is_todowrite(Some("bash")));
-        assert!(!is_todowrite(None));
+    fn todo_items() -> serde_json::Value {
+        json!([
+            {"content": "a", "status": "pending", "priority": "medium"},
+            {"content": "b", "status": "pending", "priority": "medium"},
+        ])
     }
 
     #[test]
@@ -71,7 +82,7 @@ mod tests {
             {"content": "a", "status": "pending", "priority": "high"},
             {"content": "b", "status": "in_progress", "priority": "low"},
         ]});
-        let todos = parse_todos(&payload);
+        let todos = parse_todos(&payload).expect("todos key present");
         assert_eq!(todos.len(), 2);
         assert_eq!(todos[1].status, "in_progress");
     }
@@ -80,9 +91,20 @@ mod tests {
     fn parses_completed_output_shape() {
         let payload = json!({"output": "…", "metadata": {"todos": [
             {"content": "a", "status": "completed", "priority": "high"},
-        ]}});
-        let todos = parse_todos(&payload);
+        ], "truncated": false}});
+        let todos = parse_todos(&payload).expect("metadata.todos present");
         assert_eq!(todos, vec![todo("a", "completed")]);
+    }
+
+    #[test]
+    fn missing_key_returns_none() {
+        assert!(parse_todos(&json!({})).is_none());
+        assert!(parse_todos(&json!({"output": "…", "metadata": {}})).is_none());
+    }
+
+    #[test]
+    fn empty_list_returns_some_empty() {
+        assert_eq!(parse_todos(&json!({"todos": []})), Some(Vec::new()));
     }
 
     #[test]
@@ -91,13 +113,46 @@ mod tests {
             {"content": "a", "status": "pending"},
             {"content": "b", "status": "pending", "priority": "low"},
         ]});
-        assert_eq!(parse_todos(&payload).len(), 1);
+        let todos = parse_todos(&payload).expect("todos key present");
+        assert_eq!(todos.len(), 1);
     }
 
     #[test]
-    fn empty_list_parses_to_empty() {
-        assert!(parse_todos(&json!({"todos": []})).is_empty());
-        assert!(parse_todos(&json!({})).is_empty());
+    fn call_extracts_input() {
+        let todos = todo_items();
+        let raw = json!({"todos": todos});
+        let fresh = todos_from_call(Some(&raw)).expect("input carries todos");
+        assert_eq!(fresh.len(), 2);
+        assert_eq!(fresh[0].content, "a");
+    }
+
+    #[test]
+    fn call_ignores_empty_input() {
+        assert!(todos_from_call(None).is_none());
+        assert!(todos_from_call(Some(&json!({}))).is_none());
+    }
+
+    #[test]
+    fn update_prefers_output_over_input() {
+        let input = json!({"todos": [{"content": "a", "status": "pending", "priority": "high"}]});
+        let output =
+            json!({"output": "…", "metadata": {"todos": todo_items(), "truncated": false}});
+        let fresh = todos_from_update(Some(&input), Some(&output)).expect("output carries todos");
+        assert_eq!(fresh.len(), 2);
+        assert_eq!(fresh[0].content, "a");
+    }
+
+    #[test]
+    fn update_falls_back_to_input() {
+        let input = json!({"todos": todo_items()});
+        let fresh = todos_from_update(Some(&input), None).expect("input carries todos");
+        assert_eq!(fresh.len(), 2);
+    }
+
+    #[test]
+    fn update_ignores_payloads_without_todos() {
+        assert!(todos_from_update(None, None).is_none());
+        assert!(todos_from_update(Some(&json!({})), Some(&json!({"output": "…"}))).is_none());
     }
 
     #[test]

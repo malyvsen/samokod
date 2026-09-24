@@ -6,12 +6,12 @@ pub use agent_client_protocol::schema::v1::{
     RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigId, SessionConfigKind,
     SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
     SessionConfigSelectOptions, SessionConfigValueId, SessionId, SessionNotification,
-    SessionUpdate, SetSessionConfigOptionRequest, TextContent, ToolCall, ToolCallStatus,
-    ToolCallUpdate, ToolKind, UsageUpdate,
+    SessionUpdate, SetSessionConfigOptionRequest, TextContent, ToolCall, ToolCallUpdate, ToolKind,
+    UsageUpdate,
 };
 #[cfg(test)]
 pub use agent_client_protocol::schema::v1::{
-    ContentChunk, SessionConfigSelectOption, ToolCallUpdateFields,
+    ContentChunk, SessionConfigSelectOption, ToolCallStatus, ToolCallUpdateFields,
 };
 use agent_client_protocol::schema::{
     ProtocolVersion,

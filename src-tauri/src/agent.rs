@@ -8,12 +8,12 @@ use tauri::{AppHandle, Emitter};
 
 use crate::acp::{
     self, AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, SessionConfigKind,
-    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOptions, ToolCallStatus,
+    SessionConfigOption, SessionConfigOptionCategory, SessionConfigSelectOptions,
 };
 use crate::awake;
 use crate::error_hint::{classify_error, is_transport_error};
 use crate::spend::context_pct;
-use crate::todos::{diff_todos, is_todowrite, parse_todos};
+use crate::todos::{diff_todos, todos_from_call, todos_from_update};
 use crate::types::{
     AgentError, AppEvent, ConfigOptionValueView, ConfigOptionView, PermissionView, SessionInfo,
     TodoView,
@@ -39,7 +39,6 @@ struct State {
     last_model: Option<String>,
     pending: HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>,
     todos: Vec<TodoView>,
-    tool_names: HashMap<String, String>,
 }
 
 impl State {
@@ -71,7 +70,6 @@ impl State {
         self.last_model = model;
         self.pending.clear();
         self.todos.clear();
-        self.tool_names.clear();
     }
 }
 
@@ -638,12 +636,12 @@ fn handle_notification(
         acp::SessionUpdate::ToolCall(call) => {
             let line = crate::updates::format_tool_line(call);
             emit_event(app, AppEvent::ToolLine { line });
-            track_tool_call(state, app, call);
+            snoop_todos_from_call(state, app, call);
         }
         acp::SessionUpdate::ToolCallUpdate(update) => {
             let line = crate::updates::format_tool_update(update);
             emit_event(app, AppEvent::ToolLine { line });
-            track_tool_update(state, app, update);
+            snoop_todos_from_update(state, app, update);
         }
         acp::SessionUpdate::UsageUpdate(update) => {
             emit_event(app, spend_tick(update));
@@ -656,56 +654,38 @@ fn handle_notification(
     }
 }
 
-/// Remember the programmatic tool name for later updates, and refresh the
-/// todo list from `todowrite` input when present.
-fn track_tool_call(state: &Mutex<State>, app: &AppHandle, call: &acp::ToolCall) {
-    let id = call.tool_call_id.to_string();
-    let name = call.name.clone();
-    if let Some(tool) = name.as_ref()
-        && let Some(mut guard) = lock_state(state)
-    {
-        guard.tool_names.insert(id.clone(), tool.clone());
-    }
-    if let Some(raw) = call.raw_input.as_ref()
-        && is_todowrite(name.as_deref())
-    {
-        update_todos(state, app, raw);
+/// Snoop a todo list off a tool call input, when it carries one.
+fn snoop_todos_from_call(state: &Mutex<State>, app: &AppHandle, call: &acp::ToolCall) {
+    let fresh = todos_from_call(call.raw_input.as_ref());
+    log::debug!(
+        "todo snoop call {} todos {:?}",
+        call.tool_call_id,
+        fresh.as_ref().map(|todos| todos.len()),
+    );
+    if let Some(fresh) = fresh {
+        update_todos(state, app, fresh);
     }
 }
 
-/// Attribute a tool update via the tracked name (falling back to the update's
-/// own), refresh the todo list from `todowrite` results, and forget finished
-/// calls.
-fn track_tool_update(state: &Mutex<State>, app: &AppHandle, update: &acp::ToolCallUpdate) {
-    let id = update.tool_call_id.to_string();
-    let name = update.fields.name.clone().or_else(|| tool_name(state, &id));
-    if is_todowrite(name.as_deref()) {
-        let payload = update
-            .fields
-            .raw_output
-            .as_ref()
-            .or(update.fields.raw_input.as_ref());
-        if let Some(raw) = payload {
-            update_todos(state, app, raw);
-        }
-    }
-    if matches!(
-        update.fields.status,
-        Some(ToolCallStatus::Completed) | Some(ToolCallStatus::Failed)
-    ) && let Some(mut guard) = lock_state(state)
-    {
-        guard.tool_names.remove(&id);
+/// Snoop a todo list off a tool update, preferring the output over the input.
+fn snoop_todos_from_update(state: &Mutex<State>, app: &AppHandle, update: &acp::ToolCallUpdate) {
+    let fresh = todos_from_update(
+        update.fields.raw_input.as_ref(),
+        update.fields.raw_output.as_ref(),
+    );
+    log::debug!(
+        "todo snoop update {} todos {:?}",
+        update.tool_call_id,
+        fresh.as_ref().map(|todos| todos.len()),
+    );
+    if let Some(fresh) = fresh {
+        update_todos(state, app, fresh);
     }
 }
 
-fn tool_name(state: &Mutex<State>, tool_call_id: &str) -> Option<String> {
-    lock_state(state).and_then(|guard| guard.tool_names.get(tool_call_id).cloned())
-}
-
-/// Replace the held list with a fresh `todowrite` payload and emit when it
-/// moved. Identical lists stay silent.
-fn update_todos(state: &Mutex<State>, app: &AppHandle, payload: &serde_json::Value) {
-    let fresh = parse_todos(payload);
+/// Replace the held list with a fresh todo list and emit when it moved.
+/// Identical lists stay silent.
+fn update_todos(state: &Mutex<State>, app: &AppHandle, fresh: Vec<TodoView>) {
     let Some(mut guard) = lock_state(state) else {
         return;
     };
