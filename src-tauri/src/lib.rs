@@ -111,6 +111,20 @@ async fn set_config_option(
     Ok(options)
 }
 
+fn log_level() -> log::LevelFilter {
+    match std::env::var("SAMOKOD_LOG")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "trace" => log::LevelFilter::Trace,
+        "debug" => log::LevelFilter::Debug,
+        "warn" => log::LevelFilter::Warn,
+        "error" => log::LevelFilter::Error,
+        _ => log::LevelFilter::Info,
+    }
+}
+
 fn prefs_dir(app: &AppHandle) -> PathBuf {
     match app.path().app_data_dir() {
         Ok(dir) => dir,
@@ -129,7 +143,7 @@ pub fn run() {
             app.manage(AgentManager::new(app.handle().clone()));
             app.handle().plugin(
                 tauri_plugin_log::Builder::new()
-                    .level(log::LevelFilter::Info)
+                    .level(log_level())
                     .target(Target::new(TargetKind::Stdout))
                     .build(),
             )?;

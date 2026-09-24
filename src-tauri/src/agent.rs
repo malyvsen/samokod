@@ -632,6 +632,10 @@ fn handle_notification(
     if let Some(current) = current
         && notification.session_id.to_string() != current
     {
+        log::debug!(
+            "dropping notification for stale session {}",
+            notification.session_id
+        );
         return;
     }
     if let Some(chunk) = crate::updates::agent_text_of(&notification.update) {
@@ -655,35 +659,39 @@ fn handle_notification(
             let options = config_views(&update.config_options);
             emit_event(app, AppEvent::ConfigOptions { options });
         }
-        _ => {}
+        acp::SessionUpdate::AgentMessageChunk(_) => {}
+        // Already streamed as agent text above. Known-but-unrendered kinds
+        // are routine; an unknown kind means protocol drift.
+        update => match crate::updates::update_kind(update) {
+            Some(kind) => log::debug!("unhandled session update: {kind}"),
+            None => log::warn!("unknown session update: {update:?}"),
+        },
     }
 }
 
 /// Snoop a todo list off a tool call input, when it carries one.
 fn snoop_todos_from_call(state: &Mutex<State>, app: &AppHandle, call: &acp::ToolCall) {
-    let fresh = todos_from_call(call.raw_input.as_ref());
-    log::debug!(
-        "todo snoop call {} todos {:?}",
-        call.tool_call_id,
-        fresh.as_ref().map(|todos| todos.len()),
-    );
-    if let Some(fresh) = fresh {
+    if let Some(fresh) = todos_from_call(call.raw_input.as_ref()) {
+        log::debug!(
+            "todo snoop call {} todos {}",
+            call.tool_call_id,
+            fresh.len()
+        );
         update_todos(state, app, fresh);
     }
 }
 
 /// Snoop a todo list off a tool update, preferring the output over the input.
 fn snoop_todos_from_update(state: &Mutex<State>, app: &AppHandle, update: &acp::ToolCallUpdate) {
-    let fresh = todos_from_update(
+    if let Some(fresh) = todos_from_update(
         update.fields.raw_input.as_ref(),
         update.fields.raw_output.as_ref(),
-    );
-    log::debug!(
-        "todo snoop update {} todos {:?}",
-        update.tool_call_id,
-        fresh.as_ref().map(|todos| todos.len()),
-    );
-    if let Some(fresh) = fresh {
+    ) {
+        log::debug!(
+            "todo snoop update {} todos {}",
+            update.tool_call_id,
+            fresh.len()
+        );
         update_todos(state, app, fresh);
     }
 }

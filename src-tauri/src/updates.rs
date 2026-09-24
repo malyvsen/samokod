@@ -1,4 +1,4 @@
-// Pure mapping from ACP session updates to transcript rows. Every tool
+// Pure mappings for ACP session updates and tool calls. Every tool
 // execution becomes one `▸` status line regardless of kind.
 use crate::acp::{ContentBlock, SessionUpdate, ToolCall, ToolCallUpdate, ToolKind};
 use crate::types::ToolLineView;
@@ -10,6 +10,25 @@ pub fn agent_text_of(update: &SessionUpdate) -> Option<String> {
             ContentBlock::Text(text) => Some(text.text.clone()),
             _ => None,
         },
+        _ => None,
+    }
+}
+
+/// Short label for a session update. `None` means the protocol sent a variant
+/// this client never enumerated. Pure.
+pub fn update_kind(update: &SessionUpdate) -> Option<&'static str> {
+    match update {
+        SessionUpdate::UserMessageChunk(_) => Some("user_message_chunk"),
+        SessionUpdate::AgentMessageChunk(_) => Some("agent_message_chunk"),
+        SessionUpdate::AgentThoughtChunk(_) => Some("agent_thought_chunk"),
+        SessionUpdate::ToolCall(_) => Some("tool_call"),
+        SessionUpdate::ToolCallUpdate(_) => Some("tool_call_update"),
+        SessionUpdate::Plan(_) => Some("plan"),
+        SessionUpdate::AvailableCommandsUpdate(_) => Some("available_commands"),
+        SessionUpdate::CurrentModeUpdate(_) => Some("current_mode"),
+        SessionUpdate::ConfigOptionUpdate(_) => Some("config_option"),
+        SessionUpdate::SessionInfoUpdate(_) => Some("session_info"),
+        SessionUpdate::UsageUpdate(_) => Some("usage"),
         _ => None,
     }
 }
@@ -99,6 +118,15 @@ mod tests {
         let call = ToolCall::new("id-1", "title").kind(ToolKind::Read);
         let update = SessionUpdate::ToolCall(call);
         assert_eq!(agent_text_of(&update), None);
+    }
+
+    #[test]
+    fn update_kind_labels_tool_call() {
+        let call = ToolCall::new("id-1", "title").kind(ToolKind::Read);
+        assert_eq!(
+            update_kind(&SessionUpdate::ToolCall(call)),
+            Some("tool_call")
+        );
     }
 
     #[test]
