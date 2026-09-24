@@ -31,6 +31,21 @@ pub fn resolve_opencode_binary() -> Result<PathBuf, AgentError> {
     resolve_in_dirs(&candidate_dirs())
 }
 
+/// PATH value for spawning the agent: restored shell dirs first, then
+/// whatever the app process already has, deduplicated. Finding the binary
+/// is not enough; agent tools inherit this environment too.
+pub fn agent_path_value() -> String {
+    let mut seen = std::collections::HashSet::new();
+    let dirs: Vec<PathBuf> = candidate_dirs()
+        .into_iter()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .filter(|dir| seen.insert(dir.clone()))
+        .collect();
+    std::env::join_paths(dirs)
+        .map(|paths| paths.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
 /// Build the ACP `initialize` request. The client advertises no filesystem or
 /// terminal capabilities so OpenCode keeps tool execution server-side.
 pub fn build_initialize_request() -> InitializeRequest {
@@ -288,6 +303,21 @@ mod tests {
     fn path_value_splits_on_colon() {
         let dirs = split_path_value("/usr/bin:/bin\n");
         assert_eq!(dirs, vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
+    }
+
+    #[test]
+    fn agent_path_covers_candidate_dirs_in_order() {
+        let expected = {
+            let mut seen = std::collections::HashSet::new();
+            candidate_dirs()
+                .into_iter()
+                .filter(|dir| !dir.as_os_str().is_empty())
+                .filter(|dir| seen.insert(dir.clone()))
+                .collect::<Vec<_>>()
+        };
+        let actual = split_path_value(&agent_path_value());
+        assert!(!actual.is_empty());
+        assert_eq!(actual, expected);
     }
 
     #[test]

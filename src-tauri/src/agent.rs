@@ -358,7 +358,11 @@ impl AgentManager {
             }
         }
         let binary = acp::resolve_opencode_binary()?;
-        let config = AcpAgentConfig::new(binary).arg("acp");
+        let path_value = acp::agent_path_value();
+        log::info!("spawning {} with PATH={}", binary.display(), path_value);
+        let config = AcpAgentConfig::new(binary)
+            .arg("acp")
+            .envs(HashMap::from([("PATH".to_string(), path_value)]));
         let agent = AcpAgent::new(config);
         let slot = Arc::clone(&self.state);
         let notify_state = Arc::clone(&self.state);
