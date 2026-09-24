@@ -23,7 +23,7 @@ use crate::types::{ConfigOptionView, Prefs, SessionInfo};
 
 #[tauri::command]
 fn get_prefs(app: AppHandle) -> Result<Prefs, String> {
-    Ok(load_prefs(&prefs_dir(&app)))
+    Ok(load_prefs(&prefs_dir(&app)?))
 }
 
 #[tauri::command]
@@ -38,7 +38,7 @@ async fn open_repo(
     path: String,
 ) -> Result<SessionInfo, String> {
     let info = validate_repo(&PathBuf::from(&path))?;
-    let dir = prefs_dir(&app);
+    let dir = prefs_dir(&app)?;
     let stored = stored_model(&load_prefs(&dir), &info.root);
     let session = state
         .open_repo(PathBuf::from(&info.root), info.branch.clone(), stored)
@@ -101,7 +101,7 @@ async fn set_config_option(
         && let Some(repo) = state.current_repo()
     {
         let repo = repo.to_string_lossy().to_string();
-        let dir = prefs_dir(&app);
+        let dir = prefs_dir(&app)?;
         let mut prefs = load_prefs(&dir);
         record_model(&mut prefs, &repo, &value);
         if let Err(error) = save_prefs(&dir, &prefs) {
@@ -125,14 +125,12 @@ fn log_level() -> log::LevelFilter {
     }
 }
 
-fn prefs_dir(app: &AppHandle) -> PathBuf {
-    match app.path().app_data_dir() {
-        Ok(dir) => dir,
-        Err(error) => {
-            log::warn!("failed to resolve app data dir, using cwd: {error}");
-            PathBuf::from(".")
-        }
-    }
+fn prefs_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path().app_data_dir().map_err(|error| {
+        let message = format!("failed to resolve app data dir: {error}");
+        log::error!("{message}");
+        message
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
