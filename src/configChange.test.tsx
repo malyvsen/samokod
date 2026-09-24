@@ -100,7 +100,7 @@ async function openChatWith(options: ConfigOptionView[]) {
 	const user = userEvent.setup();
 	render(<App />);
 	await user.click(await screen.findByRole("button", { name: "open" }));
-	await screen.findByPlaceholderText("Ask for a change…");
+	await screen.findByRole("textbox", { name: "Ask for a change…" });
 	return user;
 }
 

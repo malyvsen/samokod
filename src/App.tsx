@@ -13,7 +13,7 @@ import {
 	validateRepo,
 } from "./api";
 import { reducedMotion, useAuroraMotion } from "./auroraMotion";
-import { Composer } from "./components/Composer";
+import { DraftBubble } from "./components/DraftBubble";
 import { RepoPicker } from "./components/RepoPicker";
 import { SidePanel } from "./components/SidePanel";
 import { TopBar } from "./components/TopBar";
@@ -45,7 +45,6 @@ export function App() {
 	const [spend, setSpend] = useState<SpendView | null>(null);
 	const [working, setWorking] = useState(false);
 	const [awaitingApproval, setAwaitingApproval] = useState(false);
-	const [draft, setDraft] = useState("");
 	const appRef = useRef<HTMLDivElement>(null);
 	const notifyEdit = useAuroraMotion(appRef);
 	const transcriptRef = useRef<HTMLDivElement>(null);
@@ -64,7 +63,6 @@ export function App() {
 		setSpend(null);
 		setWorking(false);
 		setAwaitingApproval(false);
-		setDraft("");
 		setView({ kind: "chat" });
 		setPickerError(null);
 	}, []);
@@ -283,14 +281,12 @@ export function App() {
 		}
 	}
 
-	async function handleSend() {
-		const text = draft.trim();
+	async function handleSend(text: string) {
 		if (text === "" || status !== "idle" || session === null) return;
 		setTranscript((items) => [
 			...items,
 			{ kind: "user", id: crypto.randomUUID(), text },
 		]);
-		setDraft("");
 		await runTurn(text);
 	}
 
@@ -392,31 +388,22 @@ export function App() {
 						status={status}
 						onOpenPicker={handleRepoButton}
 						onNewChat={handleNewChat}
+						onStop={handleStop}
 					/>
 					<div className="mainrow">
 						<div className="chatcol">
 							<div className="transcript" ref={transcriptRef}>
-								{transcript.length === 0 ? (
-									<div className="empty-hint">
-										<b>{repoLabel} · fresh session</b>
-										no messages yet
-									</div>
-								) : (
-									<Transcript
-										items={transcript}
-										onRetry={handleRetry}
-										onAnswer={handleAnswer}
-									/>
-								)}
+								<Transcript
+									items={transcript}
+									repoLabel={repoLabel}
+									onRetry={handleRetry}
+									onAnswer={handleAnswer}
+								>
+									{status === "idle" && (
+										<DraftBubble onSend={handleSend} onEdit={notifyEdit} />
+									)}
+								</Transcript>
 							</div>
-							<Composer
-								status={status}
-								draft={draft}
-								onDraft={setDraft}
-								onSend={handleSend}
-								onStop={handleStop}
-								onEdit={notifyEdit}
-							/>
 						</div>
 						<SidePanel
 							todos={todos}

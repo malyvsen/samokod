@@ -12,18 +12,26 @@ export function TopBar({
 	status,
 	onOpenPicker,
 	onNewChat,
+	onStop,
 }: {
 	repoLabel: string;
 	branch: string;
 	status: AgentStatus;
 	onOpenPicker: () => void;
 	onNewChat: () => void;
+	onStop: () => void;
 }) {
 	const busy = status !== "idle";
 	const { text, className } = STATUS[status];
 	const tip = busy
 		? "stop the agent to switch repositories"
 		: "open repo picker";
+	// Remount on swap so the pulse animation leaves no stale paint in the WebView compositor.
+	const pill = (
+		<span key={status} className={className}>
+			{text}
+		</span>
+	);
 	return (
 		<div className="topbar">
 			<span className="brand">SAMOKOD</span>
@@ -43,10 +51,17 @@ export function TopBar({
 			>
 				new chat
 			</button>
-			{/* Remount on swap so the pulse animation leaves no stale paint in the WebView compositor */}
-			<span key={status} className={className}>
-				{text}
-			</span>
+			{busy ? (
+				<span className="stop-wrap">
+					{pill}
+					<button className="stop-ctl" type="button" onClick={onStop}>
+						<span className="sq" aria-hidden="true" />
+						STOP
+					</button>
+				</span>
+			) : (
+				pill
+			)}
 		</div>
 	);
 }
