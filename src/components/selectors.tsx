@@ -59,22 +59,22 @@ export function OptionDropdown({
 	const label = selected !== undefined ? selected.name : option.name;
 	const isFixed = option.options.length <= 1;
 	return (
-		<span className="mwrap">
+		<span className="dwrap">
 			<button
-				className="msel"
+				className="dsel"
 				type="button"
 				disabled={disabled || isFixed}
 				onClick={() => setOpen((value) => !value)}
 				aria-label={option.name}
 			>
-				<span className="mlabel">{label}</span>
-				<span className="caret">▾</span>
+				<span className="dlabel">{label}</span>
+				<span className="arrow">▾</span>
 			</button>
 			{open && !disabled && !isFixed && (
-				<span className="mpop">
+				<span className="dpop">
 					{option.options.map((value) => (
 						<button
-							className="mop"
+							className="dopt"
 							key={value.value}
 							type="button"
 							onClick={() => {
@@ -96,9 +96,9 @@ export function OptionDropdown({
 
 export function EffortPlaceholder() {
 	return (
-		<span className="mwrap">
-			<button className="msel" type="button" disabled>
-				<span className="mlabel">Effort unavailable</span>
+		<span className="dwrap">
+			<button className="dsel" type="button" disabled>
+				<span className="dlabel">Effort unavailable</span>
 			</button>
 		</span>
 	);

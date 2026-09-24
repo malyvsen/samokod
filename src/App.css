@@ -676,11 +676,11 @@ body {
 	letter-spacing: 0.02em;
 }
 
-.mwrap {
+.dwrap {
 	position: relative;
 }
 
-.msel {
+.dsel {
 	font: inherit;
 	font-size: 11px;
 	background: #0b0b10;
@@ -695,24 +695,24 @@ body {
 	cursor: pointer;
 }
 
-.msel:disabled {
+.dsel:disabled {
 	opacity: 0.45;
 	cursor: default;
 }
 
-.msel .mlabel {
+.dsel .dlabel {
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
 
-.msel .caret {
+.dsel .arrow {
 	margin-left: auto;
 	color: #8f8c85;
 	flex: none;
 }
 
-.mpop {
+.dpop {
 	position: absolute;
 	bottom: calc(100% + 6px);
 	left: 0;
@@ -728,25 +728,25 @@ body {
 	z-index: 5;
 }
 
-.mpop::-webkit-scrollbar {
+.dpop::-webkit-scrollbar {
 	width: 10px;
 }
 
-.mpop::-webkit-scrollbar-track {
+.dpop::-webkit-scrollbar-track {
 	background: rgba(8, 8, 12, 0.96);
 	border-left: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-.mpop::-webkit-scrollbar-thumb {
+.dpop::-webkit-scrollbar-thumb {
 	background: rgba(255, 255, 255, 0.28);
 	border: 2px solid rgba(8, 8, 12, 0.96);
 }
 
-.mpop::-webkit-scrollbar-thumb:hover {
+.dpop::-webkit-scrollbar-thumb:hover {
 	background: #e8e6e1;
 }
 
-.mop {
+.dopt {
 	display: flex;
 	gap: 8px;
 	width: 100%;
@@ -763,12 +763,12 @@ body {
 	text-overflow: ellipsis;
 }
 
-.mop:hover {
+.dopt:hover {
 	background: #e8e6e1;
 	color: #050508;
 }
 
-.mop .tick {
+.dopt .tick {
 	width: 14px;
 	flex: none;
 }
@@ -995,7 +995,7 @@ body {
 	color: #7dffc4;
 }
 
-.side .msel {
+.side .dsel {
 	width: 100%;
 }
 
