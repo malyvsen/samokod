@@ -86,7 +86,7 @@ beforeEach(() => {
 			removeEventListener: () => {},
 		}),
 	});
-	api.getPrefs.mockResolvedValue({ recent: [], last_repo: null });
+	api.getPrefs.mockResolvedValue({ recent: [] });
 	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "main" });
 	api.setConfigOption.mockReset();
 });
@@ -94,7 +94,6 @@ beforeEach(() => {
 async function openChatWith(options: ConfigOptionView[]) {
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo", branch: "main" }],
-		last_repo: null,
 	});
 	api.openRepo.mockResolvedValue(sessionWith(options));
 	const user = userEvent.setup();

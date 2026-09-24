@@ -37,7 +37,6 @@ export interface RepoInfo {
 
 export interface Prefs {
 	recent: RecentRepo[];
-	last_repo: string | null;
 }
 
 export interface PermissionOptionView {

@@ -52,7 +52,6 @@ beforeEach(() => {
 	});
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo", branch: "main" }],
-		last_repo: null,
 	});
 	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "main" });
 	api.openRepo.mockResolvedValue({

@@ -21,7 +21,6 @@ import { Transcript } from "./components/Transcript";
 import type {
 	AgentStatus,
 	AppEvent,
-	Prefs,
 	RecentRepo,
 	SessionInfo,
 	SpendView,
@@ -70,31 +69,17 @@ export function App() {
 	useEffect(() => {
 		let cancelled = false;
 		getPrefs()
-			.then(async (prefs: Prefs) => {
+			.then((prefs) => {
 				if (cancelled) return;
 				setRecent(prefs.recent);
-				if (prefs.last_repo != null && prefs.last_repo !== "") {
-					try {
-						const info = await validateRepo(prefs.last_repo);
-						if (cancelled) return;
-						const opened = await openRepo(info.root);
-						if (cancelled) return;
-						applySession(opened);
-						setRecent((await getPrefs()).recent);
-					} catch (error) {
-						console.warn("failed to reopen last repo", error);
-						if (!cancelled) setView({ kind: "picker", returnToChat: false });
-					}
-				}
 			})
 			.catch((error: unknown) => {
 				console.warn("failed to load prefs", error);
-				if (!cancelled) setView({ kind: "picker", returnToChat: false });
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [applySession]);
+	}, []);
 
 	const handleEvent = useCallback((event: AppEvent) => {
 		switch (event.type) {

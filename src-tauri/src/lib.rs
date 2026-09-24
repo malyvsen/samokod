@@ -53,17 +53,8 @@ async fn open_repo(
 }
 
 #[tauri::command]
-async fn new_chat(app: AppHandle, state: State<'_, AgentManager>) -> Result<SessionInfo, String> {
-    let dir = prefs_dir(&app);
-    let prefs = load_prefs(&dir);
-    let stored = prefs
-        .last_repo
-        .as_ref()
-        .and_then(|repo| stored_model(&prefs, repo));
-    state
-        .new_chat(stored)
-        .await
-        .map_err(|error| error.to_string())
+async fn new_chat(state: State<'_, AgentManager>) -> Result<SessionInfo, String> {
+    state.new_chat().await.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -106,14 +97,15 @@ async fn set_config_option(
         .set_config_option(config_id.clone(), value.clone())
         .await
         .map_err(|error| error.to_string())?;
-    if config_id == "model" {
+    if config_id == "model"
+        && let Some(repo) = state.current_repo()
+    {
+        let repo = repo.to_string_lossy().to_string();
         let dir = prefs_dir(&app);
         let mut prefs = load_prefs(&dir);
-        if let Some(repo) = prefs.last_repo.clone() {
-            record_model(&mut prefs, &repo, &value);
-            if let Err(error) = save_prefs(&dir, &prefs) {
-                log::warn!("failed to save model choice for {repo}: {error}");
-            }
+        record_model(&mut prefs, &repo, &value);
+        if let Err(error) = save_prefs(&dir, &prefs) {
+            log::warn!("failed to save model choice for {repo}: {error}");
         }
     }
     Ok(options)

@@ -188,14 +188,19 @@ impl AgentManager {
     }
 
     /// Open a fresh session on the same root, closing the old one when the
-    /// agent advertises it.
-    pub async fn new_chat(&self, stored_model: Option<String>) -> Result<SessionInfo, AgentError> {
-        let (repo_root, branch, _) =
+    /// agent advertises it. Reuses the in-memory model choice.
+    pub async fn new_chat(&self) -> Result<SessionInfo, AgentError> {
+        let (repo_root, branch, model) =
             self.reopen_snapshot()
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "open a repository first".to_string(),
                 })?;
-        self.open_repo(repo_root, branch, stored_model).await
+        self.open_repo(repo_root, branch, model).await
+    }
+
+    /// Current repository root, when a session is open.
+    pub fn current_repo(&self) -> Option<PathBuf> {
+        lock_state(&self.state)?.repo_root.clone()
     }
 
     /// Resend the last prompt. When the transport is closed, reopen the

@@ -1,6 +1,5 @@
-// Local preferences: recent repos, the last opened repo, and per-repo model
-// choices. Persisted as JSON under the OS app-data directory resolved through
-// the Tauri path API.
+// Local preferences: recent repos and per-repo model choices. Persisted as
+// JSON under the OS app-data directory resolved through the Tauri path API.
 // Record and lookup helpers stay pure over an explicit directory so tests
 // never touch the real profile; loading logs its failures and falls back.
 use std::path::Path;
@@ -45,8 +44,8 @@ pub fn save_prefs(dir: &Path, prefs: &Prefs) -> Result<(), String> {
     std::fs::write(path, text).map_err(|error| error.to_string())
 }
 
-/// Record a repo open: moves it to the front, updates branch, caps the list,
-/// and stores it as last repo. Pure over the prefs value.
+/// Record a repo open: moves it to the front, updates branch, and caps the
+/// list. Pure over the prefs value.
 pub fn record_open(prefs: &mut Prefs, path: &str, branch: &str) {
     prefs.recent.retain(|repo| repo.path != path);
     prefs.recent.insert(
@@ -57,7 +56,6 @@ pub fn record_open(prefs: &mut Prefs, path: &str, branch: &str) {
         },
     );
     prefs.recent.truncate(MAX_RECENT);
-    prefs.last_repo = Some(path.to_string());
 }
 
 /// Remember a per-repo model choice. Pure.
@@ -82,7 +80,6 @@ mod tests {
         }
         assert_eq!(prefs.recent.len(), MAX_RECENT);
         assert_eq!(prefs.recent[0].path, "/repo-11");
-        assert_eq!(prefs.last_repo.as_deref(), Some("/repo-11"));
     }
 
     #[test]

@@ -142,8 +142,6 @@ pub struct Prefs {
     #[serde(default)]
     pub recent: Vec<RecentRepo>,
     #[serde(default)]
-    pub last_repo: Option<String>,
-    #[serde(default)]
     pub models: HashMap<String, String>,
 }
 
