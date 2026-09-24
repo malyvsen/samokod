@@ -10,6 +10,8 @@ If pre-commit reports formatting or lint errors, run `task fix`; otherwise fix t
 
 OpenCode owns agent state, the app owns the window. The app renders agent capabilities and relays user decisions, but reimplements none of them.
 
+If possible, drive the agent through ACP, not OpenCode internals. ACP is the stable contract that keeps the backend swappable and runnable remotely.
+
 Where OpenCode does not expose something directly, the app infers it from agent state instead of duplicating the capability (e.g. the todo list read from todowrite tool calls).
 
 # Coding conventions
