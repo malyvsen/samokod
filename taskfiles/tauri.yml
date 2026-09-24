@@ -20,3 +20,8 @@ tasks:
     desc: Raise the app's version (patch, minor, or major)
     cmds:
       - node scripts/tauri/bump.mjs {{.CLI_ARGS}}
+
+  generate-icon:
+    desc: Regenerate bundle icons from the vector source
+    cmds:
+      - pnpm tauri icon src-tauri/app-icon.svg
