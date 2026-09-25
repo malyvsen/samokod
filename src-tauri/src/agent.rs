@@ -69,6 +69,10 @@ impl ActivePlan {
         }
     }
 
+    fn is_scoping(&self) -> bool {
+        self.phase == plans::Phase::Scoping
+    }
+
     fn info(&self, repo_root: &Path) -> PlanInfo {
         PlanInfo::of(repo_root, &self.plan_ref())
     }
@@ -152,14 +156,9 @@ impl AgentManager {
         self.shutdown_connection().await;
         let scoping = plans::create_scoping(&repo_root)?;
         let plan = ActivePlan::scoping(scoping.name);
+        let agent = opencode::agent_for(plan.phase);
         let (_, _, info) = self
-            .spawn_session(
-                &repo_root,
-                &branch,
-                stored_model,
-                plan,
-                opencode::PLANNER_AGENT,
-            )
+            .spawn_session(&repo_root, &branch, stored_model, plan, agent)
             .await?;
         Ok(info)
     }
@@ -231,8 +230,9 @@ impl AgentManager {
         // from here on, and a failed spawn recovers via auto-abandon.
         self.set_plan(plan.clone());
         self.shutdown_connection().await;
+        let agent = opencode::agent_for(plan.phase);
         let (connection, session_id, info) = self
-            .spawn_session(&repo_root, &branch, model, plan, opencode::EXECUTOR_AGENT)
+            .spawn_session(&repo_root, &branch, model, plan, agent)
             .await?;
         let text = opencode::executor_first_message(&opencode::plan_display(&next));
         self.start_turn(connection, session_id, text, None).await?;
@@ -257,7 +257,7 @@ impl AgentManager {
 
     /// Spawn a fresh agent process scoped to one plan and open a session on
     /// it: pin the agent mode, reapply the stored model, and report the
-    /// session. Shared by every chat opener.
+    /// session. Shared by every session opener.
     async fn spawn_session(
         &self,
         repo_root: &Path,
@@ -374,30 +374,20 @@ impl AgentManager {
     }
 
     /// Resend the last prompt. When the transport is closed, reopen the
-    /// session on the same root first. Returns false when nothing ran.
+    /// session on the held plan first. Returns false when nothing ran.
     pub async fn retry_last(&self) -> Result<bool, AgentError> {
-        let text = match self.state.lock() {
-            Ok(state) => state.last_prompt.clone(),
-            Err(error) => {
-                log::warn!("failed to read last prompt: {error}");
-                None
-            }
-        };
-        let Some(text) = text else {
+        let Some(text) = lock_state(&self.state).and_then(|state| state.last_prompt.clone()) else {
             return Ok(false);
         };
-        let live = self
+        let (connection, session_id) = match self
             .session_snapshot()
-            .is_some_and(|(connection, _, _)| !connection.is_incoming_closed());
-        if !live {
-            let (repo_root, branch, model) =
-                self.reopen_snapshot()
-                    .ok_or_else(|| AgentError::NoSession {
-                        raw: "open a repository first".to_string(),
-                    })?;
-            self.open_repo(repo_root, branch, model).await?;
-        }
-        self.send_prompt(text).await?;
+            .filter(|(connection, _, _)| !connection.is_incoming_closed())
+        {
+            Some((connection, session_id, _)) => (connection, session_id),
+            None => self.reopen_session().await?,
+        };
+        let watch = Self::scoping_watch(&self.plan_snapshot());
+        self.start_turn(connection, session_id, text, watch).await?;
         Ok(true)
     }
 
@@ -410,26 +400,64 @@ impl AgentManager {
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "open a repository first".to_string(),
                 })?;
-        let snapshot = self.plan_snapshot();
-        let mut watch: Option<(PathBuf, plans::PlanRef)> = None;
+        let watch = Self::scoping_watch(&self.plan_snapshot());
         let mut text = text;
-        if let Some((repo_root, plan)) = snapshot
-            && plan.phase == plans::Phase::Scoping
-        {
-            watch = Some((repo_root, plan.plan_ref()));
-            if !plan.prefixed {
-                if let Ok(mut state) = self.state.lock()
-                    && let Some(current) = state.plan.as_mut()
-                {
-                    current.prefixed = true;
-                }
-                text = opencode::planner_first_message(
-                    &opencode::plan_display(&plan.plan_ref()),
-                    &text,
-                );
-            }
+        if let Some(plan) = self.claim_planner_prefix() {
+            text = opencode::planner_first_message(&opencode::plan_display(&plan), &text);
         }
         self.start_turn(connection, session_id, text, watch).await
+    }
+
+    /// Plan watch for scoping turns: re-emit `plan.md` presence when the
+    /// turn lands. Pure.
+    fn scoping_watch(
+        snapshot: &Option<(PathBuf, ActivePlan)>,
+    ) -> Option<(PathBuf, plans::PlanRef)> {
+        let (repo_root, plan) = snapshot.as_ref().filter(|(_, plan)| plan.is_scoping())?;
+        Some((repo_root.clone(), plan.plan_ref()))
+    }
+
+    /// Claim the one-time planner prefix for the first scoping message.
+    /// One locked check-and-mark, so a retried turn never prefixes twice.
+    fn claim_planner_prefix(&self) -> Option<plans::PlanRef> {
+        let mut state = lock_state(&self.state)?;
+        let plan = state
+            .plan
+            .as_mut()
+            .filter(|plan| plan.is_scoping() && !plan.prefixed)?;
+        plan.prefixed = true;
+        Some(plan.plan_ref())
+    }
+
+    /// Reopen the held plan in a fresh session after transport death: same
+    /// plan, same dir, no flag changes. Retry path only.
+    async fn reopen_session(&self) -> Result<(ConnectionTo<Agent>, String), AgentError> {
+        let (repo_root, branch, model, plan) = {
+            let state = lock_state(&self.state).ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
+            let repo_root = state
+                .repo_root
+                .clone()
+                .ok_or_else(|| AgentError::NoSession {
+                    raw: "open a repository first".to_string(),
+                })?;
+            let plan = state.plan.clone().ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
+            (
+                repo_root,
+                state.branch.clone(),
+                state.last_model.clone(),
+                plan,
+            )
+        };
+        self.shutdown_connection().await;
+        let agent = opencode::agent_for(plan.phase);
+        let (connection, session_id, _) = self
+            .spawn_session(&repo_root, &branch, model, plan, agent)
+            .await?;
+        Ok((connection, session_id))
     }
 
     /// Guard one turn and stream it as events. Records the prompt so retry

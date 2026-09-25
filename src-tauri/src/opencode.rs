@@ -8,6 +8,14 @@ use crate::plans::{Phase, PlanRef};
 pub const PLANNER_AGENT: &str = "samokod-planner";
 pub const EXECUTOR_AGENT: &str = "samokod-executor";
 
+/// Agent id for a phase. Pure.
+pub fn agent_for(phase: Phase) -> &'static str {
+    match phase {
+        Phase::Scoping => PLANNER_AGENT,
+        Phase::Executing | Phase::Completed | Phase::Cancelled => EXECUTOR_AGENT,
+    }
+}
+
 /// Env key carrying inline JSON config. Merges over user and project config.
 pub const CONFIG_CONTENT_ENV: &str = "OPENCODE_CONFIG_CONTENT";
 
