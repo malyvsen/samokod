@@ -27,7 +27,7 @@ export interface SessionInfo {
 	plan: PlanInfo;
 }
 
-export type PlanPhase = "scoping" | "executing" | "completed" | "cancelled";
+export type PlanPhase = "scoping" | "executing";
 
 export interface PlanInfo {
 	name: string;

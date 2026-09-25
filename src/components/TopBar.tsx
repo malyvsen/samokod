@@ -75,8 +75,6 @@ export function TopBar({
 const PHASE_LABEL: Record<PlanPhase, string> = {
 	scoping: "SCOPING",
 	executing: "EXECUTING",
-	completed: "COMPLETED",
-	cancelled: "CANCELLED",
 };
 
 interface PlanOption {
@@ -102,22 +100,27 @@ function PlanMenu({
 }) {
 	const [open, setOpen] = useState(false);
 	if (plan === null) return null;
-	if (plan.phase === "completed" || plan.phase === "cancelled") {
-		return <span className="status">{PHASE_LABEL[plan.phase]}</span>;
-	}
-	const lead: PlanOption =
-		plan.phase === "scoping"
-			? {
+	const lead: PlanOption = (() => {
+		switch (plan.phase) {
+			case "scoping":
+				return {
 					label: "Execute",
 					tip: plan.has_plan_md ? undefined : "Needs plan.md",
 					disabled: !plan.has_plan_md,
 					onSelect: onExecute,
-				}
-			: {
+				} satisfies PlanOption;
+			case "executing":
+				return {
 					label: "Mark completed",
 					disabled: false,
 					onSelect: onComplete,
-				};
+				} satisfies PlanOption;
+			default: {
+				const _exhaustive: never = plan.phase;
+				throw new Error(`unknown plan phase ${_exhaustive}`);
+			}
+		}
+	})();
 	const options: PlanOption[] = [
 		lead,
 		{

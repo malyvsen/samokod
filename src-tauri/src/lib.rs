@@ -23,7 +23,7 @@ use tauri_plugin_log::{Target, TargetKind};
 use crate::agent::AgentManager;
 use crate::prefs::{load_prefs, record_open, save_prefs};
 use crate::repo::{RepoInfo, validate_repo};
-use crate::types::{ConfigOptionView, PlanInfo, Prefs, SessionInfo};
+use crate::types::{ConfigOptionView, Prefs, SessionInfo};
 
 #[tauri::command]
 fn get_prefs(app: AppHandle) -> Result<Prefs, String> {
@@ -73,7 +73,7 @@ async fn execute_plan(state: State<'_, AgentManager>) -> Result<SessionInfo, Str
 }
 
 #[tauri::command]
-async fn mark_completed(state: State<'_, AgentManager>) -> Result<PlanInfo, String> {
+async fn mark_completed(state: State<'_, AgentManager>) -> Result<SessionInfo, String> {
     state
         .mark_completed()
         .await
@@ -81,7 +81,7 @@ async fn mark_completed(state: State<'_, AgentManager>) -> Result<PlanInfo, Stri
 }
 
 #[tauri::command]
-async fn abandon_plan(state: State<'_, AgentManager>) -> Result<PlanInfo, String> {
+async fn abandon_plan(state: State<'_, AgentManager>) -> Result<SessionInfo, String> {
     state
         .abandon_plan()
         .await

@@ -363,6 +363,23 @@ mod tests {
     }
 
     #[test]
+    fn complete_then_scoping_keeps_history_and_starts_fresh() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let scoping = create_scoping(root).expect("create");
+        std::fs::write(scoping.plan_md(root), "# Shiny feature\n\nSteps.\n").expect("write plan");
+        let executing = execute(root, &scoping).expect("execute");
+        let completed = complete(root, &executing).expect("complete");
+        assert!(completed.has_plan_md(root));
+        let fresh = create_scoping(root).expect("fresh scoping");
+        assert_eq!(fresh.phase, Phase::Scoping);
+        assert!(fresh.path(root).is_dir());
+        assert!(!fresh.has_plan_md(root));
+        assert!(completed.path(root).is_dir());
+    }
+
+    #[test]
     fn execute_fails_loud_without_heading() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();

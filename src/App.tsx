@@ -374,18 +374,20 @@ export function App() {
 	}
 
 	async function handleComplete() {
-		await runPlanAction(markCompleted);
+		await runSessionAction(markCompleted);
 	}
 
 	async function handleAbandon() {
-		await runPlanAction(abandonPlan);
+		await runSessionAction(abandonPlan);
 	}
 
-	async function runPlanAction(action: () => Promise<PlanInfo>) {
+	async function runSessionAction(action: () => Promise<SessionInfo>) {
 		if (status !== "idle") return;
+		setWorking(true);
 		try {
-			setPlan(await action());
+			applySession(await action());
 		} catch (error) {
+			setWorking(false);
 			appendError(error instanceof Error ? error.message : String(error));
 		}
 	}
@@ -482,7 +484,12 @@ function failureItem(
 
 function agentLabelForPlan(plan: PlanInfo | null): string {
 	if (plan === null) return "AGENT";
-	return plan.phase === "scoping" ? "PLANNER" : "EXECUTOR";
+	switch (plan.phase) {
+		case "scoping":
+			return "PLANNER";
+		case "executing":
+			return "EXECUTOR";
+	}
 }
 
 function shortPath(path: string): string {

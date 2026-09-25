@@ -54,14 +54,6 @@ impl ActivePlan {
         }
     }
 
-    fn transitioned(next: plans::PlanRef) -> Self {
-        ActivePlan {
-            name: next.name,
-            phase: next.phase,
-            prefixed: true,
-        }
-    }
-
     fn plan_ref(&self) -> plans::PlanRef {
         plans::PlanRef {
             name: self.name.clone(),
@@ -313,20 +305,59 @@ impl AgentManager {
         Ok(info)
     }
 
-    /// Finish the executing plan. The chat ends here; the phase label stays.
-    pub async fn mark_completed(&self) -> Result<PlanInfo, AgentError> {
+    /// Finish the executing plan, then open a fresh scoping chat; the
+    /// completed plan stays on disk.
+    pub async fn mark_completed(&self) -> Result<SessionInfo, AgentError> {
         ensure_idle(&self.state)?;
-        let (repo_root, active) = self.active_plan_snapshot()?;
-        let next = plans::complete(&repo_root, &active.plan_ref())?;
-        Ok(self.replace_plan(&repo_root, next))
+        let (repo_root, branch, stored) =
+            self.reopen_snapshot()
+                .ok_or_else(|| AgentError::NoSession {
+                    raw: "open a repository first".to_string(),
+                })?;
+        let active = self
+            .plan_snapshot()
+            .map(|(_, plan)| plan)
+            .filter(|plan| plan.phase == plans::Phase::Executing)
+            .ok_or_else(|| AgentError::RequestFailed {
+                raw: "no executing plan to complete".to_string(),
+            })?;
+        plans::complete(&repo_root, &active.plan_ref())?;
+        let scoping = plans::create_scoping(&repo_root)?;
+        let plan = ActivePlan::scoping(scoping.name.clone());
+        self.set_plan(plan.clone());
+        self.shutdown_connection().await;
+        let agent = opencode::agent_for(plan.phase);
+        let (_, _, info) = self
+            .spawn_session(&repo_root, &branch, stored, plan, agent)
+            .await?;
+        Ok(info)
     }
 
-    /// Drop an active plan. Keeps the session open on a terminal label.
-    pub async fn abandon_plan(&self) -> Result<PlanInfo, AgentError> {
+    /// Drop an active plan, then open a fresh scoping chat.
+    pub async fn abandon_plan(&self) -> Result<SessionInfo, AgentError> {
         ensure_idle(&self.state)?;
-        let (repo_root, active) = self.active_plan_snapshot()?;
-        let next = plans::abandon(&repo_root, &active.plan_ref())?;
-        Ok(self.replace_plan(&repo_root, next))
+        let (repo_root, branch, stored) =
+            self.reopen_snapshot()
+                .ok_or_else(|| AgentError::NoSession {
+                    raw: "open a repository first".to_string(),
+                })?;
+        let active = self
+            .plan_snapshot()
+            .map(|(_, plan)| plan)
+            .filter(|plan| plan.phase.is_active())
+            .ok_or_else(|| AgentError::RequestFailed {
+                raw: "no active plan to abandon".to_string(),
+            })?;
+        plans::abandon(&repo_root, &active.plan_ref())?;
+        let scoping = plans::create_scoping(&repo_root)?;
+        let plan = ActivePlan::scoping(scoping.name.clone());
+        self.set_plan(plan.clone());
+        self.shutdown_connection().await;
+        let agent = opencode::agent_for(plan.phase);
+        let (_, _, info) = self
+            .spawn_session(&repo_root, &branch, stored, plan, agent)
+            .await?;
+        Ok(info)
     }
 
     /// Spawn a fresh agent process scoped to one plan and open a session on
@@ -392,36 +423,6 @@ impl AgentManager {
         };
         emit_event(&self.app, AppEvent::SessionReset);
         Ok((connection, session_id, info))
-    }
-
-    /// Current repo plus active plan, or a loud error when chatting is
-    /// impossible. One locked read, so root and plan never tear.
-    fn active_plan_snapshot(&self) -> Result<(PathBuf, ActivePlan), AgentError> {
-        let state = lock_state(&self.state).ok_or_else(|| AgentError::NoSession {
-            raw: "open a repository first".to_string(),
-        })?;
-        let repo_root = state
-            .repo_root
-            .clone()
-            .ok_or_else(|| AgentError::NoSession {
-                raw: "open a repository first".to_string(),
-            })?;
-        let active = state
-            .plan
-            .clone()
-            .ok_or_else(|| AgentError::RequestFailed {
-                raw: "no active plan".to_string(),
-            })?;
-        Ok((repo_root, active))
-    }
-
-    /// Swap the held plan for a transitioned one and report it.
-    fn replace_plan(&self, repo_root: &Path, next: plans::PlanRef) -> PlanInfo {
-        let plan = ActivePlan::transitioned(next);
-        let view = plan.info(repo_root);
-        self.set_plan(plan);
-        emit_event(&self.app, AppEvent::PlanChanged { plan: view.clone() });
-        view
     }
 
     /// Record the held plan. A poisoned lock only logs, matching

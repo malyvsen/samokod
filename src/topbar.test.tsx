@@ -112,12 +112,4 @@ describe("top bar", () => {
 		).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Abandon" })).toBeInTheDocument();
 	});
-
-	test("completed phase is a plain label", () => {
-		render(topBar("idle", { plan: testPlan("completed", true) }));
-		expect(screen.getByText("COMPLETED")).toBeInTheDocument();
-		expect(
-			screen.queryByRole("button", { name: /plan phase/ }),
-		).not.toBeInTheDocument();
-	});
 });

@@ -78,4 +78,37 @@ describe("plan", () => {
 			screen.getByRole("button", { name: "plan phase executing" }),
 		).toBeInTheDocument();
 	});
+
+	test("completing applies a fresh scoping session", async () => {
+		api.markCompleted.mockResolvedValue(testSession([]));
+		const user = userEvent.setup();
+		await openChat();
+		emit({ type: "agent_text", chunk: "old chat" });
+		emit({ type: "turn_done" });
+		expect(screen.getByText("old chat")).toBeInTheDocument();
+		emit({ type: "plan_changed", plan: testPlan("executing", true) });
+		await user.click(
+			screen.getByRole("button", { name: "plan phase executing" }),
+		);
+		await user.click(screen.getByRole("button", { name: "Mark completed" }));
+		expect(api.markCompleted).toHaveBeenCalledTimes(1);
+		await screen.findByRole("button", { name: "plan phase scoping" });
+		expect(screen.queryByText("old chat")).not.toBeInTheDocument();
+	});
+
+	test("abandoning applies a fresh scoping session", async () => {
+		api.abandonPlan.mockResolvedValue(testSession([]));
+		const user = userEvent.setup();
+		await openChat();
+		emit({ type: "agent_text", chunk: "old chat" });
+		emit({ type: "turn_done" });
+		emit({ type: "plan_changed", plan: testPlan("executing", true) });
+		await user.click(
+			screen.getByRole("button", { name: "plan phase executing" }),
+		);
+		await user.click(screen.getByRole("button", { name: "Abandon" }));
+		expect(api.abandonPlan).toHaveBeenCalledTimes(1);
+		await screen.findByRole("button", { name: "plan phase scoping" });
+		expect(screen.queryByText("old chat")).not.toBeInTheDocument();
+	});
 });
