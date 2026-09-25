@@ -148,7 +148,7 @@ impl AgentManager {
         stored_model: Option<String>,
     ) -> Result<SessionInfo, AgentError> {
         plans::ensure_structure(&repo_root)?;
-        self.abandon_active_plan(&repo_root)?;
+        self.abandon_stored_plan()?;
         self.shutdown_connection().await;
         let scoping = plans::create_scoping(&repo_root)?;
         let plan = ActivePlan::scoping(scoping.name);
@@ -309,18 +309,23 @@ impl AgentManager {
     }
 
     /// Current repo plus active plan, or a loud error when chatting is
-    /// impossible. Pure state read.
+    /// impossible. One locked read, so root and plan never tear.
     fn active_plan_snapshot(&self) -> Result<(PathBuf, ActivePlan), AgentError> {
-        let (repo_root, _, _) = self
-            .reopen_snapshot()
+        let state = lock_state(&self.state).ok_or_else(|| AgentError::NoSession {
+            raw: "open a repository first".to_string(),
+        })?;
+        let repo_root = state
+            .repo_root
+            .clone()
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
-        let active = self.plan_snapshot().map(|(_, plan)| plan).ok_or_else(|| {
-            AgentError::RequestFailed {
+        let active = state
+            .plan
+            .clone()
+            .ok_or_else(|| AgentError::RequestFailed {
                 raw: "no active plan".to_string(),
-            }
-        })?;
+            })?;
         Ok((repo_root, active))
     }
 
@@ -346,26 +351,20 @@ impl AgentManager {
         }
     }
 
-    /// Move an active plan to cancelled. No-op without one or when its
+    /// Move the stored plan to cancelled. No-op without one or when its
     /// directory is already gone, so a retried open never bricks.
-    fn abandon_active_plan(&self, repo_root: &Path) -> Result<(), AgentError> {
-        let active = match self.state.lock() {
-            Ok(state) => state.plan.clone(),
-            Err(error) => {
-                log::warn!("failed to read plan for abandon: {error}");
-                None
-            }
-        };
-        let Some(active) = active else {
+    fn abandon_stored_plan(&self) -> Result<(), AgentError> {
+        let Some((repo_root, active)) = self.plan_snapshot() else {
             return Ok(());
         };
-        if !active.phase.is_active() {
+        let plan = active.plan_ref();
+        if !plan.phase.is_active() {
             return Ok(());
         }
-        if !active.plan_ref().path(repo_root).exists() {
+        if !plan.path(&repo_root).exists() {
             return Ok(());
         }
-        plans::abandon(repo_root, &active.plan_ref())?;
+        plans::abandon(&repo_root, &plan)?;
         Ok(())
     }
 
