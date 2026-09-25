@@ -1735,6 +1735,7 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::path::Path;
+    use std::time::Instant;
 
     #[test]
     fn config_views_keep_agent_ordering() {
@@ -1934,6 +1935,150 @@ mod tests {
         set_working(&state, &first, true);
         assert!(ensure_idle(&state, &first).is_err());
         assert!(ensure_idle(&state, &second).is_ok());
+    }
+
+    fn write_plan_dir(root: &Path, phase: plans::Phase, name: &str, title: Option<&str>) {
+        let dir = root
+            .join(".samokod/plans")
+            .join(phase.dir_name())
+            .join(name);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        if let Some(title) = title {
+            std::fs::write(dir.join("plan.md"), format!("# {title}\n")).expect("write");
+        }
+    }
+
+    fn empty_activity() -> HashMap<String, Instant> {
+        HashMap::new()
+    }
+
+    #[test]
+    fn entries_sort_scoping_first_then_rest() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        write_plan_dir(root, plans::Phase::Cancelled, "c", Some("C"));
+        write_plan_dir(root, plans::Phase::Completed, "b", Some("B"));
+        write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
+        write_plan_dir(root, plans::Phase::Scoping, "s", Some("S"));
+        let entries = sorted_entries(root, &HashMap::new(), &empty_activity());
+        let phases: Vec<plans::Phase> = entries.iter().map(|entry| entry.phase).collect();
+        assert_eq!(
+            phases,
+            vec![
+                plans::Phase::Scoping,
+                plans::Phase::Executing,
+                plans::Phase::Completed,
+                plans::Phase::Cancelled,
+            ]
+        );
+        assert_eq!(entries[0].title, "S");
+    }
+
+    #[test]
+    fn activity_beats_newer_mtime() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        write_plan_dir(root, plans::Phase::Scoping, "old", Some("Old"));
+        write_plan_dir(root, plans::Phase::Scoping, "new", Some("New"));
+        let mut activity = empty_activity();
+        activity.insert("old".to_string(), Instant::now());
+        let entries = sorted_entries(root, &HashMap::new(), &activity);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "old");
+        assert_eq!(entries[1].name, "new");
+    }
+
+    #[test]
+    fn idle_plans_fall_back_to_newest_first() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        write_plan_dir(root, plans::Phase::Scoping, "first", Some("First"));
+        write_plan_dir(root, plans::Phase::Scoping, "second", Some("Second"));
+        let entries = sorted_entries(root, &HashMap::new(), &empty_activity());
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "second");
+        assert_eq!(entries[1].name, "first");
+    }
+
+    #[test]
+    fn untitled_plans_list_without_heading() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        write_plan_dir(root, plans::Phase::Scoping, "bare", None);
+        let entries = sorted_entries(root, &HashMap::new(), &empty_activity());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "Untitled");
+        assert_eq!(entries[0].sessions.len(), 1);
+    }
+
+    #[test]
+    fn most_recent_prefers_execution_session() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
+        let entries = sorted_entries(root, &HashMap::new(), &empty_activity());
+        assert_eq!(
+            most_recent_key(&entries),
+            Some(SessionKey {
+                plan: "a".to_string(),
+                role: SessionRole::Executing,
+            })
+        );
+        assert!(most_recent_key(&[]).is_none());
+    }
+
+    #[test]
+    fn statuses_cover_sessions_and_live_flags() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
+        let key = SessionKey {
+            plan: "a".to_string(),
+            role: SessionRole::Executing,
+        };
+        let mut live = LiveSession::fresh(
+            ActivePlan::executing("a".to_string()),
+            crate::repo_state::RepoState::default(),
+        );
+        live.working = true;
+        live.approval = true;
+        let sessions = HashMap::from([(key, live)]);
+        let entries = sorted_entries(root, &sessions, &empty_activity());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].sessions.len(), 2);
+        let executing = entries[0]
+            .sessions
+            .iter()
+            .find(|status| status.role == SessionRole::Executing)
+            .expect("executing status");
+        assert!(executing.working);
+        assert!(executing.approval);
+        assert!(!executing.failed);
+        assert!(!executing.live);
+        let scoping = entries[0]
+            .sessions
+            .iter()
+            .find(|status| status.role == SessionRole::Scoping)
+            .expect("scoping status");
+        assert!(!scoping.working);
+    }
+
+    #[test]
+    fn cancelled_scoping_lists_one_row() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        write_plan_dir(root, plans::Phase::Cancelled, "c", Some("C"));
+        let entries = sorted_entries(root, &HashMap::new(), &empty_activity());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].sessions.len(), 1);
+        assert_eq!(entries[0].sessions[0].role, SessionRole::Scoping);
     }
 
     async fn open_test_session(

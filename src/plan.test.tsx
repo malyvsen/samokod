@@ -146,4 +146,93 @@ describe("plan", () => {
 		expect(api.abandonPlan).toHaveBeenCalledTimes(1);
 		expect(screen.getByText("old chat")).toBeInTheDocument();
 	});
+
+	test("background sessions update silently", async () => {
+		await openChat();
+		emit({
+			type: "agent_text",
+			session: { plan: "other-plan", role: "scoping" },
+			chunk: "background chat",
+		});
+		emit({
+			type: "turn_done",
+			session: { plan: "other-plan", role: "scoping" },
+		});
+		expect(screen.queryByText("background chat")).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("textbox", { name: "Ask for a change…" }),
+		).toBeInTheDocument();
+	});
+
+	test("selecting a row swaps transcript, todos, and cost", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "main",
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb", "scoping", "Beta", true),
+			],
+			selected: { plan: "aaa", role: "scoping" },
+		});
+		const user = await openChat();
+		const aaa = { plan: "aaa", role: "scoping" } as const;
+		const bbb = { plan: "bbb", role: "scoping" } as const;
+		emit({ type: "agent_text", session: aaa, chunk: "aaa chat" });
+		emit({ type: "turn_done", session: aaa });
+		emit({ type: "agent_text", session: bbb, chunk: "bbb chat" });
+		emit({ type: "turn_done", session: bbb });
+		emit({
+			type: "todos_changed",
+			session: bbb,
+			todos: [{ content: "Beta todo", status: "pending", priority: "high" }],
+			changes: [],
+		});
+		emit({ type: "spend_tick", session: bbb, cost: 1.5, ctx_pct: 10 });
+		expect(screen.getByText("aaa chat")).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Beta Scoping" }));
+		expect(screen.getByText("bbb chat")).toBeInTheDocument();
+		expect(screen.queryByText("aaa chat")).not.toBeInTheDocument();
+		expect(screen.getByText("Beta todo")).toBeInTheDocument();
+		expect(screen.getByText("$1.50")).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Alpha Scoping" }));
+		expect(screen.getByText("aaa chat")).toBeInTheDocument();
+		expect(screen.queryByText("Beta todo")).not.toBeInTheDocument();
+	});
+
+	test("new plan selects a fresh empty session", async () => {
+		api.createPlan.mockResolvedValue({
+			plans: [
+				testEntry(),
+				testEntry("2026-09-25.11-00-00", "scoping", "Untitled", false),
+			],
+			selected: { plan: "2026-09-25.11-00-00", role: "scoping" },
+		});
+		const user = await openChat();
+		emit({ type: "agent_text", session: testKey(), chunk: "old chat" });
+		emit({ type: "turn_done", session: testKey() });
+		await user.click(screen.getByRole("button", { name: "+ NEW PLAN" }));
+		expect(api.createPlan).toHaveBeenCalledTimes(1);
+		expect(screen.queryByText("old chat")).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("textbox", { name: "Ask for a change…" }),
+		).toBeInTheDocument();
+	});
+
+	test("failed turns show a red pill and retry resends", async () => {
+		api.retryLast.mockResolvedValue(true);
+		const user = await openChat();
+		emit({
+			type: "turn_failed",
+			session: testKey(),
+			raw: "boom",
+			hint: "retry the turn",
+			retryable: true,
+		});
+		expect(screen.getByText("● FAILED")).toBeInTheDocument();
+		expect(
+			screen.getByRole("textbox", { name: "Ask for a change…" }),
+		).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "retry" }));
+		expect(api.retryLast).toHaveBeenCalledWith(testKey());
+	});
 });

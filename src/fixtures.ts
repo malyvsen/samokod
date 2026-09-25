@@ -13,22 +13,39 @@ export function testKey(
 	return { plan, role };
 }
 
+export function testStatus(
+	role: SessionRole,
+	overrides: Partial<SessionStatusView> = {},
+): SessionStatusView {
+	return {
+		role,
+		working: false,
+		approval: false,
+		failed: false,
+		live: false,
+		...overrides,
+	};
+}
+
 export function testEntry(
 	name = "2026-09-25.10-54-59",
 	phase: PlanPhase = "scoping",
 	title = "Parallel sessions",
 	has_plan_md = false,
 ): PlanEntry {
-	const idle = (role: SessionRole): SessionStatusView => ({
-		role,
-		working: false,
-		approval: false,
-		failed: false,
-		live: false,
-	});
 	const sessions =
 		phase === "scoping"
-			? [idle("scoping")]
-			: [idle("scoping"), idle("executing")];
+			? [testStatus("scoping")]
+			: [testStatus("scoping"), testStatus("executing")];
 	return { name, phase, title, has_plan_md, sessions };
+}
+
+export function testEntryWith(
+	name: string,
+	phase: PlanPhase,
+	title: string,
+	has_plan_md: boolean,
+	statuses: SessionStatusView[],
+): PlanEntry {
+	return { name, phase, title, has_plan_md, sessions: statuses };
 }

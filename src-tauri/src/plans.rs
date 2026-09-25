@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// Lifecycle phase. One directory per phase under `.samokod/plans/`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
     Scoping,
@@ -403,6 +403,96 @@ mod tests {
     fn extract_title_rejects_hash_without_space() {
         assert_eq!(extract_title("#hashtag\n").as_deref(), None);
         assert_eq!(extract_title("no headings\n").as_deref(), None);
+    }
+
+    #[test]
+    fn title_reads_first_heading() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let scoping = create_scoping(root).expect("create");
+        std::fs::write(scoping.plan_md(root), "intro\n\n# Real title\n").expect("write");
+        assert_eq!(plan_title(root, &scoping), "Real title");
+    }
+
+    #[test]
+    fn title_falls_back_to_untitled() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let bare = create_scoping(root).expect("create");
+        assert_eq!(plan_title(root, &bare), "Untitled");
+        std::fs::write(bare.plan_md(root), "no heading here\n").expect("write");
+        assert_eq!(plan_title(root, &bare), "Untitled");
+        let missing = PlanRef {
+            name: "gone".to_string(),
+            phase: Phase::Scoping,
+        };
+        assert_eq!(plan_title(root, &missing), "Untitled");
+    }
+
+    #[test]
+    fn scan_lists_every_phase() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let scoping = create_scoping(root).expect("create");
+        std::fs::write(scoping.plan_md(root), "# Titled\n").expect("write");
+        let executing = execute(root, &scoping).expect("execute");
+        let done = complete(root, &executing).expect("complete");
+        let cancelled = abandon(root, &create_scoping(root).expect("fresh")).expect("abandon");
+        let names: HashSet<(String, Phase)> = scan_plans(root)
+            .into_iter()
+            .map(|plan| (plan.name, plan.phase))
+            .collect();
+        assert_eq!(
+            names,
+            HashSet::from([
+                (cancelled.name, Phase::Cancelled),
+                (done.name, Phase::Completed),
+            ])
+        );
+    }
+
+    #[test]
+    fn execution_marker_survives_cancel() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let plain = create_scoping(root).expect("create");
+        assert!(!has_execution(root, &plain));
+        std::fs::write(plain.plan_md(root), "# Shiny\n").expect("write");
+        let executing = execute(root, &plain).expect("execute");
+        mark_executed(root, &executing);
+        assert!(has_execution(root, &executing));
+        let done = complete(root, &executing).expect("complete");
+        assert!(has_execution(root, &done));
+        let second = create_scoping(root).expect("second");
+        std::fs::write(second.plan_md(root), "# Second\n").expect("write");
+        let running = execute(root, &second).expect("execute");
+        mark_executed(root, &running);
+        let cancelled = abandon(root, &running).expect("abandon");
+        assert!(has_execution(root, &cancelled));
+        let fresh = create_scoping(root).expect("fresh");
+        let dropped = abandon(root, &fresh).expect("abandon");
+        assert!(!has_execution(root, &dropped));
+    }
+
+    #[test]
+    fn mtime_prefers_plan_md_then_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let with_md = create_scoping(root).expect("create");
+        std::fs::write(with_md.plan_md(root), "# T\n").expect("write");
+        let bare = create_scoping(root).expect("create");
+        assert!(plan_mtime(root, &with_md).is_some());
+        assert!(plan_mtime(root, &bare).is_some());
+        let missing = PlanRef {
+            name: "gone".to_string(),
+            phase: Phase::Scoping,
+        };
+        assert_eq!(plan_mtime(root, &missing), None);
     }
 
     #[test]
