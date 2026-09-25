@@ -81,6 +81,7 @@ impl ActivePlan {
 #[derive(Default)]
 struct State {
     connection: Option<ConnectionTo<Agent>>,
+    branch_watch: Option<notify::RecommendedWatcher>,
     supports_close: bool,
     session_id: Option<String>,
     repo_root: Option<PathBuf>,
@@ -89,6 +90,7 @@ struct State {
     awake: Option<awake::Guard>,
     last_prompt: Option<String>,
     last_model: Option<String>,
+    last_effort: Option<String>,
     pending: HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>,
     todos: Vec<TodoView>,
     plan: Option<ActivePlan>,
@@ -115,6 +117,7 @@ impl State {
         repo_root: PathBuf,
         branch: String,
         model: Option<String>,
+        effort: Option<String>,
         plan: ActivePlan,
     ) {
         self.session_id = Some(session_id);
@@ -123,6 +126,7 @@ impl State {
         self.set_working(false);
         self.last_prompt = None;
         self.last_model = model;
+        self.last_effort = effort;
         self.pending.clear();
         self.todos.clear();
         self.plan = Some(plan);
@@ -144,12 +148,12 @@ impl AgentManager {
 
     /// Open a repository: ensure the plan structure, abandon any active
     /// plan, spawn a fresh planner process scoped to a new scoping plan,
-    /// and open a session in planner mode with the stored model reapplied.
+    /// and open a session in planner mode with stored model+effort reapplied.
     pub async fn open_repo(
         &self,
         repo_root: PathBuf,
         branch: String,
-        stored_model: Option<String>,
+        stored: crate::repo_state::RepoState,
     ) -> Result<SessionInfo, AgentError> {
         plans::ensure_structure(&repo_root)?;
         self.abandon_stored_plan()?;
@@ -158,9 +162,80 @@ impl AgentManager {
         let plan = ActivePlan::scoping(scoping.name);
         let agent = opencode::agent_for(plan.phase);
         let (_, _, info) = self
-            .spawn_session(&repo_root, &branch, stored_model, plan, agent)
+            .spawn_session(&repo_root, &branch, stored, plan, agent)
             .await?;
+        self.watch_branch(&repo_root);
         Ok(info)
+    }
+
+    /// Re-check the branch for the open repo. Failures keep the last value.
+    pub async fn refresh_branch(&self) -> Result<String, AgentError> {
+        let repo_root = lock_state(&self.state)
+            .and_then(|state| state.repo_root.clone())
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
+        let branch =
+            crate::branch::current_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string());
+        self.set_branch(branch.clone());
+        Ok(branch)
+    }
+
+    /// Set the held branch and emit it. Returns true when it moved.
+    fn set_branch(&self, branch: String) -> bool {
+        let moved = match self.state.lock() {
+            Ok(mut state) => {
+                if state.branch == branch {
+                    false
+                } else {
+                    state.branch = branch.clone();
+                    true
+                }
+            }
+            Err(error) => {
+                log::warn!("failed to record branch change: {error}");
+                false
+            }
+        };
+        if moved {
+            emit_event(&self.app, AppEvent::BranchChanged { branch });
+        }
+        moved
+    }
+
+    /// Watch `.git/HEAD` for the open repo, refreshing `state.branch` per
+    /// event so execute/retry snapshots go fresh free.
+    fn watch_branch(&self, repo_root: &Path) {
+        let root = repo_root.to_path_buf();
+        let state = Arc::clone(&self.state);
+        let app = self.app.clone();
+        let watcher = crate::branch::watch_branch(root.clone(), move |branch| {
+            let moved = match state.lock() {
+                Ok(mut guard) => {
+                    if guard.repo_root.as_ref() != Some(&root) || guard.branch == branch {
+                        false
+                    } else {
+                        guard.branch = branch.clone();
+                        true
+                    }
+                }
+                Err(error) => {
+                    log::warn!("failed to record branch change: {error}");
+                    false
+                }
+            };
+            if moved {
+                emit_event(&app, AppEvent::BranchChanged { branch });
+            }
+        });
+        match self.state.lock() {
+            Ok(mut state) => {
+                state.branch_watch = watcher;
+            }
+            Err(error) => {
+                log::warn!("failed to hold branch watcher: {error}");
+            }
+        }
     }
 
     /// Set one session config option without restarting the session.
@@ -183,14 +258,27 @@ impl AgentManager {
         )
         .await
         .map_err(|error| AgentError::RequestFailed { raw: error })?;
-        if config_id == "model" {
+        // Classify the changed option from the response list and write
+        // through to the repo file plus in-memory last values.
+        if let Some(option) = response.iter().find(|option| option.id == config_id)
+            && let Some(role) = crate::repo_state::classify_option(option)
+        {
+            let value = option.current_value.clone();
             match self.state.lock() {
-                Ok(mut state) => {
-                    state.last_model = Some(value);
-                }
+                Ok(mut state) => match role {
+                    crate::repo_state::ConfigRole::Model => {
+                        state.last_model = Some(value.clone());
+                    }
+                    crate::repo_state::ConfigRole::Effort => {
+                        state.last_effort = Some(value.clone());
+                    }
+                },
                 Err(error) => {
-                    log::warn!("failed to remember model choice: {error}");
+                    log::warn!("failed to remember config choice: {error}");
                 }
+            }
+            if let Some(repo) = self.current_repo() {
+                crate::repo_state::save_role(&repo, role, &value);
             }
         }
         Ok(response)
@@ -201,7 +289,7 @@ impl AgentManager {
     /// no user bubble, the chat opens working.
     pub async fn execute_plan(&self) -> Result<SessionInfo, AgentError> {
         ensure_idle(&self.state)?;
-        let (repo_root, branch, model) =
+        let (repo_root, branch, stored) =
             self.reopen_snapshot()
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "open a repository first".to_string(),
@@ -221,7 +309,7 @@ impl AgentManager {
         self.shutdown_connection().await;
         let agent = opencode::agent_for(plan.phase);
         let (connection, session_id, info) = self
-            .spawn_session(&repo_root, &branch, model, plan, agent)
+            .spawn_session(&repo_root, &branch, stored, plan, agent)
             .await?;
         let text = opencode::executor_first_message(&opencode::plan_display(&next));
         self.start_turn(connection, session_id, text, None).await?;
@@ -245,13 +333,14 @@ impl AgentManager {
     }
 
     /// Spawn a fresh agent process scoped to one plan and open a session on
-    /// it: pin the agent mode, reapply the stored model, and report the
-    /// session. Shared by every session opener.
+    /// it: pin the agent mode, reapply stored model then effort
+    /// (effort-last, since a model switch can reshape effort options), and
+    /// report the session. Shared by every session opener.
     async fn spawn_session(
         &self,
         repo_root: &Path,
         branch: &str,
-        model: Option<String>,
+        stored: crate::repo_state::RepoState,
         plan: ActivePlan,
         agent: &str,
     ) -> Result<(ConnectionTo<Agent>, String, SessionInfo), AgentError> {
@@ -269,17 +358,43 @@ impl AgentManager {
         let session_id = response.session_id.to_string();
         let mut options =
             pin_agent_mode(&connection, &acp::SessionId::new(session_id.clone()), agent).await?;
+        // Reapply model first, then effort; each absent or inapplicable role
+        // is skipped with a warn-log while the open continues on defaults.
         let mut applied_model: Option<String> = None;
-        if let Some(model) = model
-            && let Some(updated) = set_model_value(
-                &connection,
-                &acp::SessionId::new(session_id.clone()),
-                &model,
-            )
-            .await
-        {
-            options = updated;
-            applied_model = Some(model);
+        let mut applied_effort: Option<String> = None;
+        if let Some(model) = stored.model {
+            let id = option_id_for_role(&options, crate::repo_state::ConfigRole::Model);
+            match id {
+                Some(id) => {
+                    let session = acp::SessionId::new(session_id.clone());
+                    match send_config_option(&connection, &session, &id, &model).await {
+                        Ok(updated) => {
+                            options = updated;
+                            applied_model = Some(model);
+                        }
+                        Err(error) => log::warn!("failed to reapply stored model {model}: {error}"),
+                    }
+                }
+                None => log::warn!("stored model has no matching option, skipping"),
+            }
+        }
+        if let Some(effort) = stored.effort {
+            let id = option_id_for_role(&options, crate::repo_state::ConfigRole::Effort);
+            match id {
+                Some(id) => {
+                    let session = acp::SessionId::new(session_id.clone());
+                    match send_config_option(&connection, &session, &id, &effort).await {
+                        Ok(updated) => {
+                            options = updated;
+                            applied_effort = Some(effort);
+                        }
+                        Err(error) => {
+                            log::warn!("failed to reapply stored effort {effort}: {error}")
+                        }
+                    }
+                }
+                None => log::warn!("stored effort has no matching option, skipping"),
+            }
         }
         let info = {
             let mut state = self.state.lock().expect("state poisoned");
@@ -289,6 +404,7 @@ impl AgentManager {
                 repo_root.to_path_buf(),
                 branch.to_string(),
                 applied_model,
+                applied_effort,
                 plan,
             );
             session_info(&session_id, repo_root, branch, options, view)
@@ -421,7 +537,7 @@ impl AgentManager {
     /// Reopen the held plan in a fresh session after transport death: same
     /// plan, same dir, no flag changes. Retry path only.
     async fn reopen_session(&self) -> Result<(ConnectionTo<Agent>, String), AgentError> {
-        let (repo_root, branch, model, plan) = {
+        let (repo_root, branch, stored, plan) = {
             let state = lock_state(&self.state).ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
@@ -437,14 +553,17 @@ impl AgentManager {
             (
                 repo_root,
                 state.branch.clone(),
-                state.last_model.clone(),
+                crate::repo_state::RepoState {
+                    model: state.last_model.clone(),
+                    effort: state.last_effort.clone(),
+                },
                 plan,
             )
         };
         self.shutdown_connection().await;
         let agent = opencode::agent_for(plan.phase);
         let (connection, session_id, _) = self
-            .spawn_session(&repo_root, &branch, model, plan, agent)
+            .spawn_session(&repo_root, &branch, stored, plan, agent)
             .await?;
         Ok((connection, session_id))
     }
@@ -577,6 +696,7 @@ impl AgentManager {
             Ok(mut state) => {
                 state.connection = None;
                 state.session_id = None;
+                state.branch_watch = None;
             }
             Err(error) => {
                 log::warn!("failed to drop agent connection: {error}");
@@ -722,12 +842,15 @@ impl AgentManager {
         }
     }
 
-    fn reopen_snapshot(&self) -> Option<(PathBuf, String, Option<String>)> {
+    fn reopen_snapshot(&self) -> Option<(PathBuf, String, crate::repo_state::RepoState)> {
         let state = lock_state(&self.state)?;
         Some((
             state.repo_root.clone()?,
             state.branch.clone(),
-            state.last_model.clone(),
+            crate::repo_state::RepoState {
+                model: state.last_model.clone(),
+                effort: state.last_effort.clone(),
+            },
         ))
     }
 
@@ -1041,6 +1164,18 @@ async fn pin_agent_mode(
         })
 }
 
+/// Agent-advertised option id currently filling a storage role.
+fn option_id_for_role(
+    options: &[ConfigOptionView],
+    role: crate::repo_state::ConfigRole,
+) -> Option<String> {
+    options
+        .iter()
+        .find(|option| crate::repo_state::classify_option(option) == Some(role))
+        .map(|option| option.id.clone())
+}
+
+#[allow(dead_code)]
 async fn set_model_value(
     connection: &ConnectionTo<Agent>,
     session_id: &acp::SessionId,
@@ -1269,6 +1404,7 @@ mod tests {
             "session".to_string(),
             PathBuf::from("/tmp"),
             "main".to_string(),
+            None,
             None,
             ActivePlan::scoping("2026-09-25.10-54-59".to_string()),
         );

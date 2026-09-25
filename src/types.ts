@@ -37,7 +37,6 @@ export interface PlanInfo {
 
 export interface RecentRepo {
 	path: string;
-	branch: string;
 }
 
 export interface RepoInfo {
@@ -94,6 +93,7 @@ export type AppEvent =
 			ctx_pct: number;
 	  }
 	| { type: "plan_changed"; plan: PlanInfo }
+	| { type: "branch_changed"; branch: string }
 	| { type: "session_reset" };
 
 export type TranscriptItem =

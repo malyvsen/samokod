@@ -9,6 +9,7 @@ import {
 	markCompleted,
 	onAppEvent,
 	openRepo,
+	refreshBranch,
 	retryLast,
 	sendPrompt,
 	setConfigOption,
@@ -202,10 +203,35 @@ export function App() {
 				setPlan(event.plan);
 				break;
 			}
+			case "branch_changed": {
+				setSession((current) =>
+					current === null ? current : { ...current, branch: event.branch },
+				);
+				break;
+			}
 		}
 	}, []);
 
 	useEffect(() => onAppEvent(handleEvent), [handleEvent]);
+
+	useEffect(() => {
+		if (view.kind !== "chat") return;
+		function onFocus() {
+			refreshBranch()
+				.then((branch) => {
+					setSession((current) =>
+						current === null ? current : { ...current, branch },
+					);
+				})
+				.catch((error: unknown) => {
+					console.warn("failed to refresh branch", error);
+				});
+		}
+		window.addEventListener("focus", onFocus);
+		return () => {
+			window.removeEventListener("focus", onFocus);
+		};
+	}, [view.kind]);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: re-scroll whenever the transcript identity changes
 	useEffect(() => {

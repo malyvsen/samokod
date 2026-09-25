@@ -8,10 +8,7 @@ describe("repo picker", () => {
 			<RepoPicker
 				title="SAMOKOD"
 				subtitle="open a git repository to start one chat"
-				recent={[
-					{ path: "~/code/samokod", branch: "main" },
-					{ path: "~/code/dotfiles", branch: "master" },
-				]}
+				recent={[{ path: "~/code/samokod" }, { path: "~/code/dotfiles" }]}
 				currentPath={null}
 				error={null}
 				onOpen={vi.fn()}
@@ -30,7 +27,7 @@ describe("repo picker", () => {
 			<RepoPicker
 				title="SAMOKOD"
 				subtitle="open a git repository to start one chat"
-				recent={[{ path: "~/code/samokod", branch: "main" }]}
+				recent={[{ path: "~/code/samokod" }]}
 				currentPath={null}
 				error="~/downloads/notes - not a git repository"
 				onOpen={vi.fn()}
@@ -47,10 +44,7 @@ describe("repo picker", () => {
 			<RepoPicker
 				title="SAMOKOD"
 				subtitle="switch repository - the current chat closes"
-				recent={[
-					{ path: "~/code/samokod", branch: "main" },
-					{ path: "~/code/dotfiles", branch: "master" },
-				]}
+				recent={[{ path: "~/code/samokod" }, { path: "~/code/dotfiles" }]}
 				currentPath="~/code/samokod"
 				error={null}
 				onOpen={vi.fn()}

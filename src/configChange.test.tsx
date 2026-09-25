@@ -84,7 +84,7 @@ beforeEach(() => {
 
 async function openChatWith(options: ConfigOptionView[]) {
 	api.getPrefs.mockResolvedValue({
-		recent: [{ path: "/repo", branch: "main" }],
+		recent: [{ path: "/repo" }],
 	});
 	api.openRepo.mockResolvedValue(testSession(options));
 	const user = userEvent.setup();

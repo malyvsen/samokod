@@ -21,6 +21,10 @@ export function openRepo(path: string): Promise<SessionInfo> {
 	return invoke<SessionInfo>("open_repo", { path });
 }
 
+export function refreshBranch(): Promise<string> {
+	return invoke<string>("refresh_branch");
+}
+
 export function executePlan(): Promise<SessionInfo> {
 	return invoke<SessionInfo>("execute_plan");
 }

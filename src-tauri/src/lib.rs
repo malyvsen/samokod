@@ -2,12 +2,14 @@
 mod acp;
 mod agent;
 mod awake;
+mod branch;
 mod error_hint;
 mod opencode;
 mod permissions;
 mod plans;
 mod prefs;
 mod repo;
+mod repo_state;
 mod spend;
 mod todos;
 mod types;
@@ -19,7 +21,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_log::{Target, TargetKind};
 
 use crate::agent::AgentManager;
-use crate::prefs::{load_prefs, record_model, record_open, save_prefs, stored_model};
+use crate::prefs::{load_prefs, record_open, save_prefs};
 use crate::repo::{RepoInfo, validate_repo};
 use crate::types::{ConfigOptionView, PlanInfo, Prefs, SessionInfo};
 
@@ -40,18 +42,26 @@ async fn open_repo(
     path: String,
 ) -> Result<SessionInfo, String> {
     let info = validate_repo(&PathBuf::from(&path))?;
-    let dir = prefs_dir(&app)?;
-    let stored = stored_model(&load_prefs(&dir), &info.root);
+    let stored = crate::repo_state::load_repo_state(&PathBuf::from(&info.root));
     let session = state
         .open_repo(PathBuf::from(&info.root), info.branch.clone(), stored)
         .await
         .map_err(|error| error.to_string())?;
+    let dir = prefs_dir(&app)?;
     let mut prefs = load_prefs(&dir);
-    record_open(&mut prefs, &info.root, &info.branch);
+    record_open(&mut prefs, &info.root);
     if let Err(error) = save_prefs(&dir, &prefs) {
         log::warn!("failed to save prefs after opening {}: {error}", info.root);
     }
     Ok(session)
+}
+
+#[tauri::command]
+async fn refresh_branch(state: State<'_, AgentManager>) -> Result<String, String> {
+    state
+        .refresh_branch()
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -109,27 +119,14 @@ async fn answer_permission(
 
 #[tauri::command]
 async fn set_config_option(
-    app: AppHandle,
     state: State<'_, AgentManager>,
     config_id: String,
     value: String,
 ) -> Result<Vec<ConfigOptionView>, String> {
-    let options = state
-        .set_config_option(config_id.clone(), value.clone())
+    state
+        .set_config_option(config_id, value)
         .await
-        .map_err(|error| error.to_string())?;
-    if config_id == "model"
-        && let Some(repo) = state.current_repo()
-    {
-        let repo = repo.to_string_lossy().to_string();
-        let dir = prefs_dir(&app)?;
-        let mut prefs = load_prefs(&dir);
-        record_model(&mut prefs, &repo, &value);
-        if let Err(error) = save_prefs(&dir, &prefs) {
-            log::warn!("failed to save model choice for {repo}: {error}");
-        }
-    }
-    Ok(options)
+        .map_err(|error| error.to_string())
 }
 
 fn log_level() -> log::LevelFilter {
@@ -172,6 +169,7 @@ pub fn run() {
             get_prefs,
             validate_repo_path,
             open_repo,
+            refresh_branch,
             execute_plan,
             mark_completed,
             abandon_plan,

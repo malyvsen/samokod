@@ -1,6 +1,5 @@
 // Shared backend views: failures, events, and session payloads crossing the
 // command edge as JSON. The command edge renders errors as strings.
-use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -98,6 +97,9 @@ pub enum AppEvent {
     PlanChanged {
         plan: PlanInfo,
     },
+    BranchChanged {
+        branch: String,
+    },
     SessionReset,
 }
 
@@ -167,20 +169,17 @@ impl PlanInfo {
     }
 }
 
-/// Recent repo row for the picker.
+/// Recent repo row for the picker: path only.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RecentRepo {
     pub path: String,
-    pub branch: String,
 }
 
-/// Local preferences persisted under the OS app-data directory.
+/// Local state persisted under the OS app-data directory.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Prefs {
     #[serde(default)]
     pub recent: Vec<RecentRepo>,
-    #[serde(default)]
-    pub models: HashMap<String, String>,
 }
 
 #[cfg(test)]
