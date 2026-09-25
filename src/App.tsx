@@ -3,7 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	abandonPlan,
 	answerPermission,
+	cancelExecution,
 	cancelTurn,
+	createPlan,
 	executePlan,
 	getPrefs,
 	markCompleted,
@@ -17,6 +19,7 @@ import {
 } from "./api";
 import { reducedMotion, useAuroraMotion } from "./auroraMotion";
 import { DraftBubble } from "./components/DraftBubble";
+import { PlansPanel } from "./components/PlansPanel";
 import { RepoPicker } from "./components/RepoPicker";
 import { SidePanel } from "./components/SidePanel";
 import { TopBar } from "./components/TopBar";
@@ -24,60 +27,93 @@ import { Transcript } from "./components/Transcript";
 import type {
 	AgentStatus,
 	AppEvent,
+	ConfigOptionView,
 	PlanEntry,
 	PlanInfo,
 	PlansUpdate,
 	RecentRepo,
-	SessionInfo,
 	SessionKey,
 	SpendView,
 	TodoView,
 	TranscriptItem,
 } from "./types";
-import { sameSession } from "./types";
+import { sessionKeyOf } from "./types";
 import "./App.css";
 
 type View = { kind: "picker"; returnToChat: boolean } | { kind: "chat" };
+
+interface ChatState {
+	transcript: TranscriptItem[];
+	todos: TodoView[];
+	spend: SpendView | null;
+	configOptions: ConfigOptionView[];
+	working: boolean;
+	approval: boolean;
+	failed: boolean;
+}
+
+function emptyChat(): ChatState {
+	return {
+		transcript: [],
+		todos: [],
+		spend: null,
+		configOptions: [],
+		working: false,
+		approval: false,
+		failed: false,
+	};
+}
 
 export function App() {
 	const [view, setView] = useState<View>({
 		kind: "picker",
 		returnToChat: false,
 	});
-	const [session, setSession] = useState<SessionInfo | null>(null);
+	const [repoRoot, setRepoRoot] = useState<string | null>(null);
+	const [branch, setBranch] = useState("HEAD");
 	const [recent, setRecent] = useState<RecentRepo[]>([]);
 	const [pickerError, setPickerError] = useState<string | null>(null);
-	const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
-	const [todos, setTodos] = useState<TodoView[]>([]);
-	const [spend, setSpend] = useState<SpendView | null>(null);
-	const [plan, setPlan] = useState<PlanInfo | null>(null);
-	const [, setPlans] = useState<PlanEntry[]>([]);
+	const [plans, setPlans] = useState<PlanEntry[]>([]);
 	const [selectedKey, setSelectedKey] = useState<SessionKey | null>(null);
-	const [working, setWorking] = useState(false);
-	const [awaitingApproval, setAwaitingApproval] = useState(false);
-	const [failed, setFailed] = useState(false);
+	const [chats, setChats] = useState<Record<string, ChatState>>({});
 	const appRef = useRef<HTMLDivElement>(null);
 	const notifyEdit = useAuroraMotion(appRef);
 	const transcriptRef = useRef<HTMLDivElement>(null);
 	const configGeneration = useRef(0);
 
-	const status: AgentStatus = awaitingApproval
+	const selectedId = selectedKey === null ? null : sessionKeyOf(selectedKey);
+	const selectedChat: ChatState =
+		selectedId === null ? emptyChat() : (chats[selectedId] ?? emptyChat());
+
+	const status: AgentStatus = selectedChat.approval
 		? "approval"
-		: working
+		: selectedChat.working
 			? "working"
-			: failed
+			: selectedChat.failed
 				? "failed"
 				: "idle";
+	const busy = selectedChat.working || selectedChat.approval;
 
 	const selectedRef = useRef<SessionKey | null>(null);
 	selectedRef.current = selectedKey;
 
+	const updateChat = useCallback(
+		(key: SessionKey, next: (chat: ChatState) => ChatState) => {
+			const id = sessionKeyOf(key);
+			setChats((current) => ({
+				...current,
+				[id]: next(current[id] ?? emptyChat()),
+			}));
+		},
+		[],
+	);
+
 	const applyPlans = useCallback((update: PlansUpdate) => {
 		setPlans(update.plans);
 		setSelectedKey(update.selected);
-		setPlan(planOfSelected(update.plans, update.selected));
 	}, []);
 
+	const plan = planOfSelected(plans, selectedKey);
 	const agentLabel = agentLabelForPlan(plan);
 
 	useEffect(() => {
@@ -102,138 +138,156 @@ export function App() {
 				return;
 			}
 			if (event.type === "branch_changed") {
-				setSession((current) =>
-					current === null ? current : { ...current, branch: event.branch },
-				);
+				setBranch(event.branch);
 				return;
 			}
-			// Background sessions update silently; only the selected
-			// session renders.
-			if (!sameSession(event.session, selectedRef.current)) return;
+			if (event.type === "plan_changed") {
+				return;
+			}
+			const key = event.session;
 			switch (event.type) {
 				case "agent_text": {
-					setWorking(true);
-					setFailed(false);
-					setTranscript((items) => {
-						const last = items[items.length - 1];
-						if (last !== undefined && last.kind === "agent") {
-							return [
-								...items.slice(0, -1),
-								{ ...last, text: last.text + event.chunk },
-							];
-						}
-						return [
-							...items,
-							{ kind: "agent", id: crypto.randomUUID(), text: event.chunk },
-						];
+					updateChat(key, (chat) => {
+						const last = chat.transcript[chat.transcript.length - 1];
+						const transcript: TranscriptItem[] =
+							last !== undefined && last.kind === "agent"
+								? [
+										...chat.transcript.slice(0, -1),
+										{ ...last, text: last.text + event.chunk },
+									]
+								: [
+										...chat.transcript,
+										{
+											kind: "agent",
+											id: crypto.randomUUID(),
+											text: event.chunk,
+										},
+									];
+						return { ...chat, working: true, failed: false, transcript };
 					});
 					break;
 				}
 				case "tool_line": {
-					setWorking(true);
-					setFailed(false);
-					setTranscript((items) => {
-						const index = items.findIndex(
+					updateChat(key, (chat) => {
+						const index = chat.transcript.findIndex(
 							(item) => item.kind === "tool" && item.line.id === event.line.id,
 						);
 						if (index >= 0) {
-							const copy = [...items];
+							const copy = [...chat.transcript];
 							copy[index] = {
 								kind: "tool",
 								id: copy[index]?.id ?? crypto.randomUUID(),
 								line: event.line,
 							};
-							return copy;
+							return {
+								...chat,
+								working: true,
+								failed: false,
+								transcript: copy,
+							};
 						}
-						return [
-							...items,
-							{ kind: "tool", id: crypto.randomUUID(), line: event.line },
-						];
+						return {
+							...chat,
+							working: true,
+							failed: false,
+							transcript: [
+								...chat.transcript,
+								{ kind: "tool", id: crypto.randomUUID(), line: event.line },
+							],
+						};
 					});
 					break;
 				}
 				case "turn_done": {
-					setWorking(false);
-					setAwaitingApproval(false);
-					setFailed(false);
+					updateChat(key, (chat) => ({
+						...chat,
+						working: false,
+						approval: false,
+						failed: false,
+					}));
 					break;
 				}
 				case "turn_failed":
 				case "agent_exited": {
-					setWorking(false);
-					setAwaitingApproval(false);
-					setFailed(true);
-					setTranscript((items) => [
-						...items,
-						failureItem(event.raw, event.hint, event.retryable),
-					]);
+					updateChat(key, (chat) => ({
+						...chat,
+						working: false,
+						approval: false,
+						failed: true,
+						transcript: [
+							...chat.transcript,
+							failureItem(event.raw, event.hint, event.retryable),
+						],
+					}));
 					break;
 				}
 				case "permission_asked": {
-					setAwaitingApproval(true);
-					setTranscript((items) => [
-						...items,
-						{
-							kind: "approval",
-							id: crypto.randomUUID(),
-							permission: event.permission,
-							resolved: false,
-						},
-					]);
+					updateChat(key, (chat) => ({
+						...chat,
+						approval: true,
+						transcript: [
+							...chat.transcript,
+							{
+								kind: "approval",
+								id: crypto.randomUUID(),
+								permission: event.permission,
+								resolved: false,
+							},
+						],
+					}));
 					break;
 				}
 				case "permission_resolved": {
-					setTranscript((items) =>
-						items.map((item) =>
+					updateChat(key, (chat) => ({
+						...chat,
+						transcript: chat.transcript.map((item) =>
 							item.kind === "approval" &&
 							item.permission.tool_call_id === event.tool_call_id
 								? { ...item, resolved: true }
 								: item,
 						),
-					);
+					}));
 					break;
 				}
 				case "config_options": {
-					setSession((current) =>
-						current === null
-							? current
-							: { ...current, config_options: event.options },
-					);
+					updateChat(key, (chat) => ({
+						...chat,
+						configOptions: event.options,
+					}));
 					break;
 				}
 				case "todos_changed": {
-					setTodos(event.todos);
-					if (event.changes.length > 0) {
-						setTranscript((items) => [
-							...items,
-							{
-								kind: "todos",
-								id: crypto.randomUUID(),
-								changes: event.changes,
-							},
-						]);
-					}
+					updateChat(key, (chat) => ({
+						...chat,
+						todos: event.todos,
+						transcript:
+							event.changes.length > 0
+								? [
+										...chat.transcript,
+										{
+											kind: "todos",
+											id: crypto.randomUUID(),
+											changes: event.changes,
+										},
+									]
+								: chat.transcript,
+					}));
 					break;
 				}
 				case "spend_tick": {
-					setSpend({
-						cost: event.cost,
-						contextPct: event.ctx_pct,
-					});
+					updateChat(key, (chat) => ({
+						...chat,
+						spend: { cost: event.cost, contextPct: event.ctx_pct },
+					}));
 					break;
 				}
 				case "session_reset": {
-					setTodos([]);
-					setSpend(null);
-					break;
-				}
-				case "plan_changed": {
-					setPlan(event.plan);
+					updateChat(key, (chat) => ({ ...chat, todos: [], spend: null }));
 					break;
 				}
 			}
 		},
-		[applyPlans],
+		[applyPlans, updateChat],
 	);
 
 	useEffect(() => onAppEvent(handleEvent), [handleEvent]);
@@ -242,10 +296,8 @@ export function App() {
 		if (view.kind !== "chat") return;
 		function onFocus() {
 			refreshBranch()
-				.then((branch) => {
-					setSession((current) =>
-						current === null ? current : { ...current, branch },
-					);
+				.then((fetched) => {
+					setBranch(fetched);
 				})
 				.catch((error: unknown) => {
 					console.warn("failed to refresh branch", error);
@@ -257,7 +309,8 @@ export function App() {
 		};
 	}, [view.kind]);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: re-scroll whenever the transcript identity changes
+	const transcript = selectedChat.transcript;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: re-scroll whenever the selected transcript identity changes
 	useEffect(() => {
 		const node = transcriptRef.current;
 		if (node !== null) {
@@ -290,25 +343,15 @@ export function App() {
 		setPickerError(null);
 		try {
 			const info = await validateRepo(path);
-			if (info.root === session?.repo_root) {
+			if (info.root === repoRoot) {
 				setView({ kind: "chat" });
 				return;
 			}
 			const opened = await openRepo(info.root);
+			setRepoRoot(opened.repo_root);
+			setBranch(opened.branch);
+			setChats({});
 			applyPlans({ plans: opened.plans, selected: opened.selected });
-			setSession({
-				session_id: "",
-				repo_root: opened.repo_root,
-				branch: opened.branch,
-				config_options: [],
-				plan: planOfSelected(opened.plans, opened.selected),
-			});
-			setTranscript([]);
-			setTodos([]);
-			setSpend(null);
-			setWorking(false);
-			setAwaitingApproval(false);
-			setFailed(false);
 			setView({ kind: "chat" });
 			setPickerError(null);
 			setRecent((await getPrefs()).recent);
@@ -324,34 +367,37 @@ export function App() {
 		await handleOpenPath(picked);
 	}
 
-	function appendFailure(raw: string, hint: string, retryable: boolean) {
-		setTranscript((items) => [...items, failureItem(raw, hint, retryable)]);
+	function appendError(key: SessionKey, raw: string) {
+		updateChat(key, (chat) => ({
+			...chat,
+			transcript: [
+				...chat.transcript,
+				failureItem(raw, "retry the turn", true),
+			],
+		}));
 	}
 
-	function appendError(raw: string) {
-		appendFailure(raw, "retry the turn", true);
-	}
-
-	async function runTurn(text: string) {
-		const key = selectedRef.current;
-		if (key === null) return;
-		setWorking(true);
-		setFailed(false);
+	async function runTurn(key: SessionKey, text: string) {
+		updateChat(key, (chat) => ({ ...chat, working: true, failed: false }));
 		try {
 			await sendPrompt(key, text);
 		} catch (error) {
-			setWorking(false);
-			appendError(error instanceof Error ? error.message : String(error));
+			updateChat(key, (chat) => ({ ...chat, working: false }));
+			appendError(key, error instanceof Error ? error.message : String(error));
 		}
 	}
 
 	async function handleSend(text: string) {
-		if (text === "" || working || awaitingApproval || session === null) return;
-		setTranscript((items) => [
-			...items,
-			{ kind: "user", id: crypto.randomUUID(), text },
-		]);
-		await runTurn(text);
+		const key = selectedRef.current;
+		if (text === "" || busy || key === null) return;
+		updateChat(key, (chat) => ({
+			...chat,
+			transcript: [
+				...chat.transcript,
+				{ kind: "user", id: crypto.randomUUID(), text },
+			],
+		}));
+		await runTurn(key, text);
 	}
 
 	async function handleStop() {
@@ -360,30 +406,38 @@ export function App() {
 		try {
 			await cancelTurn(key);
 		} finally {
-			setWorking(false);
-			setAwaitingApproval(false);
+			updateChat(key, (chat) => ({
+				...chat,
+				working: false,
+				approval: false,
+			}));
 		}
+	}
+
+	function handleSelect(key: SessionKey) {
+		setSelectedKey(key);
 	}
 
 	async function handleAnswer(toolCallId: string, optionId: string) {
 		const key = selectedRef.current;
 		if (key === null) return;
 		await answerPermission(key, toolCallId, optionId);
-		setAwaitingApproval(false);
-		setWorking(true);
+		updateChat(key, (chat) => ({
+			...chat,
+			approval: false,
+			working: true,
+		}));
 	}
 
 	async function handleConfigChange(configId: string, value: string) {
 		const key = selectedRef.current;
-		if (working || awaitingApproval || key === null) return;
+		if (busy || key === null) return;
 		configGeneration.current += 1;
 		const generation = configGeneration.current;
 		try {
 			const options = await setConfigOption(key, configId, value);
 			if (configGeneration.current !== generation) return;
-			setSession((current) =>
-				current === null ? current : { ...current, config_options: options },
-			);
+			updateChat(key, (chat) => ({ ...chat, configOptions: options }));
 		} catch (error) {
 			console.warn(`set_config_option ${configId}=${value} failed`, error);
 			return;
@@ -392,68 +446,110 @@ export function App() {
 
 	async function handleRetry() {
 		const key = selectedRef.current;
-		if (working || awaitingApproval || key === null) return;
-		setFailed(false);
+		if (busy || key === null) return;
+		updateChat(key, (chat) => ({ ...chat, failed: false }));
 		try {
 			const retried = await retryLast(key);
-			if (retried) setWorking(true);
+			if (retried) {
+				updateChat(key, (chat) => ({ ...chat, working: true }));
+			}
 		} catch (error) {
-			appendError(error instanceof Error ? error.message : String(error));
+			appendError(key, error instanceof Error ? error.message : String(error));
 		}
 	}
 
 	function handleRepoButton() {
-		if (working || awaitingApproval) return;
+		if (busy) return;
 		setView({ kind: "picker", returnToChat: true });
 	}
 
-	async function handleExecute() {
-		const key = selectedRef.current;
-		if (working || awaitingApproval || key === null) return;
-		setWorking(true);
+	async function handleNewPlan() {
 		try {
-			const update = await executePlan(key);
+			const update = await createPlan();
 			applyPlans(update);
-			// The executor turn it just started is already running.
-			setWorking(true);
-			setTranscript([]);
-			setTodos([]);
-			setSpend(null);
 		} catch (error) {
-			setWorking(false);
-			appendError(error instanceof Error ? error.message : String(error));
+			const key = selectedRef.current;
+			if (key !== null) {
+				appendError(
+					key,
+					error instanceof Error ? error.message : String(error),
+				);
+			}
 		}
 	}
 
-	async function handleComplete() {
-		await runPlansAction((session) => markCompleted(session));
+	async function handleExecute(key: SessionKey) {
+		updateChat(key, (chat) => ({ ...chat, working: true }));
+		try {
+			const update = await executePlan(key);
+			carryHistory(key, update, true);
+			applyPlans(update);
+		} catch (error) {
+			updateChat(key, (chat) => ({ ...chat, working: false }));
+			appendError(key, error instanceof Error ? error.message : String(error));
+		}
 	}
 
-	async function handleAbandon() {
-		await runPlansAction((session) => abandonPlan(session));
+	async function handleDone(key: SessionKey) {
+		await runPlansAction(key, (session) => markCompleted(session));
+	}
+
+	async function handleAbandon(key: SessionKey) {
+		await runPlansAction(key, (session) => abandonPlan(session));
+	}
+
+	async function handleCancel(key: SessionKey) {
+		await runPlansAction(key, (session) => cancelExecution(session));
+	}
+
+	/// Move the acted-on transcript to its history row when the plan
+	/// renamed, and open the new execution session working. `carry` sets
+	/// the executor running for the eager execute path.
+	function carryHistory(
+		key: SessionKey,
+		update: PlansUpdate,
+		executorRunning: boolean,
+	) {
+		const historyKey: SessionKey = {
+			plan: update.selected.plan,
+			role: key.role,
+		};
+		setChats((current) => {
+			const next = { ...current };
+			const entry = next[sessionKeyOf(key)] ?? emptyChat();
+			delete next[sessionKeyOf(key)];
+			next[sessionKeyOf(historyKey)] = { ...entry, working: false };
+			if (
+				executorRunning &&
+				sessionKeyOf(update.selected) !== sessionKeyOf(historyKey)
+			) {
+				const id = sessionKeyOf(update.selected);
+				next[id] = {
+					...(next[id] ?? emptyChat()),
+					working: true,
+					failed: false,
+				};
+			}
+			return next;
+		});
 	}
 
 	async function runPlansAction(
+		key: SessionKey,
 		action: (session: SessionKey) => Promise<PlansUpdate>,
 	) {
-		const key = selectedRef.current;
-		if (working || awaitingApproval || key === null) return;
-		setWorking(true);
+		updateChat(key, (chat) => ({ ...chat, working: true }));
 		try {
-			applyPlans(await action(key));
-			setTranscript([]);
-			setTodos([]);
-			setSpend(null);
-			setWorking(false);
+			const update = await action(key);
+			carryHistory(key, update, false);
+			applyPlans(update);
 		} catch (error) {
-			setWorking(false);
-			appendError(error instanceof Error ? error.message : String(error));
+			updateChat(key, (chat) => ({ ...chat, working: false }));
+			appendError(key, error instanceof Error ? error.message : String(error));
 		}
 	}
 
-	const repoLabel = session === null ? "no repo" : shortPath(session.repo_root);
-	const branch = session?.branch ?? "HEAD";
-	const configOptions = session?.config_options ?? [];
+	const repoLabel = repoRoot === null ? "no repo" : shortPath(repoRoot);
 	const returnToChat = view.kind === "picker" && view.returnToChat;
 
 	return (
@@ -482,7 +578,7 @@ export function App() {
 							: "open a git repository to start one chat"
 					}
 					recent={recent}
-					currentPath={returnToChat ? (session?.repo_root ?? null) : null}
+					currentPath={returnToChat ? repoRoot : null}
 					error={pickerError}
 					onOpen={handleOpenPath}
 					onBrowse={handleBrowse}
@@ -498,32 +594,48 @@ export function App() {
 						plan={plan}
 						onOpenPicker={handleRepoButton}
 						onStop={handleStop}
-						onExecute={handleExecute}
-						onComplete={handleComplete}
-						onAbandon={handleAbandon}
+						onExecute={() => {
+							if (selectedKey !== null) void handleExecute(selectedKey);
+						}}
+						onComplete={() => {
+							if (selectedKey !== null) void handleDone(selectedKey);
+						}}
+						onAbandon={() => {
+							if (selectedKey !== null) void handleAbandon(selectedKey);
+						}}
 					/>
 					<div className="mainrow">
+						<PlansPanel
+							plans={plans}
+							selected={selectedKey}
+							onSelect={handleSelect}
+							onNewPlan={() => void handleNewPlan()}
+							onExecute={(key) => void handleExecute(key)}
+							onAbandon={(key) => void handleAbandon(key)}
+							onCancel={(key) => void handleCancel(key)}
+							onDone={(key) => void handleDone(key)}
+						/>
 						<div className="chatcol">
 							<div className="transcript" ref={transcriptRef}>
 								<Transcript
-									items={transcript}
+									items={selectedChat.transcript}
 									repoLabel={repoLabel}
 									agentLabel={agentLabel}
 									onRetry={handleRetry}
 									onAnswer={handleAnswer}
 								>
-									{status === "idle" && (
+									{!busy && (
 										<DraftBubble onSend={handleSend} onEdit={notifyEdit} />
 									)}
 								</Transcript>
 							</div>
 						</div>
 						<SidePanel
-							todos={todos}
-							spend={spend}
-							sessionId={session?.session_id ?? ""}
-							options={configOptions}
-							disabled={status !== "idle"}
+							todos={selectedChat.todos}
+							spend={selectedChat.spend}
+							sessionId={selectedId ?? ""}
+							options={selectedChat.configOptions}
+							disabled={busy}
 							onChange={handleConfigChange}
 						/>
 					</div>
@@ -541,13 +653,18 @@ function failureItem(
 	return { kind: "error", id: crypto.randomUUID(), raw, hint, retryable };
 }
 
-function planOfSelected(plans: PlanEntry[], selected: SessionKey): PlanInfo {
+function planOfSelected(
+	plans: PlanEntry[],
+	selected: SessionKey | null,
+): PlanInfo | null {
+	if (selected === null) return null;
 	const entry = plans.find((plan) => plan.name === selected.plan);
+	if (entry === undefined) return null;
 	return {
-		name: selected.plan,
-		phase: entry?.phase === "scoping" ? "scoping" : "executing",
-		has_plan_md: true,
-		title: entry?.title ?? "Untitled",
+		name: entry.name,
+		phase: entry.phase === "scoping" ? "scoping" : "executing",
+		has_plan_md: entry.has_plan_md,
+		title: entry.title,
 	};
 }
 

@@ -90,6 +90,7 @@ pub struct PlanEntry {
     pub name: String,
     pub phase: crate::plans::Phase,
     pub title: String,
+    pub has_plan_md: bool,
     pub sessions: Vec<SessionStatusView>,
 }
 

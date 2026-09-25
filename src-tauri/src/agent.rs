@@ -1175,6 +1175,7 @@ fn sorted_entries(
             name: plan.name.clone(),
             phase: plan.phase,
             title: plans::plan_title(repo_root, plan),
+            has_plan_md: plan.has_plan_md(repo_root),
             sessions: session_statuses(repo_root, plan, sessions),
         })
         .collect()

@@ -18,20 +18,15 @@ export interface ToolLineView {
 	status: string;
 }
 
-export interface SessionInfo {
-	session_id: string;
-	repo_root: string;
-	branch: string;
-	config_options: ConfigOptionView[];
-	/** The chat's plan. Every chat owns exactly one. */
-	plan: PlanInfo;
-}
-
 export type SessionRole = "scoping" | "executing";
 
 export interface SessionKey {
 	plan: string;
 	role: SessionRole;
+}
+
+export function sessionKeyOf(key: SessionKey): string {
+	return `${key.plan}::${key.role}`;
 }
 
 export function sameSession(
@@ -56,6 +51,7 @@ export interface PlanEntry {
 	name: string;
 	phase: PlanPhase;
 	title: string;
+	has_plan_md: boolean;
 	sessions: SessionStatusView[];
 }
 

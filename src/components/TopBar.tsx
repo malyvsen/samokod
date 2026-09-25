@@ -29,7 +29,7 @@ export function TopBar({
 	onComplete: () => void;
 	onAbandon: () => void;
 }) {
-	const busy = status !== "idle";
+	const busy = status === "working" || status === "approval";
 	const { text, className } = STATUS[status];
 	const tip = busy
 		? "stop the agent to switch repositories"

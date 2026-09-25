@@ -2,7 +2,7 @@ import { act, render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
-import { testEntry, testKey, testPlan } from "./fixtures";
+import { testEntry, testKey } from "./fixtures";
 import type { AppEvent } from "./types";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -63,7 +63,7 @@ async function openChat() {
 	const user = userEvent.setup();
 	render(<App />);
 	await user.click(await screen.findByRole("button", { name: "open" }));
-	await screen.findByRole("button", { name: "plan phase scoping" });
+	await screen.findByRole("button", { name: "+ NEW PLAN" });
 }
 
 describe("plan", () => {
@@ -75,19 +75,21 @@ describe("plan", () => {
 		).toBeInTheDocument();
 	});
 
-	test("plan_changed swaps the plan", async () => {
+	test("plans_changed swaps the plan", async () => {
 		await openChat();
 		emit({
-			type: "plan_changed",
-			session: testKey(),
-			plan: testPlan("executing", true),
+			type: "plans_changed",
+			plans: [
+				testEntry("2026-09-25.10-54-59.slug", "executing", "Shiny", true),
+			],
+			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
 		});
 		expect(
 			screen.getByRole("button", { name: "plan phase executing" }),
 		).toBeInTheDocument();
 	});
 
-	test("completing clears the transcript and keeps the selection", async () => {
+	test("completing keeps the transcript on the read-only session", async () => {
 		api.markCompleted.mockResolvedValue({
 			plans: [
 				testEntry("2026-09-25.10-54-59.slug", "completed", "Shiny feature"),
@@ -96,41 +98,48 @@ describe("plan", () => {
 		});
 		const user = userEvent.setup();
 		await openChat();
-		emit({ type: "agent_text", session: testKey(), chunk: "old chat" });
-		emit({ type: "turn_done", session: testKey() });
-		expect(screen.getByText("old chat")).toBeInTheDocument();
 		emit({
-			type: "plan_changed",
-			session: testKey(),
-			plan: testPlan("executing", true),
+			type: "plans_changed",
+			plans: [
+				testEntry("2026-09-25.10-54-59.slug", "executing", "Shiny", true),
+			],
+			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
 		});
+		emit({
+			type: "agent_text",
+			session: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
+			chunk: "executor chat",
+		});
+		emit({
+			type: "turn_done",
+			session: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
+		});
+		expect(screen.getByText("executor chat")).toBeInTheDocument();
 		await user.click(
 			screen.getByRole("button", { name: "plan phase executing" }),
 		);
 		await user.click(screen.getByRole("button", { name: "Mark completed" }));
 		expect(api.markCompleted).toHaveBeenCalledTimes(1);
-		expect(screen.queryByText("old chat")).not.toBeInTheDocument();
+		expect(screen.getByText("executor chat")).toBeInTheDocument();
 	});
 
-	test("abandoning clears the transcript and keeps the selection", async () => {
+	test("abandoning keeps the transcript on the read-only session", async () => {
 		api.abandonPlan.mockResolvedValue({
-			plans: [testEntry("2026-09-25.10-54-59", "cancelled", "Untitled")],
-			selected: testKey(),
+			plans: [
+				testEntry("2026-09-25.10-54-59.draft-idea", "cancelled", "Draft idea"),
+			],
+			selected: { plan: "2026-09-25.10-54-59.draft-idea", role: "scoping" },
 		});
 		const user = userEvent.setup();
 		await openChat();
 		emit({ type: "agent_text", session: testKey(), chunk: "old chat" });
 		emit({ type: "turn_done", session: testKey() });
-		emit({
-			type: "plan_changed",
-			session: testKey(),
-			plan: testPlan("executing", true),
-		});
+		expect(screen.getByText("old chat")).toBeInTheDocument();
 		await user.click(
-			screen.getByRole("button", { name: "plan phase executing" }),
+			screen.getByRole("button", { name: "plan phase scoping" }),
 		);
 		await user.click(screen.getByRole("button", { name: "Abandon" }));
 		expect(api.abandonPlan).toHaveBeenCalledTimes(1);
-		expect(screen.queryByText("old chat")).not.toBeInTheDocument();
+		expect(screen.getByText("old chat")).toBeInTheDocument();
 	});
 });

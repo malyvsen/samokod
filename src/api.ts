@@ -26,6 +26,10 @@ export function refreshBranch(): Promise<string> {
 	return invoke<string>("refresh_branch");
 }
 
+export function createPlan(): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("create_plan");
+}
+
 export function executePlan(session: SessionKey): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("execute_plan", { session });
 }
@@ -36,6 +40,10 @@ export function markCompleted(session: SessionKey): Promise<PlansUpdate> {
 
 export function abandonPlan(session: SessionKey): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("abandon_plan", { session });
+}
+
+export function cancelExecution(session: SessionKey): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("cancel_execution", { session });
 }
 
 export function sendPrompt(session: SessionKey, text: string): Promise<void> {

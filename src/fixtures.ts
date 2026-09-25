@@ -28,6 +28,7 @@ export function testEntry(
 	name = "2026-09-25.10-54-59",
 	phase: PlanPhase = "scoping",
 	title = "Parallel sessions",
+	has_plan_md = false,
 ): PlanEntry {
 	const idle = (role: SessionRole): SessionStatusView => ({
 		role,
@@ -40,5 +41,5 @@ export function testEntry(
 		phase === "scoping"
 			? [idle("scoping")]
 			: [idle("scoping"), idle("executing")];
-	return { name, phase, title, sessions };
+	return { name, phase, title, has_plan_md, sessions };
 }
