@@ -1,21 +1,10 @@
 import type {
 	PlanEntry,
-	PlanInfo,
 	PlanPhase,
 	SessionKey,
 	SessionRole,
 	SessionStatusView,
 } from "./types";
-
-export function testPlan(
-	phase: PlanPhase = "scoping",
-	has_plan_md = false,
-	title = "Parallel sessions",
-): PlanInfo {
-	const name =
-		phase === "scoping" ? "2026-09-25.10-54-59" : "2026-09-25.10-54-59.slug";
-	return { name, phase, has_plan_md, title };
-}
 
 export function testKey(
 	plan = "2026-09-25.10-54-59",

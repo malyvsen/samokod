@@ -1,10 +1,8 @@
 // Shared backend views: failures, events, and session payloads crossing the
 // command edge as JSON. The command edge renders errors as strings.
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
 
-use crate::plans::{PlanError, PlanRef};
+use crate::plans::PlanError;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum AgentError {
@@ -163,10 +161,6 @@ pub enum AppEvent {
         cost: f64,
         ctx_pct: f64,
     },
-    PlanChanged {
-        session: SessionKey,
-        plan: PlanInfo,
-    },
     BranchChanged {
         branch: String,
     },
@@ -212,34 +206,6 @@ pub struct ConfigOptionView {
     /// Spec `category`, absent when the agent omits it.
     #[serde(default)]
     pub category: Option<String>,
-}
-
-/// Plan state for one session. Mirrors `plans::Phase`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PlanInfo {
-    pub name: String,
-    pub phase: crate::plans::Phase,
-    pub has_plan_md: bool,
-    /// First markdown heading of `plan.md`, `Untitled` without one.
-    #[serde(default = "untitled")]
-    pub title: String,
-}
-
-fn untitled() -> String {
-    "Untitled".to_string()
-}
-
-impl PlanInfo {
-    /// Frontend plan payload with fresh `plan.md` presence and title. Pure
-    /// except the existence check and the title read.
-    pub fn of(repo_root: &Path, plan: &PlanRef) -> Self {
-        PlanInfo {
-            name: plan.name.clone(),
-            phase: plan.phase,
-            has_plan_md: plan.has_plan_md(repo_root),
-            title: crate::plans::plan_title(repo_root, plan),
-        }
-    }
 }
 
 /// Recent repo row for the picker: path only.

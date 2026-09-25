@@ -364,31 +364,17 @@ body {
 	color: #fff;
 }
 
-.repo-btn b {
+.repo-static {
+	font-size: 11px;
+	color: #e8e6e1;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.repo-static b {
 	color: #fff;
 	font-weight: 600;
-}
-
-.repo-btn {
-	position: relative;
-}
-
-.repo-btn::after {
-	content: attr(data-tip);
-	position: absolute;
-	top: calc(100% + 8px);
-	left: 0;
-	padding: 2px 0 0;
-	font-size: 11px;
-	white-space: nowrap;
-	color: #8f8c85;
-	opacity: 0;
-	pointer-events: none;
-	z-index: 5;
-}
-
-.repo-btn:hover::after {
-	opacity: 1;
 }
 
 .tbtn {
@@ -795,46 +781,9 @@ body {
 	color: #e8e6e1;
 }
 
-.dsel.plan-scoping {
-	color: #ffd98a;
-	border-color: rgba(255, 200, 60, 0.55);
-}
-
-.dsel.plan-executing {
-	color: #7dffc4;
-	border-color: rgba(125, 255, 196, 0.4);
-}
-
 .dopt .tick {
 	width: 14px;
 	flex: none;
-}
-
-.topbar .dsel {
-	width: auto;
-	min-height: 0;
-	padding: 4px 8px;
-	background: transparent;
-}
-
-.topbar .dsel:hover {
-	border-color: #fff;
-}
-
-.topbar .dpop {
-	top: calc(100% + 6px);
-	bottom: auto;
-}
-
-.topbar .dopt {
-	flex-direction: column;
-	align-items: flex-start;
-	gap: 2px;
-}
-
-.dopt .sub {
-	font-size: 11px;
-	color: #8f8c85;
 }
 
 .topbar .stop-wrap {

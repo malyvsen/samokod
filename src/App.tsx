@@ -29,7 +29,6 @@ import type {
 	AppEvent,
 	ConfigOptionView,
 	PlanEntry,
-	PlanInfo,
 	PlansUpdate,
 	RecentRepo,
 	SessionKey,
@@ -40,7 +39,7 @@ import type {
 import { sessionKeyOf } from "./types";
 import "./App.css";
 
-type View = { kind: "picker"; returnToChat: boolean } | { kind: "chat" };
+type View = { kind: "picker" } | { kind: "chat" };
 
 interface ChatState {
 	transcript: TranscriptItem[];
@@ -65,10 +64,7 @@ function emptyChat(): ChatState {
 }
 
 export function App() {
-	const [view, setView] = useState<View>({
-		kind: "picker",
-		returnToChat: false,
-	});
+	const [view, setView] = useState<View>({ kind: "picker" });
 	const [repoRoot, setRepoRoot] = useState<string | null>(null);
 	const [branch, setBranch] = useState("HEAD");
 	const [recent, setRecent] = useState<RecentRepo[]>([]);
@@ -113,8 +109,11 @@ export function App() {
 		setSelectedKey(update.selected);
 	}, []);
 
-	const plan = planOfSelected(plans, selectedKey);
-	const agentLabel = agentLabelForPlan(plan);
+	const selectedEntry =
+		selectedKey === null
+			? undefined
+			: plans.find((plan) => plan.name === selectedKey.plan);
+	const agentLabel = agentLabelForPhase(selectedEntry?.phase);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -139,9 +138,6 @@ export function App() {
 			}
 			if (event.type === "branch_changed") {
 				setBranch(event.branch);
-				return;
-			}
-			if (event.type === "plan_changed") {
 				return;
 			}
 			const key = event.session;
@@ -458,11 +454,6 @@ export function App() {
 		}
 	}
 
-	function handleRepoButton() {
-		if (busy) return;
-		setView({ kind: "picker", returnToChat: true });
-	}
-
 	async function handleNewPlan() {
 		try {
 			const update = await createPlan();
@@ -550,7 +541,6 @@ export function App() {
 	}
 
 	const repoLabel = repoRoot === null ? "no repo" : shortPath(repoRoot);
-	const returnToChat = view.kind === "picker" && view.returnToChat;
 
 	return (
 		<div className="app" data-state={status} ref={appRef}>
@@ -572,17 +562,11 @@ export function App() {
 			{view.kind === "picker" ? (
 				<RepoPicker
 					title="SAMOKOD"
-					subtitle={
-						returnToChat
-							? "switch repository - the current chat closes"
-							: "open a git repository to start one chat"
-					}
+					subtitle="open a git repository to start planning"
 					recent={recent}
-					currentPath={returnToChat ? repoRoot : null}
 					error={pickerError}
 					onOpen={handleOpenPath}
 					onBrowse={handleBrowse}
-					onBack={returnToChat ? () => setView({ kind: "chat" }) : null}
 					onDismissError={() => setPickerError(null)}
 				/>
 			) : (
@@ -591,18 +575,7 @@ export function App() {
 						repoLabel={repoLabel}
 						branch={branch}
 						status={status}
-						plan={plan}
-						onOpenPicker={handleRepoButton}
 						onStop={handleStop}
-						onExecute={() => {
-							if (selectedKey !== null) void handleExecute(selectedKey);
-						}}
-						onComplete={() => {
-							if (selectedKey !== null) void handleDone(selectedKey);
-						}}
-						onAbandon={() => {
-							if (selectedKey !== null) void handleAbandon(selectedKey);
-						}}
 					/>
 					<div className="mainrow">
 						<PlansPanel
@@ -653,30 +626,13 @@ function failureItem(
 	return { kind: "error", id: crypto.randomUUID(), raw, hint, retryable };
 }
 
-function planOfSelected(
-	plans: PlanEntry[],
-	selected: SessionKey | null,
-): PlanInfo | null {
-	if (selected === null) return null;
-	const entry = plans.find((plan) => plan.name === selected.plan);
-	if (entry === undefined) return null;
-	return {
-		name: entry.name,
-		phase: entry.phase === "scoping" ? "scoping" : "executing",
-		has_plan_md: entry.has_plan_md,
-		title: entry.title,
-	};
-}
-
-function agentLabelForPlan(plan: PlanInfo | null): string {
-	if (plan === null) return "AGENT";
-	switch (plan.phase) {
+function agentLabelForPhase(phase: PlanEntry["phase"] | undefined): string {
+	switch (phase) {
 		case "scoping":
 			return "PLANNER";
 		case "executing":
 			return "EXECUTOR";
-		case "completed":
-		case "cancelled":
+		default:
 			return "AGENT";
 	}
 }

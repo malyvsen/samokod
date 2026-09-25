@@ -1,31 +1,15 @@
 import { render, screen } from "@testing-library/react";
-import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { TopBar } from "./components/TopBar";
-import { testPlan } from "./fixtures";
-import type { AgentStatus, PlanInfo } from "./types";
+import type { AgentStatus } from "./types";
 
-function topBar(
-	status: AgentStatus,
-	options: {
-		onStop?: () => void;
-		onExecute?: () => void;
-		onComplete?: () => void;
-		onAbandon?: () => void;
-		plan?: PlanInfo | null;
-	} = {},
-) {
+function topBar(status: AgentStatus, options: { onStop?: () => void } = {}) {
 	return (
 		<TopBar
-			repoLabel="repo"
+			repoLabel="~/repo"
 			branch="main"
 			status={status}
-			plan={options.plan ?? null}
-			onOpenPicker={vi.fn()}
 			onStop={options.onStop ?? vi.fn()}
-			onExecute={options.onExecute ?? vi.fn()}
-			onComplete={options.onComplete ?? vi.fn()}
-			onAbandon={options.onAbandon ?? vi.fn()}
 		/>
 	);
 }
@@ -48,9 +32,23 @@ describe("top bar", () => {
 		expect(label).not.toHaveClass("live");
 	});
 
+	test("failed shows a red pill", () => {
+		render(topBar("failed"));
+		const label = screen.getByText("● FAILED");
+		expect(label).toHaveClass("failed");
+		expect(label).not.toHaveClass("live");
+	});
+
 	test("idle shows no stop control", () => {
 		render(topBar("idle"));
 		expect(screen.getByText("IDLE")).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "STOP" }),
+		).not.toBeInTheDocument();
+	});
+
+	test("failed shows no stop control", () => {
+		render(topBar("failed"));
 		expect(
 			screen.queryByRole("button", { name: "STOP" }),
 		).not.toBeInTheDocument();
@@ -68,48 +66,18 @@ describe("top bar", () => {
 		},
 	);
 
-	test("without a plan there is no phase menu", () => {
+	test("repo chip is static text", () => {
+		render(topBar("idle"));
+		expect(screen.getByText("~/repo")).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: /repo/ }),
+		).not.toBeInTheDocument();
+	});
+
+	test("there is no plan menu", () => {
 		render(topBar("idle"));
 		expect(
 			screen.queryByRole("button", { name: /plan phase/ }),
 		).not.toBeInTheDocument();
-	});
-
-	test("scoping without plan.md disables execute with a visible hint", async () => {
-		const user = userEvent.setup();
-		render(topBar("idle", { plan: testPlan("scoping", false) }));
-		await user.click(
-			screen.getByRole("button", { name: "plan phase scoping" }),
-		);
-		const execute = screen.getByRole("button", {
-			name: "Execute Needs plan.md",
-		});
-		expect(execute).toBeDisabled();
-		expect(screen.getByText("Needs plan.md")).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Abandon" })).toBeInTheDocument();
-	});
-
-	test("scoping with plan.md enables execute", async () => {
-		const user = userEvent.setup();
-		const onExecute = vi.fn();
-		const { rerender } = render(topBar("idle"));
-		rerender(topBar("idle", { onExecute, plan: testPlan("scoping", true) }));
-		await user.click(
-			screen.getByRole("button", { name: "plan phase scoping" }),
-		);
-		await user.click(screen.getByRole("button", { name: "Execute" }));
-		expect(onExecute).toHaveBeenCalledTimes(1);
-	});
-
-	test("executing offers mark completed and abandon", async () => {
-		const user = userEvent.setup();
-		render(topBar("idle", { plan: testPlan("executing", true) }));
-		await user.click(
-			screen.getByRole("button", { name: "plan phase executing" }),
-		);
-		expect(
-			screen.getByRole("button", { name: "Mark completed" }),
-		).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Abandon" })).toBeInTheDocument();
 	});
 });

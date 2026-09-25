@@ -19,7 +19,7 @@ use crate::spend::context_pct;
 use crate::todos::{diff_todos, todos_from_call, todos_from_update};
 use crate::types::{
     AgentError, AppEvent, ConfigOptionValueView, ConfigOptionView, OpenRepoResult, PermissionView,
-    PlanEntry, PlanInfo, PlansUpdate, SessionKey, SessionRole, SessionStatusView, TodoView,
+    PlanEntry, PlansUpdate, SessionKey, SessionRole, SessionStatusView, TodoView,
 };
 
 /// User decision for one permission card.
@@ -424,8 +424,7 @@ impl AgentManager {
             self.spawn_session(&repo_root, &branch, plan, agent).await?;
         let text = opencode::executor_first_message(&opencode::plan_display(&next));
         self.touch_activity(&next.name);
-        self.start_turn(connection, session_id, key, text, None)
-            .await?;
+        self.start_turn(connection, session_id, key, text).await?;
         Ok(self.plans_update())
     }
 
@@ -754,8 +753,7 @@ impl AgentManager {
             return Ok(false);
         };
         let (connection, session_id) = self.ensure_live(&session).await?;
-        let watch = self.scoping_watch_for(&session);
-        self.start_turn(connection, session_id, session, text, watch)
+        self.start_turn(connection, session_id, session, text)
             .await?;
         Ok(true)
     }
@@ -775,25 +773,11 @@ impl AgentManager {
         }
         self.select_key(session.clone());
         self.touch_activity(&session.plan);
-        let watch = self.scoping_watch_for(&session);
         let mut text = text;
         if let Some(plan) = self.claim_planner_prefix(&session) {
             text = opencode::planner_first_message(&opencode::plan_display(&plan), &text);
         }
-        self.start_turn(connection, session_id, session, text, watch)
-            .await
-    }
-
-    /// Plan watch for scoping turns: re-emit `plan.md` presence when the
-    /// turn lands.
-    fn scoping_watch_for(&self, key: &SessionKey) -> Option<(PathBuf, plans::PlanRef)> {
-        let state = lock_state(&self.state)?;
-        let repo_root = state.repo_root.clone()?;
-        let live = state.sessions.get(key)?;
-        if !live.plan.is_scoping() {
-            return None;
-        }
-        Some((repo_root, live.plan.plan_ref()))
+        self.start_turn(connection, session_id, session, text).await
     }
 
     /// Claim the one-time role prefix for the first message of one ACP
@@ -817,7 +801,6 @@ impl AgentManager {
         session_id: String,
         key: SessionKey,
         text: String,
-        watch: Option<(PathBuf, plans::PlanRef)>,
     ) -> Result<(), AgentError> {
         {
             let mut state = self.state.lock().expect("state poisoned");
@@ -858,15 +841,6 @@ impl AgentManager {
                             session: key.clone(),
                         },
                     );
-                    if let Some((repo_root, plan)) = watch {
-                        emit_event(
-                            &app,
-                            AppEvent::PlanChanged {
-                                session: key.clone(),
-                                plan: PlanInfo::of(&repo_root, &plan),
-                            },
-                        );
-                    }
                     push_sorted(&push_state, &push_app);
                 }
                 Err(error) => {

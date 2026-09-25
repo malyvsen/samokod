@@ -67,13 +67,6 @@ export interface OpenRepoResult {
 	selected: SessionKey;
 }
 
-export interface PlanInfo {
-	name: string;
-	phase: PlanPhase;
-	has_plan_md: boolean;
-	title: string;
-}
-
 export interface RecentRepo {
 	path: string;
 }
@@ -153,9 +146,8 @@ export type AppEvent =
 			cost: number;
 			ctx_pct: number;
 	  }
-	| { type: "plan_changed"; session: SessionKey; plan: PlanInfo }
-	| { type: "branch_changed"; branch: string }
 	| { type: "session_reset"; session: SessionKey }
+	| { type: "branch_changed"; branch: string }
 	| { type: "plans_changed"; plans: PlanEntry[]; selected: SessionKey };
 
 export type TranscriptItem =

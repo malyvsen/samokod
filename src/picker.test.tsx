@@ -7,13 +7,11 @@ describe("repo picker", () => {
 		render(
 			<RepoPicker
 				title="SAMOKOD"
-				subtitle="open a git repository to start one chat"
+				subtitle="open a git repository to start planning"
 				recent={[{ path: "~/code/samokod" }, { path: "~/code/dotfiles" }]}
-				currentPath={null}
 				error={null}
 				onOpen={vi.fn()}
 				onBrowse={vi.fn()}
-				onBack={null}
 				onDismissError={vi.fn()}
 			/>,
 		);
@@ -26,35 +24,14 @@ describe("repo picker", () => {
 		render(
 			<RepoPicker
 				title="SAMOKOD"
-				subtitle="open a git repository to start one chat"
+				subtitle="open a git repository to start planning"
 				recent={[{ path: "~/code/samokod" }]}
-				currentPath={null}
 				error="~/downloads/notes - not a git repository"
 				onOpen={vi.fn()}
 				onBrowse={vi.fn()}
-				onBack={null}
 				onDismissError={vi.fn()}
 			/>,
 		);
 		expect(screen.getByRole("alert")).toHaveTextContent("not a git repository");
-	});
-
-	test("marks current repo and offers back from chat", () => {
-		render(
-			<RepoPicker
-				title="SAMOKOD"
-				subtitle="switch repository - the current chat closes"
-				recent={[{ path: "~/code/samokod" }, { path: "~/code/dotfiles" }]}
-				currentPath="~/code/samokod"
-				error={null}
-				onOpen={vi.fn()}
-				onBrowse={vi.fn()}
-				onBack={vi.fn()}
-				onDismissError={vi.fn()}
-			/>,
-		);
-		expect(screen.getByText("current")).toBeInTheDocument();
-		expect(screen.getByText("back to chat")).toBeInTheDocument();
-		expect(screen.getAllByText("open")).toHaveLength(1);
 	});
 });
