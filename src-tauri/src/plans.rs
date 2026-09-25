@@ -162,6 +162,83 @@ fn slugged_name(repo_root: &Path, plan: &PlanRef) -> Option<String> {
     Some(format!("{}.{}", plan.name, slugify(&title)))
 }
 
+/// Sort rank for the plans list: scoping, executing, completed, cancelled.
+pub fn phase_rank(phase: Phase) -> u8 {
+    match phase {
+        Phase::Scoping => 0,
+        Phase::Executing => 1,
+        Phase::Completed => 2,
+        Phase::Cancelled => 3,
+    }
+}
+
+/// Marker left inside a plan directory once its scoping chat was approved.
+/// It travels with the directory through executing, completed, and
+/// cancelled, so a rescan still knows the plan owns an execution session.
+const EXECUTED_MARKER: &str = ".executed";
+
+/// Record that a plan was approved for execution. Best-effort: a missing
+/// marker only collapses a cancelled plan to one row after a restart.
+pub fn mark_executed(repo_root: &Path, plan: &PlanRef) {
+    if let Err(error) = std::fs::write(plan.path(repo_root).join(EXECUTED_MARKER), "") {
+        log::warn!(
+            "failed to mark {} as executed: {error}",
+            plan.path(repo_root).display()
+        );
+    }
+}
+
+/// Whether the plan owns an execution session: every executing and
+/// completed plan, plus cancelled plans carrying the approval marker.
+pub fn has_execution(repo_root: &Path, plan: &PlanRef) -> bool {
+    match plan.phase {
+        Phase::Executing | Phase::Completed => true,
+        Phase::Scoping => false,
+        Phase::Cancelled => plan.path(repo_root).join(EXECUTED_MARKER).is_file(),
+    }
+}
+
+/// Display title: first markdown heading of `plan.md`, `Untitled` without
+/// one. Missing and unreadable files also yield `Untitled`.
+pub fn plan_title(repo_root: &Path, plan: &PlanRef) -> String {
+    let text = std::fs::read_to_string(plan.plan_md(repo_root)).unwrap_or_default();
+    extract_title(&text).unwrap_or_else(|| "Untitled".to_string())
+}
+
+/// Every plan directory across all four phases. Missing phase dirs yield no
+/// rows; callers run `ensure_structure` first on open.
+pub fn scan_plans(repo_root: &Path) -> Vec<PlanRef> {
+    let mut plans = Vec::new();
+    for phase in [
+        Phase::Scoping,
+        Phase::Executing,
+        Phase::Completed,
+        Phase::Cancelled,
+    ] {
+        let dir = phase_dir(repo_root, phase);
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            if entry.path().is_dir()
+                && let Some(name) = entry.file_name().to_str().map(str::to_string)
+            {
+                plans.push(PlanRef { name, phase });
+            }
+        }
+    }
+    plans
+}
+
+/// Sort key fallback for plans without user activity: `plan.md`
+/// modification time, newest first. Missing times sort last.
+pub fn plan_mtime(repo_root: &Path, plan: &PlanRef) -> Option<std::time::SystemTime> {
+    std::fs::metadata(plan.plan_md(repo_root))
+        .and_then(|meta| meta.modified())
+        .or_else(|_| std::fs::metadata(plan.path(repo_root)).and_then(|meta| meta.modified()))
+        .ok()
+}
+
 /// Base timestamp name `2026-09-25.10-54-59` in local time.
 pub fn timestamp_now() -> String {
     jiff::Zoned::now().strftime("%Y-%m-%d.%H-%M-%S").to_string()

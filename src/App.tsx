@@ -24,13 +24,17 @@ import { Transcript } from "./components/Transcript";
 import type {
 	AgentStatus,
 	AppEvent,
+	PlanEntry,
 	PlanInfo,
+	PlansUpdate,
 	RecentRepo,
 	SessionInfo,
+	SessionKey,
 	SpendView,
 	TodoView,
 	TranscriptItem,
 } from "./types";
+import { sameSession } from "./types";
 import "./App.css";
 
 type View = { kind: "picker"; returnToChat: boolean } | { kind: "chat" };
@@ -47,8 +51,11 @@ export function App() {
 	const [todos, setTodos] = useState<TodoView[]>([]);
 	const [spend, setSpend] = useState<SpendView | null>(null);
 	const [plan, setPlan] = useState<PlanInfo | null>(null);
+	const [, setPlans] = useState<PlanEntry[]>([]);
+	const [selectedKey, setSelectedKey] = useState<SessionKey | null>(null);
 	const [working, setWorking] = useState(false);
 	const [awaitingApproval, setAwaitingApproval] = useState(false);
+	const [failed, setFailed] = useState(false);
 	const appRef = useRef<HTMLDivElement>(null);
 	const notifyEdit = useAuroraMotion(appRef);
 	const transcriptRef = useRef<HTMLDivElement>(null);
@@ -58,18 +65,17 @@ export function App() {
 		? "approval"
 		: working
 			? "working"
-			: "idle";
+			: failed
+				? "failed"
+				: "idle";
 
-	const applySession = useCallback((info: SessionInfo) => {
-		setSession(info);
-		setTranscript([]);
-		setTodos([]);
-		setSpend(null);
-		setPlan(info.plan);
-		setWorking(false);
-		setAwaitingApproval(false);
-		setView({ kind: "chat" });
-		setPickerError(null);
+	const selectedRef = useRef<SessionKey | null>(null);
+	selectedRef.current = selectedKey;
+
+	const applyPlans = useCallback((update: PlansUpdate) => {
+		setPlans(update.plans);
+		setSelectedKey(update.selected);
+		setPlan(planOfSelected(update.plans, update.selected));
 	}, []);
 
 	const agentLabel = agentLabelForPlan(plan);
@@ -89,128 +95,146 @@ export function App() {
 		};
 	}, []);
 
-	const handleEvent = useCallback((event: AppEvent) => {
-		switch (event.type) {
-			case "agent_text": {
-				setWorking(true);
-				setTranscript((items) => {
-					const last = items[items.length - 1];
-					if (last !== undefined && last.kind === "agent") {
-						return [
-							...items.slice(0, -1),
-							{ ...last, text: last.text + event.chunk },
-						];
-					}
-					return [
-						...items,
-						{ kind: "agent", id: crypto.randomUUID(), text: event.chunk },
-					];
-				});
-				break;
+	const handleEvent = useCallback(
+		(event: AppEvent) => {
+			if (event.type === "plans_changed") {
+				applyPlans({ plans: event.plans, selected: event.selected });
+				return;
 			}
-			case "tool_line": {
-				setWorking(true);
-				setTranscript((items) => {
-					const index = items.findIndex(
-						(item) => item.kind === "tool" && item.line.id === event.line.id,
-					);
-					if (index >= 0) {
-						const copy = [...items];
-						copy[index] = {
-							kind: "tool",
-							id: copy[index]?.id ?? crypto.randomUUID(),
-							line: event.line,
-						};
-						return copy;
-					}
-					return [
-						...items,
-						{ kind: "tool", id: crypto.randomUUID(), line: event.line },
-					];
-				});
-				break;
-			}
-			case "turn_done": {
-				setWorking(false);
-				setAwaitingApproval(false);
-				break;
-			}
-			case "turn_failed":
-			case "agent_exited": {
-				setWorking(false);
-				setAwaitingApproval(false);
-				setTranscript((items) => [
-					...items,
-					failureItem(event.raw, event.hint, event.retryable),
-				]);
-				break;
-			}
-			case "permission_asked": {
-				setAwaitingApproval(true);
-				setTranscript((items) => [
-					...items,
-					{
-						kind: "approval",
-						id: crypto.randomUUID(),
-						permission: event.permission,
-						resolved: false,
-					},
-				]);
-				break;
-			}
-			case "permission_resolved": {
-				setTranscript((items) =>
-					items.map((item) =>
-						item.kind === "approval" &&
-						item.permission.tool_call_id === event.tool_call_id
-							? { ...item, resolved: true }
-							: item,
-					),
-				);
-				break;
-			}
-			case "config_options": {
-				setSession((current) =>
-					current === null
-						? current
-						: { ...current, config_options: event.options },
-				);
-				break;
-			}
-			case "todos_changed": {
-				setTodos(event.todos);
-				if (event.changes.length > 0) {
-					setTranscript((items) => [
-						...items,
-						{ kind: "todos", id: crypto.randomUUID(), changes: event.changes },
-					]);
-				}
-				break;
-			}
-			case "spend_tick": {
-				setSpend({
-					cost: event.cost,
-					contextPct: event.ctx_pct,
-				});
-				break;
-			}
-			case "session_reset": {
-				setTodos([]);
-				setSpend(null);
-				break;
-			}
-			case "plan_changed": {
-				setPlan(event.plan);
-				break;
-			}
-			case "branch_changed": {
+			if (event.type === "branch_changed") {
 				setSession((current) =>
 					current === null ? current : { ...current, branch: event.branch },
 				);
-				break;
+				return;
 			}
-		}
-	}, []);
+			// Background sessions update silently; only the selected
+			// session renders.
+			if (!sameSession(event.session, selectedRef.current)) return;
+			switch (event.type) {
+				case "agent_text": {
+					setWorking(true);
+					setFailed(false);
+					setTranscript((items) => {
+						const last = items[items.length - 1];
+						if (last !== undefined && last.kind === "agent") {
+							return [
+								...items.slice(0, -1),
+								{ ...last, text: last.text + event.chunk },
+							];
+						}
+						return [
+							...items,
+							{ kind: "agent", id: crypto.randomUUID(), text: event.chunk },
+						];
+					});
+					break;
+				}
+				case "tool_line": {
+					setWorking(true);
+					setFailed(false);
+					setTranscript((items) => {
+						const index = items.findIndex(
+							(item) => item.kind === "tool" && item.line.id === event.line.id,
+						);
+						if (index >= 0) {
+							const copy = [...items];
+							copy[index] = {
+								kind: "tool",
+								id: copy[index]?.id ?? crypto.randomUUID(),
+								line: event.line,
+							};
+							return copy;
+						}
+						return [
+							...items,
+							{ kind: "tool", id: crypto.randomUUID(), line: event.line },
+						];
+					});
+					break;
+				}
+				case "turn_done": {
+					setWorking(false);
+					setAwaitingApproval(false);
+					setFailed(false);
+					break;
+				}
+				case "turn_failed":
+				case "agent_exited": {
+					setWorking(false);
+					setAwaitingApproval(false);
+					setFailed(true);
+					setTranscript((items) => [
+						...items,
+						failureItem(event.raw, event.hint, event.retryable),
+					]);
+					break;
+				}
+				case "permission_asked": {
+					setAwaitingApproval(true);
+					setTranscript((items) => [
+						...items,
+						{
+							kind: "approval",
+							id: crypto.randomUUID(),
+							permission: event.permission,
+							resolved: false,
+						},
+					]);
+					break;
+				}
+				case "permission_resolved": {
+					setTranscript((items) =>
+						items.map((item) =>
+							item.kind === "approval" &&
+							item.permission.tool_call_id === event.tool_call_id
+								? { ...item, resolved: true }
+								: item,
+						),
+					);
+					break;
+				}
+				case "config_options": {
+					setSession((current) =>
+						current === null
+							? current
+							: { ...current, config_options: event.options },
+					);
+					break;
+				}
+				case "todos_changed": {
+					setTodos(event.todos);
+					if (event.changes.length > 0) {
+						setTranscript((items) => [
+							...items,
+							{
+								kind: "todos",
+								id: crypto.randomUUID(),
+								changes: event.changes,
+							},
+						]);
+					}
+					break;
+				}
+				case "spend_tick": {
+					setSpend({
+						cost: event.cost,
+						contextPct: event.ctx_pct,
+					});
+					break;
+				}
+				case "session_reset": {
+					setTodos([]);
+					setSpend(null);
+					break;
+				}
+				case "plan_changed": {
+					setPlan(event.plan);
+					break;
+				}
+			}
+		},
+		[applyPlans],
+	);
 
 	useEffect(() => onAppEvent(handleEvent), [handleEvent]);
 
@@ -271,7 +295,22 @@ export function App() {
 				return;
 			}
 			const opened = await openRepo(info.root);
-			applySession(opened);
+			applyPlans({ plans: opened.plans, selected: opened.selected });
+			setSession({
+				session_id: "",
+				repo_root: opened.repo_root,
+				branch: opened.branch,
+				config_options: [],
+				plan: planOfSelected(opened.plans, opened.selected),
+			});
+			setTranscript([]);
+			setTodos([]);
+			setSpend(null);
+			setWorking(false);
+			setAwaitingApproval(false);
+			setFailed(false);
+			setView({ kind: "chat" });
+			setPickerError(null);
 			setRecent((await getPrefs()).recent);
 		} catch (error) {
 			setPickerError(error instanceof Error ? error.message : String(error));
@@ -294,9 +333,12 @@ export function App() {
 	}
 
 	async function runTurn(text: string) {
+		const key = selectedRef.current;
+		if (key === null) return;
 		setWorking(true);
+		setFailed(false);
 		try {
-			await sendPrompt(text);
+			await sendPrompt(key, text);
 		} catch (error) {
 			setWorking(false);
 			appendError(error instanceof Error ? error.message : String(error));
@@ -304,7 +346,7 @@ export function App() {
 	}
 
 	async function handleSend(text: string) {
-		if (text === "" || status !== "idle" || session === null) return;
+		if (text === "" || working || awaitingApproval || session === null) return;
 		setTranscript((items) => [
 			...items,
 			{ kind: "user", id: crypto.randomUUID(), text },
@@ -313,8 +355,10 @@ export function App() {
 	}
 
 	async function handleStop() {
+		const key = selectedRef.current;
+		if (key === null) return;
 		try {
-			await cancelTurn();
+			await cancelTurn(key);
 		} finally {
 			setWorking(false);
 			setAwaitingApproval(false);
@@ -322,17 +366,20 @@ export function App() {
 	}
 
 	async function handleAnswer(toolCallId: string, optionId: string) {
-		await answerPermission(toolCallId, optionId);
+		const key = selectedRef.current;
+		if (key === null) return;
+		await answerPermission(key, toolCallId, optionId);
 		setAwaitingApproval(false);
 		setWorking(true);
 	}
 
 	async function handleConfigChange(configId: string, value: string) {
-		if (status !== "idle") return;
+		const key = selectedRef.current;
+		if (working || awaitingApproval || key === null) return;
 		configGeneration.current += 1;
 		const generation = configGeneration.current;
 		try {
-			const options = await setConfigOption(configId, value);
+			const options = await setConfigOption(key, configId, value);
 			if (configGeneration.current !== generation) return;
 			setSession((current) =>
 				current === null ? current : { ...current, config_options: options },
@@ -344,9 +391,11 @@ export function App() {
 	}
 
 	async function handleRetry() {
-		if (status !== "idle") return;
+		const key = selectedRef.current;
+		if (working || awaitingApproval || key === null) return;
+		setFailed(false);
 		try {
-			const retried = await retryLast();
+			const retried = await retryLast(key);
 			if (retried) setWorking(true);
 		} catch (error) {
 			appendError(error instanceof Error ? error.message : String(error));
@@ -354,19 +403,22 @@ export function App() {
 	}
 
 	function handleRepoButton() {
-		if (status !== "idle") return;
+		if (working || awaitingApproval) return;
 		setView({ kind: "picker", returnToChat: true });
 	}
 
 	async function handleExecute() {
-		if (status !== "idle") return;
+		const key = selectedRef.current;
+		if (working || awaitingApproval || key === null) return;
 		setWorking(true);
 		try {
-			const info = await executePlan();
-			applySession(info);
-			// applySession resets to idle, but the executor turn it just
-			// started is already running.
+			const update = await executePlan(key);
+			applyPlans(update);
+			// The executor turn it just started is already running.
 			setWorking(true);
+			setTranscript([]);
+			setTodos([]);
+			setSpend(null);
 		} catch (error) {
 			setWorking(false);
 			appendError(error instanceof Error ? error.message : String(error));
@@ -374,18 +426,25 @@ export function App() {
 	}
 
 	async function handleComplete() {
-		await runSessionAction(markCompleted);
+		await runPlansAction((session) => markCompleted(session));
 	}
 
 	async function handleAbandon() {
-		await runSessionAction(abandonPlan);
+		await runPlansAction((session) => abandonPlan(session));
 	}
 
-	async function runSessionAction(action: () => Promise<SessionInfo>) {
-		if (status !== "idle") return;
+	async function runPlansAction(
+		action: (session: SessionKey) => Promise<PlansUpdate>,
+	) {
+		const key = selectedRef.current;
+		if (working || awaitingApproval || key === null) return;
 		setWorking(true);
 		try {
-			applySession(await action());
+			applyPlans(await action(key));
+			setTranscript([]);
+			setTodos([]);
+			setSpend(null);
+			setWorking(false);
 		} catch (error) {
 			setWorking(false);
 			appendError(error instanceof Error ? error.message : String(error));
@@ -482,6 +541,16 @@ function failureItem(
 	return { kind: "error", id: crypto.randomUUID(), raw, hint, retryable };
 }
 
+function planOfSelected(plans: PlanEntry[], selected: SessionKey): PlanInfo {
+	const entry = plans.find((plan) => plan.name === selected.plan);
+	return {
+		name: selected.plan,
+		phase: entry?.phase === "scoping" ? "scoping" : "executing",
+		has_plan_md: true,
+		title: entry?.title ?? "Untitled",
+	};
+}
+
 function agentLabelForPlan(plan: PlanInfo | null): string {
 	if (plan === null) return "AGENT";
 	switch (plan.phase) {
@@ -489,6 +558,9 @@ function agentLabelForPlan(plan: PlanInfo | null): string {
 			return "PLANNER";
 		case "executing":
 			return "EXECUTOR";
+		case "completed":
+		case "cancelled":
+			return "AGENT";
 	}
 }
 

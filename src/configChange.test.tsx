@@ -1,9 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
-import { testSession } from "./fixtures";
-import type { ConfigOptionView } from "./types";
+import { testEntry, testKey } from "./fixtures";
+import type { AppEvent, ConfigOptionView } from "./types";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
@@ -11,6 +11,11 @@ const api = vi.hoisted(() => ({
 	getPrefs: vi.fn(),
 	validateRepo: vi.fn(),
 	openRepo: vi.fn(),
+	createPlan: vi.fn(),
+	executePlan: vi.fn(),
+	markCompleted: vi.fn(),
+	abandonPlan: vi.fn(),
+	cancelExecution: vi.fn(),
 	sendPrompt: vi.fn(),
 	retryLast: vi.fn(),
 	cancelTurn: vi.fn(),
@@ -86,11 +91,26 @@ async function openChatWith(options: ConfigOptionView[]) {
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo" }],
 	});
-	api.openRepo.mockResolvedValue(testSession(options));
+	api.openRepo.mockResolvedValue({
+		repo_root: "/repo",
+		branch: "main",
+		plans: [testEntry()],
+		selected: testKey(),
+	});
 	const user = userEvent.setup();
 	render(<App />);
 	await user.click(await screen.findByRole("button", { name: "open" }));
 	await screen.findByRole("textbox", { name: "Ask for a change…" });
+	act(() => {
+		const calls = api.onAppEvent.mock.calls as unknown as Array<
+			[(event: AppEvent) => void]
+		>;
+		calls.at(-1)?.[0]({
+			type: "config_options",
+			session: testKey(),
+			options,
+		});
+	});
 	return user;
 }
 
@@ -107,7 +127,11 @@ describe("config change", () => {
 		]);
 		await user.click(screen.getByLabelText("Model"));
 		await user.click(screen.getByText("GPT-5"));
-		expect(api.setConfigOption).toHaveBeenCalledWith("model", "openai/gpt-5");
+		expect(api.setConfigOption).toHaveBeenCalledWith(
+			testKey(),
+			"model",
+			"openai/gpt-5",
+		);
 		await screen.findByLabelText("Effort");
 		expect(screen.getByText("GPT-5")).toBeInTheDocument();
 	});

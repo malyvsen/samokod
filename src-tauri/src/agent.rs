@@ -1,8 +1,9 @@
-// Agent lifecycle: spawn `opencode acp` once, initialize it, open sessions
-// bound to repository roots, and stream prompt turns as events.
+// Agent lifecycle: one `opencode acp` child process per live session,
+// sessions keyed by plan directory name plus role, plans listed from disk.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use tauri::{AppHandle, Emitter};
 
@@ -17,8 +18,8 @@ use crate::plans;
 use crate::spend::context_pct;
 use crate::todos::{diff_todos, todos_from_call, todos_from_update};
 use crate::types::{
-    AgentError, AppEvent, ConfigOptionValueView, ConfigOptionView, PermissionView, PlanInfo,
-    SessionInfo, TodoView,
+    AgentError, AppEvent, ConfigOptionValueView, ConfigOptionView, OpenRepoResult, PermissionView,
+    PlanEntry, PlanInfo, PlansUpdate, SessionKey, SessionRole, SessionStatusView, TodoView,
 };
 
 /// User decision for one permission card.
@@ -28,29 +29,12 @@ enum PermissionDecision {
     Cancelled,
 }
 
-/// Role of one live session. One plan owns one scoping session, plus one
-/// executing session once approved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum SessionRole {
-    Scoping,
-    Executing,
-}
-
-impl SessionRole {
-    fn of_phase(phase: plans::Phase) -> Option<Self> {
-        match phase {
-            plans::Phase::Scoping => Some(SessionRole::Scoping),
-            plans::Phase::Executing => Some(SessionRole::Executing),
-            plans::Phase::Completed | plans::Phase::Cancelled => None,
-        }
+/// Role phases: sessions only run on active plans.
+fn role_phase(role: SessionRole) -> plans::Phase {
+    match role {
+        SessionRole::Scoping => plans::Phase::Scoping,
+        SessionRole::Executing => plans::Phase::Executing,
     }
-}
-
-/// Key of one live session: plan directory name plus role.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct SessionKey {
-    plan: String,
-    role: SessionRole,
 }
 
 /// Plan owned by one live session.
@@ -80,7 +64,12 @@ impl ActivePlan {
     }
 
     fn key(&self) -> Option<SessionKey> {
-        SessionRole::of_phase(self.phase).map(|role| SessionKey {
+        let role = match self.phase {
+            plans::Phase::Scoping => SessionRole::Scoping,
+            plans::Phase::Executing => SessionRole::Executing,
+            plans::Phase::Completed | plans::Phase::Cancelled => return None,
+        };
+        Some(SessionKey {
             plan: self.name.clone(),
             role,
         })
@@ -96,10 +85,6 @@ impl ActivePlan {
     fn is_scoping(&self) -> bool {
         self.phase == plans::Phase::Scoping
     }
-
-    fn info(&self, repo_root: &Path) -> PlanInfo {
-        PlanInfo::of(repo_root, &self.plan_ref())
-    }
 }
 
 /// One live agent session: its own `opencode acp` process, connection, ACP
@@ -109,6 +94,7 @@ struct LiveSession {
     supports_close: bool,
     session_id: Option<String>,
     working: bool,
+    approval: bool,
     failed: bool,
     last_prompt: Option<String>,
     last_roles: crate::repo_state::RepoState,
@@ -124,6 +110,7 @@ impl LiveSession {
             supports_close: false,
             session_id: None,
             working: false,
+            approval: false,
             failed: false,
             last_prompt: None,
             last_roles: roles,
@@ -131,6 +118,15 @@ impl LiveSession {
             todos: Vec::new(),
             plan,
         }
+    }
+
+    fn is_live(&self) -> bool {
+        self.session_id.is_some()
+            && self
+                .connection
+                .as_ref()
+                .map(|connection| !connection.is_incoming_closed())
+                .unwrap_or(false)
     }
 }
 
@@ -142,6 +138,9 @@ struct State {
     branch: String,
     branch_watch: Option<notify::RecommendedWatcher>,
     awake: Option<awake::Guard>,
+    /// Last user-sent prompt per plan directory name. Drives plan sorting;
+    /// migrated across renames so an approved plan keeps its recency.
+    activity: HashMap<String, Instant>,
 }
 
 impl State {
@@ -174,27 +173,99 @@ impl AgentManager {
         }
     }
 
-    /// Open a repository: ensure the plan structure, abandon any active
-    /// plan, spawn a fresh planner process scoped to a new scoping plan,
-    /// and open a session in planner mode with stored model+effort reapplied.
-    pub async fn open_repo(
-        &self,
-        repo_root: PathBuf,
-        branch: String,
-        stored: crate::repo_state::RepoState,
-    ) -> Result<SessionInfo, AgentError> {
+    /// Open a repository: ensure the plan structure, rescan every plan,
+    /// and select the most-recent session. Spawns no agents: each session
+    /// starts lazily on its first prompt, with transcripts and TODOs kept
+    /// run-local.
+    pub async fn open_repo(&self, repo_root: PathBuf) -> Result<OpenRepoResult, AgentError> {
         plans::ensure_structure(&repo_root)?;
-        self.abandon_stored_plan()?;
-        self.shutdown_current().await;
         self.clear_sessions();
-        let scoping = plans::create_scoping(&repo_root)?;
-        let plan = ActivePlan::scoping(scoping.name);
-        let agent = opencode::agent_for(plan.phase);
-        let (_, _, _, info) = self
-            .spawn_session(&repo_root, &branch, stored, plan, agent)
-            .await?;
+        {
+            let mut state = self.state.lock().expect("state poisoned");
+            state.repo_root = Some(repo_root.clone());
+            state.branch =
+                crate::branch::current_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string());
+            if plans::scan_plans(&repo_root)
+                .iter()
+                .all(|plan| plan.phase != plans::Phase::Scoping)
+            {
+                plans::create_scoping(&repo_root)?;
+            }
+        }
         self.watch_branch(&repo_root);
-        Ok(info)
+        Ok(self.open_result())
+    }
+
+    /// Current repo payload: plans plus the most-recent session.
+    fn open_result(&self) -> OpenRepoResult {
+        let state = self.state.lock().expect("state poisoned");
+        let repo_root = state.repo_root.clone().unwrap_or_default();
+        let branch = state.branch.clone();
+        let plans = sorted_entries(&repo_root, &state.sessions, &state.activity);
+        let selected = most_recent_key(&plans).unwrap_or_else(|| SessionKey {
+            plan: plans
+                .first()
+                .map(|entry| entry.name.clone())
+                .unwrap_or_default(),
+            role: SessionRole::Scoping,
+        });
+        OpenRepoResult {
+            repo_root: repo_root.to_string_lossy().to_string(),
+            branch,
+            plans,
+            selected,
+        }
+    }
+
+    /// Fresh plans payload with the current selection. Emitted after every
+    /// transition, activity, or title change.
+    fn plans_update(&self) -> PlansUpdate {
+        let state = self.state.lock().expect("state poisoned");
+        let repo_root = state.repo_root.clone().unwrap_or_default();
+        let plans = sorted_entries(&repo_root, &state.sessions, &state.activity);
+        let selected = state.current.clone().unwrap_or_else(|| {
+            most_recent_key(&plans).unwrap_or_else(|| SessionKey {
+                plan: plans
+                    .first()
+                    .map(|entry| entry.name.clone())
+                    .unwrap_or_default(),
+                role: SessionRole::Scoping,
+            })
+        });
+        PlansUpdate { plans, selected }
+    }
+
+    fn push_plans(&self) {
+        let update = self.plans_update();
+        emit_event(
+            &self.app,
+            AppEvent::PlansChanged {
+                plans: update.plans,
+                selected: update.selected,
+            },
+        );
+    }
+
+    /// Create a fresh scoping plan and select it. Its agent spawns lazily
+    /// on the first prompt, so this never blocks on other sessions.
+    pub async fn create_plan(&self) -> Result<PlansUpdate, AgentError> {
+        let repo_root = self.current_repo().ok_or_else(|| AgentError::NoSession {
+            raw: "open a repository first".to_string(),
+        })?;
+        let scoping = plans::create_scoping(&repo_root)?;
+        let selected = SessionKey {
+            plan: scoping.name,
+            role: SessionRole::Scoping,
+        };
+        match self.state.lock() {
+            Ok(mut state) => {
+                state.current = Some(selected);
+            }
+            Err(error) => {
+                log::warn!("failed to select new plan: {error}");
+            }
+        }
+        Ok(self.plans_update())
     }
 
     /// Re-check the branch for the open repo. Failures keep the last value.
@@ -269,13 +340,16 @@ impl AgentManager {
 
     /// Set one session config option without restarting the session.
     /// Returns the agent's complete option list, including dependent updates.
+    /// Also stores the choice as the repo-wide default new sessions start
+    /// from.
     pub async fn set_config_option(
         &self,
+        session: SessionKey,
         config_id: String,
         value: String,
     ) -> Result<Vec<ConfigOptionView>, AgentError> {
-        let (connection, session_id, _, key) =
-            self.session_snapshot()
+        let (connection, session_id, _, _) =
+            self.session_snapshot_for(&session)
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "open a repository first".to_string(),
                 })?;
@@ -294,15 +368,15 @@ impl AgentManager {
             Ok(mut state) => {
                 let current_roles = state
                     .sessions
-                    .get(&key)
-                    .map(|session| session.last_roles.clone())
+                    .get(&session)
+                    .map(|live| live.last_roles.clone())
                     .unwrap_or_default();
                 let moved: Vec<crate::repo_state::ConfigRole> = crate::repo_state::ConfigRole::ALL
                     .into_iter()
                     .filter(|role| role.get(&current_roles) != role.get(&roles))
                     .collect();
-                if let Some(session) = state.sessions.get_mut(&key) {
-                    session.last_roles = roles.clone();
+                if let Some(live) = state.sessions.get_mut(&session) {
+                    live.last_roles = roles.clone();
                 }
                 Some(moved)
             }
@@ -322,116 +396,204 @@ impl AgentManager {
 
     /// Approve the scoping plan: move it to executing, switch to a fresh
     /// executor process, and start it immediately. The prompt stays hidden:
-    /// no user bubble, the chat opens working.
-    pub async fn execute_plan(&self) -> Result<SessionInfo, AgentError> {
-        let key = self.current_key().ok_or_else(|| AgentError::NoSession {
-            raw: "open a repository first".to_string(),
-        })?;
-        ensure_idle(&self.state, &key)?;
-        let (repo_root, branch, stored) =
-            self.reopen_snapshot()
-                .ok_or_else(|| AgentError::NoSession {
-                    raw: "open a repository first".to_string(),
-                })?;
-        let active = self
-            .plan_snapshot()
-            .map(|(_, plan)| plan)
-            .filter(|plan| plan.phase == plans::Phase::Scoping)
-            .ok_or_else(|| AgentError::RequestFailed {
-                raw: "no scoping plan to execute".to_string(),
+    /// no user bubble, the chat opens working. The selection follows the
+    /// new execution session.
+    pub async fn execute_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
+        ensure_idle(&self.state, &session)?;
+        let (repo_root, branch) = self
+            .reopen_snapshot()
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
             })?;
-        let next = plans::execute(&repo_root, &active.plan_ref())?;
+        let from = plans::PlanRef {
+            name: session.plan.clone(),
+            phase: plans::Phase::Scoping,
+        };
+        if session.role != SessionRole::Scoping || !from.path(&repo_root).is_dir() {
+            return Err(AgentError::RequestFailed {
+                raw: "no scoping plan to execute".to_string(),
+            });
+        }
+        let next = plans::execute(&repo_root, &from)?;
+        plans::mark_executed(&repo_root, &next);
+        self.drop_live(&session).await;
+        self.move_activity(&from.name, &next.name);
         let plan = ActivePlan::executing(next.name.clone());
-        // Record the move before any fallible spawn: disk and state agree
-        // from here on, and a failed spawn recovers via auto-abandon.
-        self.set_plan(plan.clone());
-        self.shutdown_current().await;
         let agent = opencode::agent_for(plan.phase);
-        let (connection, session_id, key, info) = self
-            .spawn_session(&repo_root, &branch, stored, plan, agent)
-            .await?;
+        let (connection, session_id, key) =
+            self.spawn_session(&repo_root, &branch, plan, agent).await?;
         let text = opencode::executor_first_message(&opencode::plan_display(&next));
+        self.touch_activity(&next.name);
         self.start_turn(connection, session_id, key, text, None)
             .await?;
-        Ok(info)
+        Ok(self.plans_update())
     }
 
-    /// Finish the executing plan, then open a fresh scoping chat; the
-    /// completed plan stays on disk.
-    pub async fn mark_completed(&self) -> Result<SessionInfo, AgentError> {
-        let key = self.current_key().ok_or_else(|| AgentError::NoSession {
-            raw: "open a repository first".to_string(),
-        })?;
-        ensure_idle(&self.state, &key)?;
-        let (repo_root, branch, stored) =
-            self.reopen_snapshot()
-                .ok_or_else(|| AgentError::NoSession {
-                    raw: "open a repository first".to_string(),
-                })?;
-        let active = self
-            .plan_snapshot()
-            .map(|(_, plan)| plan)
-            .filter(|plan| plan.phase == plans::Phase::Executing)
-            .ok_or_else(|| AgentError::RequestFailed {
+    /// Finish the executing plan. The selection stays on the completed
+    /// (now read-only) execution session; fresh plans come from `+ NEW PLAN`.
+    pub async fn mark_completed(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
+        ensure_idle(&self.state, &session)?;
+        let (repo_root, _) = self
+            .reopen_snapshot()
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
+        let from = plans::PlanRef {
+            name: session.plan.clone(),
+            phase: plans::Phase::Executing,
+        };
+        if session.role != SessionRole::Executing || !from.path(&repo_root).is_dir() {
+            return Err(AgentError::RequestFailed {
                 raw: "no executing plan to complete".to_string(),
-            })?;
-        plans::complete(&repo_root, &active.plan_ref())?;
-        let scoping = plans::create_scoping(&repo_root)?;
-        let plan = ActivePlan::scoping(scoping.name.clone());
-        self.set_plan(plan.clone());
-        self.shutdown_current().await;
-        let agent = opencode::agent_for(plan.phase);
-        let (_, _, _, info) = self
-            .spawn_session(&repo_root, &branch, stored, plan, agent)
-            .await?;
-        Ok(info)
+            });
+        }
+        let next = plans::complete(&repo_root, &from)?;
+        self.drop_live(&session).await;
+        self.move_activity(&from.name, &next.name);
+        self.select_key(SessionKey {
+            plan: next.name,
+            role: SessionRole::Executing,
+        });
+        Ok(self.plans_update())
     }
 
-    /// Drop an active plan, then open a fresh scoping chat.
-    pub async fn abandon_plan(&self) -> Result<SessionInfo, AgentError> {
-        let key = self.current_key().ok_or_else(|| AgentError::NoSession {
-            raw: "open a repository first".to_string(),
-        })?;
-        ensure_idle(&self.state, &key)?;
-        let (repo_root, branch, stored) =
-            self.reopen_snapshot()
-                .ok_or_else(|| AgentError::NoSession {
-                    raw: "open a repository first".to_string(),
-                })?;
-        let active = self
-            .plan_snapshot()
-            .map(|(_, plan)| plan)
-            .filter(|plan| plan.phase.is_active())
-            .ok_or_else(|| AgentError::RequestFailed {
-                raw: "no active plan to abandon".to_string(),
+    /// Drop a scoping plan. The selection stays on the cancelled (now
+    /// read-only) scoping session.
+    pub async fn abandon_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
+        ensure_idle(&self.state, &session)?;
+        let (repo_root, _) = self
+            .reopen_snapshot()
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
             })?;
-        plans::abandon(&repo_root, &active.plan_ref())?;
-        let scoping = plans::create_scoping(&repo_root)?;
-        let plan = ActivePlan::scoping(scoping.name.clone());
-        self.set_plan(plan.clone());
-        self.shutdown_current().await;
-        let agent = opencode::agent_for(plan.phase);
-        let (_, _, _, info) = self
-            .spawn_session(&repo_root, &branch, stored, plan, agent)
-            .await?;
-        Ok(info)
+        let from = plans::PlanRef {
+            name: session.plan.clone(),
+            phase: plans::Phase::Scoping,
+        };
+        if session.role != SessionRole::Scoping || !from.path(&repo_root).is_dir() {
+            return Err(AgentError::RequestFailed {
+                raw: "no active plan to abandon".to_string(),
+            });
+        }
+        let next = plans::abandon(&repo_root, &from)?;
+        self.drop_live(&session).await;
+        self.move_activity(&from.name, &next.name);
+        self.select_key(SessionKey {
+            plan: next.name,
+            role: SessionRole::Scoping,
+        });
+        Ok(self.plans_update())
+    }
+
+    /// Cancel an executing plan. The selection stays on the cancelled (now
+    /// read-only) execution session.
+    pub async fn cancel_execution(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
+        ensure_idle(&self.state, &session)?;
+        let (repo_root, _) = self
+            .reopen_snapshot()
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
+        let from = plans::PlanRef {
+            name: session.plan.clone(),
+            phase: plans::Phase::Executing,
+        };
+        if session.role != SessionRole::Executing || !from.path(&repo_root).is_dir() {
+            return Err(AgentError::RequestFailed {
+                raw: "no executing plan to cancel".to_string(),
+            });
+        }
+        let next = plans::abandon(&repo_root, &from)?;
+        self.drop_live(&session).await;
+        self.move_activity(&from.name, &next.name);
+        self.select_key(SessionKey {
+            plan: next.name,
+            role: SessionRole::Executing,
+        });
+        Ok(self.plans_update())
+    }
+
+    /// Record one user prompt for plan sorting. Pure timestamp edge.
+    fn touch_activity(&self, plan: &str) {
+        if let Some(mut state) = lock_state(&self.state) {
+            state.activity.insert(plan.to_string(), Instant::now());
+        }
+        self.push_plans();
+    }
+
+    /// Carry recency across a plan rename. Pure timestamp edge.
+    fn move_activity(&self, from: &str, to: &str) {
+        if let Some(mut state) = lock_state(&self.state)
+            && let Some(when) = state.activity.remove(from)
+        {
+            state.activity.insert(to.to_string(), when);
+        }
+    }
+
+    /// Pin the selection to one session key.
+    fn select_key(&self, key: SessionKey) {
+        match self.state.lock() {
+            Ok(mut state) => {
+                state.current = Some(key);
+            }
+            Err(error) => {
+                log::warn!("failed to select session: {error}");
+            }
+        }
+    }
+
+    /// Shut down one live session and forget it. Its transcript stays
+    /// frontend-side; the row turns gray.
+    async fn drop_live(&self, key: &SessionKey) {
+        let snapshot = self.session_snapshot_for(key);
+        match self.state.lock() {
+            Ok(mut state) => {
+                if let Some(session) = state.sessions.get_mut(key) {
+                    session.connection = None;
+                    session.session_id = None;
+                    for (_, sender) in session.pending.drain() {
+                        if sender.send(PermissionDecision::Cancelled).is_err() {
+                            log::debug!("pending permission receiver gone during drop");
+                        }
+                    }
+                }
+                state.sessions.remove(key);
+                if state.sessions.values().all(|live| !live.working) {
+                    state.awake = None;
+                }
+            }
+            Err(error) => {
+                log::warn!("failed to drop live session: {error}");
+            }
+        }
+        if let Some((connection, id, supports_close, _)) = snapshot
+            && supports_close
+            && let Err(error) = connection
+                .send_request(acp::CloseSessionRequest::new(acp::SessionId::new(
+                    id.as_str(),
+                )))
+                .block_task()
+                .await
+        {
+            log::warn!("failed to close previous session {id}: {error}");
+        }
     }
 
     /// Spawn a fresh agent process scoped to one plan and open a session on
-    /// it: pin the agent mode, reapply stored model then effort
-    /// (effort-last, since a model switch can reshape effort options), and
-    /// report the session. Shared by every session opener.
+    /// it: pin the agent mode, reapply the repo default model then effort
+    /// (effort-last, since a model switch can reshape effort options).
+    /// Shared by lazy first prompts and the eager executor start.
     async fn spawn_session(
         &self,
         repo_root: &Path,
         branch: &str,
-        stored: crate::repo_state::RepoState,
         plan: ActivePlan,
         agent: &str,
-    ) -> Result<(ConnectionTo<Agent>, String, SessionKey, SessionInfo), AgentError> {
+    ) -> Result<(ConnectionTo<Agent>, String, SessionKey), AgentError> {
         let key = plan.key().ok_or_else(|| AgentError::RequestFailed {
             raw: "cannot open a session for a finished plan".to_string(),
         })?;
+        let stored = crate::repo_state::load_repo_state(repo_root);
         let connection = self
             .ensure_connection_for(&key, &plan, opencode::agent_env(&plan.plan_ref()))
             .await?;
@@ -468,14 +630,22 @@ impl AgentManager {
             }
         }
         log_roles("applied", &applied);
-        let info = {
+        {
             let mut state = self.state.lock().expect("state poisoned");
-            let view = plan.info(repo_root);
             let supports_close = state
                 .sessions
                 .get(&key)
                 .map(|session| session.supports_close)
                 .unwrap_or(false);
+            // A reopened session keeps its one-time prefix state; a fresh
+            // plan starts unprefixed.
+            let prefixed = state
+                .sessions
+                .get(&key)
+                .map(|session| session.plan.prefixed)
+                .unwrap_or(plan.prefixed);
+            let mut plan = plan;
+            plan.prefixed = prefixed;
             state.sessions.insert(
                 key.clone(),
                 LiveSession {
@@ -483,6 +653,7 @@ impl AgentManager {
                     supports_close,
                     session_id: Some(session_id.clone()),
                     working: false,
+                    approval: false,
                     failed: false,
                     last_prompt: None,
                     last_roles: applied,
@@ -494,30 +665,68 @@ impl AgentManager {
             state.repo_root = Some(repo_root.to_path_buf());
             state.branch = branch.to_string();
             state.current = Some(key.clone());
-            session_info(&session_id, repo_root, branch, options, view)
-        };
-        emit_event(&self.app, AppEvent::SessionReset);
-        Ok((connection, session_id, key, info))
-    }
-
-    /// Record the held plan on the current session. A poisoned lock only
-    /// logs, matching `lock_state`.
-    fn set_plan(&self, plan: ActivePlan) {
-        match self.state.lock() {
-            Ok(mut state) => {
-                if let Some(key) = state.current.clone()
-                    && let Some(session) = state.sessions.get_mut(&key)
-                {
-                    session.plan = plan;
-                }
-            }
-            Err(error) => {
-                log::warn!("failed to record plan transition: {error}");
-            }
         }
+        emit_event(
+            &self.app,
+            AppEvent::SessionReset {
+                session: key.clone(),
+            },
+        );
+        emit_event(
+            &self.app,
+            AppEvent::ConfigOptions {
+                session: key.clone(),
+                options,
+            },
+        );
+        Ok((connection, session_id, key))
     }
 
-    /// Drop every live session entry. Repo switches start from scratch.
+    /// Live connection for one session, spawning lazily on the first
+    /// prompt: same plan directory, mode pin, stored model/effort
+    /// reapplied. Restored sessions start unprefixed, so the role template
+    /// prepends to their first message again.
+    async fn ensure_live(
+        &self,
+        key: &SessionKey,
+    ) -> Result<(ConnectionTo<Agent>, String), AgentError> {
+        if let Some((connection, session_id, _, _)) = self.session_snapshot_for(key)
+            && !connection.is_incoming_closed()
+        {
+            return Ok((connection, session_id));
+        }
+        let (repo_root, branch) = self
+            .reopen_snapshot()
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
+        let plan_ref = plans::PlanRef {
+            name: key.plan.clone(),
+            phase: role_phase(key.role),
+        };
+        if !plan_ref.path(&repo_root).is_dir() {
+            return Err(AgentError::NoSession {
+                raw: "plan is gone".to_string(),
+            });
+        }
+        let stored_prefixed = lock_state(&self.state)
+            .and_then(|state| state.sessions.get(key).map(|live| live.plan.prefixed));
+        let mut plan = match key.role {
+            SessionRole::Scoping => ActivePlan::scoping(key.plan.clone()),
+            SessionRole::Executing => ActivePlan::executing(key.plan.clone()),
+        };
+        // A known session keeps its prefix state across transport deaths;
+        // a restored one starts unprefixed so the role prepends again.
+        if let Some(prefixed) = stored_prefixed {
+            plan.prefixed = prefixed;
+        }
+        let agent = opencode::agent_for(plan.phase);
+        let (connection, session_id, _) =
+            self.spawn_session(&repo_root, &branch, plan, agent).await?;
+        Ok((connection, session_id))
+    }
+
+    /// Drop every live session entry. Repo opens start from scratch.
     fn clear_sessions(&self) {
         match self.state.lock() {
             Ok(mut state) => {
@@ -531,27 +740,6 @@ impl AgentManager {
         }
     }
 
-    fn current_key(&self) -> Option<SessionKey> {
-        lock_state(&self.state)?.current.clone()
-    }
-
-    /// Move the stored plan to cancelled. No-op without one or when its
-    /// directory is already gone, so a retried open never bricks.
-    fn abandon_stored_plan(&self) -> Result<(), AgentError> {
-        let Some((repo_root, active)) = self.plan_snapshot() else {
-            return Ok(());
-        };
-        let plan = active.plan_ref();
-        if !plan.phase.is_active() {
-            return Ok(());
-        }
-        if !plan.path(&repo_root).exists() {
-            return Ok(());
-        }
-        plans::abandon(&repo_root, &plan)?;
-        Ok(())
-    }
-
     /// Current repository root, when a session is open.
     pub fn current_repo(&self) -> Option<PathBuf> {
         lock_state(&self.state)?.repo_root.clone()
@@ -559,113 +747,66 @@ impl AgentManager {
 
     /// Resend the last prompt. When the transport is closed, reopen the
     /// session on the held plan first. Returns false when nothing ran.
-    pub async fn retry_last(&self) -> Result<bool, AgentError> {
-        let key = self.current_key().ok_or_else(|| AgentError::NoSession {
-            raw: "open a repository first".to_string(),
-        })?;
-        let Some(text) =
-            lock_state(&self.state).and_then(|state| state.sessions.get(&key)?.last_prompt.clone())
+    pub async fn retry_last(&self, session: SessionKey) -> Result<bool, AgentError> {
+        let Some(text) = lock_state(&self.state)
+            .and_then(|state| state.sessions.get(&session)?.last_prompt.clone())
         else {
             return Ok(false);
         };
-        let (connection, session_id, _) = match self
-            .session_snapshot()
-            .filter(|(connection, _, _, _)| !connection.is_incoming_closed())
-        {
-            Some((connection, session_id, _, _)) => (connection, session_id, key.clone()),
-            None => {
-                let (connection, session_id) = self.reopen_session().await?;
-                (connection, session_id, key.clone())
-            }
-        };
-        let watch = Self::scoping_watch(&self.plan_snapshot());
-        self.start_turn(connection, session_id, key, text, watch)
+        let (connection, session_id) = self.ensure_live(&session).await?;
+        let watch = self.scoping_watch_for(&session);
+        self.start_turn(connection, session_id, session, text, watch)
             .await?;
         Ok(true)
     }
 
-    /// Send one plain-text prompt. Streams arrive as events; the turn end
-    /// arrives as done or failed. The planner role prefixes the user's
-    /// first scoping message only; the transcript keeps the raw text.
-    pub async fn send_prompt(&self, text: String) -> Result<(), AgentError> {
-        let (connection, session_id, _, key) =
-            self.session_snapshot()
-                .ok_or_else(|| AgentError::NoSession {
-                    raw: "open a repository first".to_string(),
-                })?;
+    /// Send one plain-text prompt, spawning the session lazily on its
+    /// first message. Streams arrive as events; the turn end arrives as
+    /// done or failed. The role template prefixes the first message per
+    /// ACP conversation; the transcript keeps the raw text.
+    pub async fn send_prompt(&self, session: SessionKey, text: String) -> Result<(), AgentError> {
+        let (connection, session_id) = self.ensure_live(&session).await?;
         // A fresh prompt clears the failed flag; the dot goes green while
         // the turn runs.
         if let Some(mut state) = lock_state(&self.state)
-            && let Some(session) = state.sessions.get_mut(&key)
+            && let Some(live) = state.sessions.get_mut(&session)
         {
-            session.failed = false;
+            live.failed = false;
         }
-        let watch = Self::scoping_watch(&self.plan_snapshot());
+        self.select_key(session.clone());
+        self.touch_activity(&session.plan);
+        let watch = self.scoping_watch_for(&session);
         let mut text = text;
-        if let Some(plan) = self.claim_planner_prefix() {
+        if let Some(plan) = self.claim_planner_prefix(&session) {
             text = opencode::planner_first_message(&opencode::plan_display(&plan), &text);
         }
-        self.start_turn(connection, session_id, key, text, watch)
+        self.start_turn(connection, session_id, session, text, watch)
             .await
     }
 
     /// Plan watch for scoping turns: re-emit `plan.md` presence when the
-    /// turn lands. Pure.
-    fn scoping_watch(
-        snapshot: &Option<(PathBuf, ActivePlan)>,
-    ) -> Option<(PathBuf, plans::PlanRef)> {
-        let (repo_root, plan) = snapshot.as_ref().filter(|(_, plan)| plan.is_scoping())?;
-        Some((repo_root.clone(), plan.plan_ref()))
-    }
-
-    /// Claim the one-time planner prefix for the first scoping message.
-    /// One locked check-and-mark, so a retried turn never prefixes twice.
-    fn claim_planner_prefix(&self) -> Option<plans::PlanRef> {
-        let mut state = lock_state(&self.state)?;
-        let key = state.current.clone()?;
-        let session = state.sessions.get_mut(&key)?;
-        if !session.plan.is_scoping() || session.plan.prefixed {
+    /// turn lands.
+    fn scoping_watch_for(&self, key: &SessionKey) -> Option<(PathBuf, plans::PlanRef)> {
+        let state = lock_state(&self.state)?;
+        let repo_root = state.repo_root.clone()?;
+        let live = state.sessions.get(key)?;
+        if !live.plan.is_scoping() {
             return None;
         }
-        session.plan.prefixed = true;
-        Some(session.plan.plan_ref())
+        Some((repo_root, live.plan.plan_ref()))
     }
 
-    /// Reopen the held plan in a fresh session after transport death: same
-    /// plan, same dir, no flag changes. Retry path only.
-    async fn reopen_session(&self) -> Result<(ConnectionTo<Agent>, String), AgentError> {
-        let (repo_root, branch, stored, plan) = {
-            let state = lock_state(&self.state).ok_or_else(|| AgentError::NoSession {
-                raw: "open a repository first".to_string(),
-            })?;
-            let repo_root = state
-                .repo_root
-                .clone()
-                .ok_or_else(|| AgentError::NoSession {
-                    raw: "open a repository first".to_string(),
-                })?;
-            let key = state.current.clone().ok_or_else(|| AgentError::NoSession {
-                raw: "open a repository first".to_string(),
-            })?;
-            let session = state
-                .sessions
-                .get(&key)
-                .ok_or_else(|| AgentError::NoSession {
-                    raw: "open a repository first".to_string(),
-                })?;
-            (
-                repo_root,
-                state.branch.clone(),
-                session.last_roles.clone(),
-                session.plan.clone(),
-            )
-        };
-        self.shutdown_current().await;
-        let agent = opencode::agent_for(plan.phase);
-        let (connection, session_id, _, _) = self
-            .spawn_session(&repo_root, &branch, stored, plan, agent)
-            .await?;
-        Ok((connection, session_id))
+    /// Claim the one-time role prefix for the first message of one ACP
+    /// conversation. One locked check-and-mark, so a retried turn never
+    /// prefixes twice.
+    fn claim_planner_prefix(&self, key: &SessionKey) -> Option<plans::PlanRef> {
+        let mut state = lock_state(&self.state)?;
+        let live = state.sessions.get_mut(key)?;
+        if !live.plan.is_scoping() || live.plan.prefixed {
+            return None;
+        }
+        live.plan.prefixed = true;
+        Some(live.plan.plan_ref())
     }
 
     /// Guard one turn and stream it as events. Records the prompt so retry
@@ -695,8 +836,13 @@ impl AgentManager {
                 session.last_prompt = Some(text.clone());
             }
         }
+        // Dots go green while the turn runs; titles and order refresh when
+        // it lands.
+        self.push_plans();
         let state = Arc::clone(&self.state);
         let app = self.app.clone();
+        let push_state = Arc::clone(&self.state);
+        let push_app = self.app.clone();
         tauri::async_runtime::spawn(async move {
             let prompt = acp::PromptRequest::new(
                 acp::SessionId::new(session_id),
@@ -706,15 +852,22 @@ impl AgentManager {
                 Ok(_) => {
                     set_working(&state, &key, false);
                     set_failed(&state, &key, false);
-                    emit_event(&app, AppEvent::TurnDone);
+                    emit_event(
+                        &app,
+                        AppEvent::TurnDone {
+                            session: key.clone(),
+                        },
+                    );
                     if let Some((repo_root, plan)) = watch {
                         emit_event(
                             &app,
                             AppEvent::PlanChanged {
+                                session: key.clone(),
                                 plan: PlanInfo::of(&repo_root, &plan),
                             },
                         );
                     }
+                    push_sorted(&push_state, &push_app);
                 }
                 Err(error) => {
                     let raw = error.to_string();
@@ -738,11 +891,13 @@ impl AgentManager {
                     emit_event(
                         &app,
                         AppEvent::TurnFailed {
+                            session: key.clone(),
                             raw,
                             hint: hint.text,
                             retryable: hint.retryable,
                         },
                     );
+                    push_sorted(&push_state, &push_app);
                 }
             }
         });
@@ -751,19 +906,20 @@ impl AgentManager {
 
     /// Stop the turn via `session/cancel`, answering every open card as
     /// cancelled per protocol.
-    pub async fn cancel_turn(&self) -> Result<(), AgentError> {
-        let (connection, session_id, _, key) =
-            self.session_snapshot()
+    pub async fn cancel_turn(&self, session: SessionKey) -> Result<(), AgentError> {
+        let (connection, session_id, _, _) =
+            self.session_snapshot_for(&session)
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "no active turn".to_string(),
                 })?;
-        cancel_pending(&self.state, &key);
+        cancel_pending(&self.state, &session);
         if let Err(error) = connection.send_notification(acp::build_cancel_notification(
             acp::SessionId::new(session_id),
         )) {
             log::warn!("failed to send session cancel: {error}");
         }
-        set_working(&self.state, &key, false);
+        set_working(&self.state, &session, false);
+        self.push_plans();
         Ok(())
     }
 
@@ -771,6 +927,7 @@ impl AgentManager {
     /// option; `None` answers cancelled.
     pub fn answer_permission(
         &self,
+        session: SessionKey,
         tool_call_id: &str,
         option_id: Option<String>,
     ) -> Result<(), AgentError> {
@@ -783,8 +940,8 @@ impl AgentManager {
             .map(|mut guard| {
                 guard
                     .sessions
-                    .values_mut()
-                    .find_map(|session| session.pending.remove(tool_call_id))
+                    .get_mut(&session)
+                    .and_then(|live| live.pending.remove(tool_call_id))
             });
         match sender {
             Ok(Some(sender)) => {
@@ -801,44 +958,6 @@ impl AgentManager {
                 raw: format!("no pending permission for {tool_call_id}"),
             }),
             Err(error) => Err(error),
-        }
-    }
-
-    /// Drop the current session's live connection so the next ensure spawns
-    /// a fresh process. Pending permission cards resolve as cancelled; the
-    /// old child exits when its stdio closes. Best-effort closes the old
-    /// session first. The branch watch stays repo-global.
-    async fn shutdown_current(&self) {
-        let snapshot = self.session_snapshot();
-        let key = match self.state.lock() {
-            Ok(mut state) => {
-                let key = state.current.clone();
-                if let Some(key) = key.clone()
-                    && let Some(session) = state.sessions.get_mut(&key)
-                {
-                    session.connection = None;
-                    session.session_id = None;
-                }
-                key
-            }
-            Err(error) => {
-                log::warn!("failed to drop agent connection: {error}");
-                None
-            }
-        };
-        if let Some(key) = key {
-            cancel_pending(&self.state, &key);
-        }
-        if let Some((connection, id, supports_close, _)) = snapshot
-            && supports_close
-            && let Err(error) = connection
-                .send_request(acp::CloseSessionRequest::new(acp::SessionId::new(
-                    id.as_str(),
-                )))
-                .block_task()
-                .await
-        {
-            log::warn!("failed to close previous session {id}: {error}");
         }
     }
 
@@ -968,9 +1087,11 @@ impl AgentManager {
                     // Startup failures land on the failed flag so the row
                     // dot turns red even before any prompt ran.
                     set_failed(&slot, &exit_key, true);
+                    push_sorted(&slot, &exit_app);
                     emit_event(
                         &exit_app,
                         AppEvent::AgentExited {
+                            session: exit_key,
                             raw: raw.clone(),
                             hint: hint.text,
                             retryable: hint.retryable,
@@ -999,55 +1120,111 @@ impl AgentManager {
         }
     }
 
-    fn reopen_snapshot(&self) -> Option<(PathBuf, String, crate::repo_state::RepoState)> {
+    fn reopen_snapshot(&self) -> Option<(PathBuf, String)> {
         let state = lock_state(&self.state)?;
-        let key = state.current.clone()?;
-        let roles = state.sessions.get(&key)?.last_roles.clone();
-        Some((state.repo_root.clone()?, state.branch.clone(), roles))
+        Some((state.repo_root.clone()?, state.branch.clone()))
     }
 
     fn connection_snapshot_for(&self, key: &SessionKey) -> Option<ConnectionTo<Agent>> {
         lock_state(&self.state).and_then(|state| state.sessions.get(key)?.connection.clone())
     }
 
-    fn session_snapshot(&self) -> Option<(ConnectionTo<Agent>, String, bool, SessionKey)> {
+    fn session_snapshot_for(
+        &self,
+        key: &SessionKey,
+    ) -> Option<(ConnectionTo<Agent>, String, bool, SessionKey)> {
         let state = lock_state(&self.state)?;
-        let key = state.current.clone()?;
-        let session = state.sessions.get(&key)?;
+        let session = state.sessions.get(key)?;
         Some((
             session.connection.clone()?,
             session.session_id.clone()?,
             session.supports_close,
-            key,
-        ))
-    }
-
-    /// Current repo plus owned plan, when a chat is open.
-    fn plan_snapshot(&self) -> Option<(PathBuf, ActivePlan)> {
-        let state = lock_state(&self.state)?;
-        let key = state.current.clone()?;
-        Some((
-            state.repo_root.clone()?,
-            state.sessions.get(&key)?.plan.clone(),
+            key.clone(),
         ))
     }
 }
 
-/// Build the frontend session payload with its plan. Pure.
-fn session_info(
-    session_id: &str,
+/// Plans sorted by phase, then most recent user activity first. Before any
+/// activity, `plan.md` modification time newest first, falling back to the
+/// directory name (which starts with a creation timestamp).
+fn sorted_entries(
     repo_root: &Path,
-    branch: &str,
-    options: Vec<ConfigOptionView>,
-    plan: PlanInfo,
-) -> SessionInfo {
-    SessionInfo {
-        session_id: session_id.to_string(),
-        repo_root: repo_root.to_string_lossy().to_string(),
-        branch: branch.to_string(),
-        config_options: options,
-        plan,
+    sessions: &HashMap<SessionKey, LiveSession>,
+    activity: &HashMap<String, Instant>,
+) -> Vec<PlanEntry> {
+    let mut plans = plans::scan_plans(repo_root);
+    plans.sort_by(|left, right| {
+        plans::phase_rank(left.phase)
+            .cmp(&plans::phase_rank(right.phase))
+            .then_with(|| {
+                // Active plans sort before idle ones; recency decides
+                // within each group.
+                match (activity.get(&left.name), activity.get(&right.name)) {
+                    (Some(left_at), Some(right_at)) => right_at.cmp(left_at),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => plans::plan_mtime(repo_root, right)
+                        .cmp(&plans::plan_mtime(repo_root, left))
+                        .then_with(|| right.name.cmp(&left.name)),
+                }
+            })
+    });
+    plans
+        .iter()
+        .map(|plan| PlanEntry {
+            name: plan.name.clone(),
+            phase: plan.phase,
+            title: plans::plan_title(repo_root, plan),
+            sessions: session_statuses(repo_root, plan, sessions),
+        })
+        .collect()
+}
+
+/// One status row per session a plan owns: its scoping session, plus its
+/// execution session once approved.
+fn session_statuses(
+    repo_root: &Path,
+    plan: &plans::PlanRef,
+    sessions: &HashMap<SessionKey, LiveSession>,
+) -> Vec<SessionStatusView> {
+    let mut roles = vec![SessionRole::Scoping];
+    if plans::has_execution(repo_root, plan) {
+        roles.push(SessionRole::Executing);
     }
+    roles
+        .into_iter()
+        .map(|role| {
+            let key = SessionKey {
+                plan: plan.name.clone(),
+                role,
+            };
+            let live = sessions.get(&key);
+            SessionStatusView {
+                role,
+                working: live.map(|live| live.working).unwrap_or(false),
+                approval: live.map(|live| live.approval).unwrap_or(false),
+                failed: live.map(|live| live.failed).unwrap_or(false),
+                live: live.map(|live| live.is_live()).unwrap_or(false),
+            }
+        })
+        .collect()
+}
+
+/// Most-recent session across the sorted plans: the execution session when
+/// the plan owns one, else scoping.
+fn most_recent_key(plans: &[PlanEntry]) -> Option<SessionKey> {
+    plans.first().map(|entry| {
+        let role = entry
+            .sessions
+            .iter()
+            .find(|status| status.role == SessionRole::Executing)
+            .map(|_| SessionRole::Executing)
+            .unwrap_or(SessionRole::Scoping);
+        SessionKey {
+            plan: entry.name.clone(),
+            role,
+        }
+    })
 }
 
 /// Refuse plan transitions while the session's turn runs. A poisoned lock
@@ -1107,6 +1284,35 @@ fn set_failed(state: &Mutex<State>, key: &SessionKey, failed: bool) {
     };
     if let Some(session) = guard.sessions.get_mut(key) {
         session.failed = failed;
+    }
+}
+
+fn set_approval(state: &Mutex<State>, key: &SessionKey, approval: bool) {
+    let Some(mut guard) = lock_state(state) else {
+        return;
+    };
+    if let Some(session) = guard.sessions.get_mut(key) {
+        session.approval = approval;
+    }
+}
+
+/// Rebuild the plans list from a spawned task holding only state and app.
+/// Titles re-read here, so every finished turn refreshes plan names.
+fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
+    let (plans, selected) = match state.lock() {
+        Ok(guard) => {
+            let repo_root = guard.repo_root.clone().unwrap_or_default();
+            let plans = sorted_entries(&repo_root, &guard.sessions, &guard.activity);
+            let selected = guard.current.clone().or_else(|| most_recent_key(&plans));
+            (plans, selected)
+        }
+        Err(error) => {
+            log::warn!("failed to rebuild plans list: {error}");
+            return;
+        }
+    };
+    if let Some(selected) = selected {
+        emit_event(app, AppEvent::PlansChanged { plans, selected });
     }
 }
 
@@ -1208,7 +1414,15 @@ async fn handle_permission_request(
         };
         session.pending.insert(tool_call_id.clone(), tx);
     }
-    emit_event(app, AppEvent::PermissionAsked { permission });
+    set_approval(state, key, true);
+    push_sorted(state, app);
+    emit_event(
+        app,
+        AppEvent::PermissionAsked {
+            session: key.clone(),
+            permission,
+        },
+    );
     let decision = match rx.await {
         Ok(decision) => decision,
         Err(_) => {
@@ -1245,7 +1459,15 @@ async fn handle_permission_request(
             }
         }
     }
-    emit_event(app, AppEvent::PermissionResolved { tool_call_id });
+    set_approval(state, key, false);
+    push_sorted(state, app);
+    emit_event(
+        app,
+        AppEvent::PermissionResolved {
+            session: key.clone(),
+            tool_call_id,
+        },
+    );
 }
 
 fn handle_notification(
@@ -1265,25 +1487,56 @@ fn handle_notification(
         return;
     }
     if let Some(chunk) = crate::updates::agent_text_of(&notification.update) {
-        emit_event(app, AppEvent::AgentText { chunk });
+        emit_event(
+            app,
+            AppEvent::AgentText {
+                session: key.clone(),
+                chunk,
+            },
+        );
     }
     match &notification.update {
         acp::SessionUpdate::ToolCall(call) => {
             let line = crate::updates::format_tool_line(call);
-            emit_event(app, AppEvent::ToolLine { line });
+            emit_event(
+                app,
+                AppEvent::ToolLine {
+                    session: key.clone(),
+                    line,
+                },
+            );
             snoop_todos_from_call(state, app, key, call);
         }
         acp::SessionUpdate::ToolCallUpdate(update) => {
             let line = crate::updates::format_tool_update(update);
-            emit_event(app, AppEvent::ToolLine { line });
+            emit_event(
+                app,
+                AppEvent::ToolLine {
+                    session: key.clone(),
+                    line,
+                },
+            );
             snoop_todos_from_update(state, app, key, update);
         }
         acp::SessionUpdate::UsageUpdate(update) => {
-            emit_event(app, spend_tick(update));
+            emit_event(
+                app,
+                AppEvent::SpendTick {
+                    session: key.clone(),
+                    cost: update.cost.as_ref().map(|cost| cost.amount).unwrap_or(0.0),
+                    ctx_pct: context_pct(update.used, update.size),
+                },
+            );
         }
         acp::SessionUpdate::ConfigOptionUpdate(update) => {
             let options = config_views(&update.config_options);
-            emit_event(app, AppEvent::ConfigOptions { options });
+            emit_event(
+                app,
+                AppEvent::ConfigOptions {
+                    session: key.clone(),
+                    options,
+                },
+            );
         }
         acp::SessionUpdate::AgentMessageChunk(_) => {}
         // Already streamed as agent text above. Known-but-unrendered kinds
@@ -1350,18 +1603,11 @@ fn update_todos(state: &Mutex<State>, app: &AppHandle, key: &SessionKey, fresh: 
     emit_event(
         app,
         AppEvent::TodosChanged {
+            session: key.clone(),
             todos: fresh,
             changes,
         },
     );
-}
-
-/// Spend tick from a `usage_update`. Pure.
-fn spend_tick(update: &acp::UsageUpdate) -> AppEvent {
-    AppEvent::SpendTick {
-        cost: update.cost.as_ref().map(|cost| cost.amount).unwrap_or(0.0),
-        ctx_pct: context_pct(update.used, update.size),
-    }
 }
 
 /// Select one agent by mode id. Fails loud: a planner session running as

@@ -3,9 +3,11 @@ import { listen } from "@tauri-apps/api/event";
 import type {
 	AppEvent,
 	ConfigOptionView,
+	OpenRepoResult,
+	PlansUpdate,
 	Prefs,
 	RepoInfo,
-	SessionInfo,
+	SessionKey,
 } from "./types";
 
 export function getPrefs(): Promise<Prefs> {
@@ -16,50 +18,52 @@ export function validateRepo(path: string): Promise<RepoInfo> {
 	return invoke("validate_repo_path", { path });
 }
 
-export function openRepo(path: string): Promise<SessionInfo> {
-	return invoke<SessionInfo>("open_repo", { path });
+export function openRepo(path: string): Promise<OpenRepoResult> {
+	return invoke<OpenRepoResult>("open_repo", { path });
 }
 
 export function refreshBranch(): Promise<string> {
 	return invoke<string>("refresh_branch");
 }
 
-export function executePlan(): Promise<SessionInfo> {
-	return invoke<SessionInfo>("execute_plan");
+export function executePlan(session: SessionKey): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("execute_plan", { session });
 }
 
-export function markCompleted(): Promise<SessionInfo> {
-	return invoke<SessionInfo>("mark_completed");
+export function markCompleted(session: SessionKey): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("mark_completed", { session });
 }
 
-export function abandonPlan(): Promise<SessionInfo> {
-	return invoke<SessionInfo>("abandon_plan");
+export function abandonPlan(session: SessionKey): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("abandon_plan", { session });
 }
 
-export function sendPrompt(text: string): Promise<void> {
-	return invoke("send_prompt", { text });
+export function sendPrompt(session: SessionKey, text: string): Promise<void> {
+	return invoke("send_prompt", { session, text });
 }
 
-export function retryLast(): Promise<boolean> {
-	return invoke<boolean>("retry_last");
+export function retryLast(session: SessionKey): Promise<boolean> {
+	return invoke<boolean>("retry_last", { session });
 }
 
-export function cancelTurn(): Promise<void> {
-	return invoke("cancel_turn");
+export function cancelTurn(session: SessionKey): Promise<void> {
+	return invoke("cancel_turn", { session });
 }
 
 export function answerPermission(
+	session: SessionKey,
 	toolCallId: string,
 	optionId: string | null,
 ): Promise<void> {
-	return invoke("answer_permission", { toolCallId, optionId });
+	return invoke("answer_permission", { session, toolCallId, optionId });
 }
 
 export function setConfigOption(
+	session: SessionKey,
 	configId: string,
 	value: string,
 ): Promise<ConfigOptionView[]> {
-	return invoke("set_config_option", { configId, value });
+	return invoke("set_config_option", { session, configId, value });
 }
 
 export function onAppEvent(handler: (event: AppEvent) => void): () => void {

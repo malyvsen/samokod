@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { onAppEvent, setConfigOption } from "./api";
+import { testKey } from "./fixtures";
 import type { AppEvent } from "./types";
 
 const listen = vi.hoisted(() => vi.fn());
@@ -22,8 +23,9 @@ beforeEach(() => {
 describe("config options", () => {
 	test("sends camelCase keys matching the Rust command", async () => {
 		vi.mocked(invoke).mockResolvedValue([]);
-		await setConfigOption("model", "openai/gpt-5");
+		await setConfigOption(testKey(), "model", "openai/gpt-5");
 		expect(invoke).toHaveBeenCalledWith("set_config_option", {
+			session: testKey(),
 			configId: "model",
 			value: "openai/gpt-5",
 		});
@@ -74,7 +76,9 @@ describe("app events", () => {
 
 		expect(handlers.size).toBe(1);
 		for (const handler of [...handlers]) {
-			handler({ payload: { type: "agent_text", chunk: "Yes" } });
+			handler({
+				payload: { type: "agent_text", session: testKey(), chunk: "Yes" },
+			});
 		}
 		expect(seen).toEqual(["Yes"]);
 

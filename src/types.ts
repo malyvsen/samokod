@@ -27,12 +27,55 @@ export interface SessionInfo {
 	plan: PlanInfo;
 }
 
-export type PlanPhase = "scoping" | "executing";
+export type SessionRole = "scoping" | "executing";
+
+export interface SessionKey {
+	plan: string;
+	role: SessionRole;
+}
+
+export function sameSession(
+	left: SessionKey | null,
+	right: SessionKey | null,
+): boolean {
+	if (left === null || right === null) return false;
+	return left.plan === right.plan && left.role === right.role;
+}
+
+export interface SessionStatusView {
+	role: SessionRole;
+	working: boolean;
+	approval: boolean;
+	failed: boolean;
+	live: boolean;
+}
+
+export type PlanPhase = "scoping" | "executing" | "completed" | "cancelled";
+
+export interface PlanEntry {
+	name: string;
+	phase: PlanPhase;
+	title: string;
+	sessions: SessionStatusView[];
+}
+
+export interface PlansUpdate {
+	plans: PlanEntry[];
+	selected: SessionKey;
+}
+
+export interface OpenRepoResult {
+	repo_root: string;
+	branch: string;
+	plans: PlanEntry[];
+	selected: SessionKey;
+}
 
 export interface PlanInfo {
 	name: string;
 	phase: PlanPhase;
 	has_plan_md: boolean;
+	title: string;
 }
 
 export interface RecentRepo {
@@ -78,23 +121,46 @@ export interface SpendView {
 }
 
 export type AppEvent =
-	| { type: "agent_text"; chunk: string }
-	| { type: "tool_line"; line: ToolLineView }
-	| { type: "turn_done" }
-	| { type: "turn_failed"; raw: string; hint: string; retryable: boolean }
-	| { type: "agent_exited"; raw: string; hint: string; retryable: boolean }
-	| { type: "permission_asked"; permission: PermissionView }
-	| { type: "permission_resolved"; tool_call_id: string }
-	| { type: "config_options"; options: ConfigOptionView[] }
-	| { type: "todos_changed"; todos: TodoView[]; changes: TodoChangeView[] }
+	| { type: "agent_text"; session: SessionKey; chunk: string }
+	| { type: "tool_line"; session: SessionKey; line: ToolLineView }
+	| { type: "turn_done"; session: SessionKey }
+	| {
+			type: "turn_failed";
+			session: SessionKey;
+			raw: string;
+			hint: string;
+			retryable: boolean;
+	  }
+	| {
+			type: "agent_exited";
+			session: SessionKey;
+			raw: string;
+			hint: string;
+			retryable: boolean;
+	  }
+	| {
+			type: "permission_asked";
+			session: SessionKey;
+			permission: PermissionView;
+	  }
+	| { type: "permission_resolved"; session: SessionKey; tool_call_id: string }
+	| { type: "config_options"; session: SessionKey; options: ConfigOptionView[] }
+	| {
+			type: "todos_changed";
+			session: SessionKey;
+			todos: TodoView[];
+			changes: TodoChangeView[];
+	  }
 	| {
 			type: "spend_tick";
+			session: SessionKey;
 			cost: number;
 			ctx_pct: number;
 	  }
-	| { type: "plan_changed"; plan: PlanInfo }
+	| { type: "plan_changed"; session: SessionKey; plan: PlanInfo }
 	| { type: "branch_changed"; branch: string }
-	| { type: "session_reset" };
+	| { type: "session_reset"; session: SessionKey }
+	| { type: "plans_changed"; plans: PlanEntry[]; selected: SessionKey };
 
 export type TranscriptItem =
 	| { kind: "user"; id: string; text: string }
@@ -115,4 +181,4 @@ export type TranscriptItem =
 			retryable: boolean;
 	  };
 
-export type AgentStatus = "idle" | "working" | "approval";
+export type AgentStatus = "idle" | "working" | "approval" | "failed";

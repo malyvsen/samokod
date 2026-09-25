@@ -5,6 +5,7 @@ const STATUS: Record<AgentStatus, { text: string; className: string }> = {
 	idle: { text: "IDLE", className: "status" },
 	working: { text: "● WORKING", className: "status live" },
 	approval: { text: "● PAUSED - APPROVAL", className: "status paused" },
+	failed: { text: "● FAILED", className: "status failed" },
 };
 
 export function TopBar({
@@ -75,6 +76,8 @@ export function TopBar({
 const PHASE_LABEL: Record<PlanPhase, string> = {
 	scoping: "SCOPING",
 	executing: "EXECUTING",
+	completed: "COMPLETED",
+	cancelled: "CANCELLED",
 };
 
 interface PlanOption {
@@ -115,10 +118,13 @@ function PlanMenu({
 					disabled: false,
 					onSelect: onComplete,
 				} satisfies PlanOption;
-			default: {
-				const _exhaustive: never = plan.phase;
-				throw new Error(`unknown plan phase ${_exhaustive}`);
-			}
+			case "completed":
+			case "cancelled":
+				return {
+					label: "Mark completed",
+					disabled: true,
+					onSelect: onComplete,
+				} satisfies PlanOption;
 		}
 	})();
 	const options: PlanOption[] = [

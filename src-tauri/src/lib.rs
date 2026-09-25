@@ -23,7 +23,7 @@ use tauri_plugin_log::{Target, TargetKind};
 use crate::agent::AgentManager;
 use crate::prefs::{load_prefs, record_open, save_prefs};
 use crate::repo::{RepoInfo, validate_repo};
-use crate::types::{ConfigOptionView, Prefs, SessionInfo};
+use crate::types::{ConfigOptionView, OpenRepoResult, PlansUpdate, Prefs, SessionKey};
 
 #[tauri::command]
 fn get_prefs(app: AppHandle) -> Result<Prefs, String> {
@@ -40,11 +40,10 @@ async fn open_repo(
     app: AppHandle,
     state: State<'_, AgentManager>,
     path: String,
-) -> Result<SessionInfo, String> {
+) -> Result<OpenRepoResult, String> {
     let info = validate_repo(&PathBuf::from(&path))?;
-    let stored = crate::repo_state::load_repo_state(&PathBuf::from(&info.root));
-    let session = state
-        .open_repo(PathBuf::from(&info.root), info.branch.clone(), stored)
+    let result = state
+        .open_repo(PathBuf::from(&info.root))
         .await
         .map_err(|error| error.to_string())?;
     let dir = prefs_dir(&app)?;
@@ -53,7 +52,7 @@ async fn open_repo(
     if let Err(error) = save_prefs(&dir, &prefs) {
         log::warn!("failed to save prefs after opening {}: {error}", info.root);
     }
-    Ok(session)
+    Ok(result)
 }
 
 #[tauri::command]
@@ -65,66 +64,103 @@ async fn refresh_branch(state: State<'_, AgentManager>) -> Result<String, String
 }
 
 #[tauri::command]
-async fn execute_plan(state: State<'_, AgentManager>) -> Result<SessionInfo, String> {
+async fn create_plan(state: State<'_, AgentManager>) -> Result<PlansUpdate, String> {
+    state.create_plan().await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn execute_plan(
+    state: State<'_, AgentManager>,
+    session: SessionKey,
+) -> Result<PlansUpdate, String> {
     state
-        .execute_plan()
+        .execute_plan(session)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn mark_completed(state: State<'_, AgentManager>) -> Result<SessionInfo, String> {
+async fn mark_completed(
+    state: State<'_, AgentManager>,
+    session: SessionKey,
+) -> Result<PlansUpdate, String> {
     state
-        .mark_completed()
+        .mark_completed(session)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn abandon_plan(state: State<'_, AgentManager>) -> Result<SessionInfo, String> {
+async fn abandon_plan(
+    state: State<'_, AgentManager>,
+    session: SessionKey,
+) -> Result<PlansUpdate, String> {
     state
-        .abandon_plan()
+        .abandon_plan(session)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn send_prompt(state: State<'_, AgentManager>, text: String) -> Result<(), String> {
+async fn cancel_execution(
+    state: State<'_, AgentManager>,
+    session: SessionKey,
+) -> Result<PlansUpdate, String> {
     state
-        .send_prompt(text)
+        .cancel_execution(session)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn retry_last(state: State<'_, AgentManager>) -> Result<bool, String> {
-    state.retry_last().await.map_err(|error| error.to_string())
+async fn send_prompt(
+    state: State<'_, AgentManager>,
+    session: SessionKey,
+    text: String,
+) -> Result<(), String> {
+    state
+        .send_prompt(session, text)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn cancel_turn(state: State<'_, AgentManager>) -> Result<(), String> {
-    state.cancel_turn().await.map_err(|error| error.to_string())
+async fn retry_last(state: State<'_, AgentManager>, session: SessionKey) -> Result<bool, String> {
+    state
+        .retry_last(session)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn cancel_turn(state: State<'_, AgentManager>, session: SessionKey) -> Result<(), String> {
+    state
+        .cancel_turn(session)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn answer_permission(
     state: State<'_, AgentManager>,
+    session: SessionKey,
     tool_call_id: String,
     option_id: Option<String>,
 ) -> Result<(), String> {
     state
-        .answer_permission(&tool_call_id, option_id)
+        .answer_permission(session, &tool_call_id, option_id)
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn set_config_option(
     state: State<'_, AgentManager>,
+    session: SessionKey,
     config_id: String,
     value: String,
 ) -> Result<Vec<ConfigOptionView>, String> {
     state
-        .set_config_option(config_id, value)
+        .set_config_option(session, config_id, value)
         .await
         .map_err(|error| error.to_string())
 }
@@ -170,9 +206,11 @@ pub fn run() {
             validate_repo_path,
             open_repo,
             refresh_branch,
+            create_plan,
             execute_plan,
             mark_completed,
             abandon_plan,
+            cancel_execution,
             send_prompt,
             retry_last,
             cancel_turn,

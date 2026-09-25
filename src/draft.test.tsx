@@ -2,8 +2,8 @@ import { render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
-import { testSession } from "./fixtures";
-import type { AppEvent, ConfigOptionView } from "./types";
+import { testEntry, testKey } from "./fixtures";
+import type { AppEvent } from "./types";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
@@ -11,6 +11,11 @@ const api = vi.hoisted(() => ({
 	getPrefs: vi.fn(),
 	validateRepo: vi.fn(),
 	openRepo: vi.fn(),
+	createPlan: vi.fn(),
+	executePlan: vi.fn(),
+	markCompleted: vi.fn(),
+	abandonPlan: vi.fn(),
+	cancelExecution: vi.fn(),
 	sendPrompt: vi.fn(),
 	retryLast: vi.fn(),
 	cancelTurn: vi.fn(),
@@ -19,18 +24,6 @@ const api = vi.hoisted(() => ({
 	onAppEvent: vi.fn(() => () => {}),
 }));
 vi.mock("./api", () => api);
-
-function options(): ConfigOptionView[] {
-	return [
-		{
-			id: "model",
-			name: "Model",
-			category: "model",
-			currentValue: "openai/gpt-5",
-			options: [{ value: "openai/gpt-5", name: "GPT-5" }],
-		},
-	];
-}
 
 function emit(event: AppEvent) {
 	type Handler = (event: AppEvent) => void;
@@ -54,7 +47,12 @@ beforeEach(() => {
 		recent: [{ path: "/repo" }],
 	});
 	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "main" });
-	api.openRepo.mockResolvedValue(testSession(options()));
+	api.openRepo.mockResolvedValue({
+		repo_root: "/repo",
+		branch: "main",
+		plans: [testEntry()],
+		selected: testKey(),
+	});
 });
 
 async function openChat() {
@@ -70,7 +68,7 @@ describe("draft bubble in chat", () => {
 		const user = await openChat();
 		api.sendPrompt.mockResolvedValue(undefined);
 		await user.keyboard("move the picker{Enter}");
-		expect(api.sendPrompt).toHaveBeenCalledWith("move the picker");
+		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "move the picker");
 		await screen.findByText("move the picker");
 	});
 
@@ -80,7 +78,7 @@ describe("draft bubble in chat", () => {
 		await user.keyboard("do it{Enter}");
 		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "STOP" })).toBeInTheDocument();
-		emit({ type: "turn_done" });
+		emit({ type: "turn_done", session: testKey() });
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		expect(
 			screen.queryByRole("button", { name: "STOP" }),
