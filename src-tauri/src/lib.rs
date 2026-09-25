@@ -3,7 +3,9 @@ mod acp;
 mod agent;
 mod awake;
 mod error_hint;
+mod opencode;
 mod permissions;
+mod plans;
 mod prefs;
 mod repo;
 mod spend;
@@ -19,7 +21,7 @@ use tauri_plugin_log::{Target, TargetKind};
 use crate::agent::AgentManager;
 use crate::prefs::{load_prefs, record_model, record_open, save_prefs, stored_model};
 use crate::repo::{RepoInfo, validate_repo};
-use crate::types::{ConfigOptionView, Prefs, SessionInfo};
+use crate::types::{ConfigOptionView, PlanInfo, Prefs, SessionInfo};
 
 #[tauri::command]
 fn get_prefs(app: AppHandle) -> Result<Prefs, String> {
@@ -55,6 +57,30 @@ async fn open_repo(
 #[tauri::command]
 async fn new_chat(state: State<'_, AgentManager>) -> Result<SessionInfo, String> {
     state.new_chat().await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn execute_plan(state: State<'_, AgentManager>) -> Result<SessionInfo, String> {
+    state
+        .execute_plan()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn mark_completed(state: State<'_, AgentManager>) -> Result<PlanInfo, String> {
+    state
+        .mark_completed()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn abandon_plan(state: State<'_, AgentManager>) -> Result<PlanInfo, String> {
+    state
+        .abandon_plan()
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -152,6 +178,9 @@ pub fn run() {
             validate_repo_path,
             open_repo,
             new_chat,
+            execute_plan,
+            mark_completed,
+            abandon_plan,
             send_prompt,
             retry_last,
             cancel_turn,

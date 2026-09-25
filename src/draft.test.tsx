@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
+import { testSession } from "./fixtures";
 import type { AppEvent, ConfigOptionView } from "./types";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -54,12 +55,7 @@ beforeEach(() => {
 		recent: [{ path: "/repo", branch: "main" }],
 	});
 	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "main" });
-	api.openRepo.mockResolvedValue({
-		session_id: "ses-1",
-		repo_root: "/repo",
-		branch: "main",
-		config_options: options(),
-	});
+	api.openRepo.mockResolvedValue(testSession(options()));
 });
 
 async function openChat() {

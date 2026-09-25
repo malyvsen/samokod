@@ -1,9 +1,12 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+	abandonPlan,
 	answerPermission,
 	cancelTurn,
+	executePlan,
 	getPrefs,
+	markCompleted,
 	newChat,
 	onAppEvent,
 	openRepo,
@@ -21,6 +24,7 @@ import { Transcript } from "./components/Transcript";
 import type {
 	AgentStatus,
 	AppEvent,
+	PlanInfo,
 	RecentRepo,
 	SessionInfo,
 	SpendView,
@@ -42,6 +46,7 @@ export function App() {
 	const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
 	const [todos, setTodos] = useState<TodoView[]>([]);
 	const [spend, setSpend] = useState<SpendView | null>(null);
+	const [plan, setPlan] = useState<PlanInfo | null>(null);
 	const [working, setWorking] = useState(false);
 	const [awaitingApproval, setAwaitingApproval] = useState(false);
 	const appRef = useRef<HTMLDivElement>(null);
@@ -60,11 +65,14 @@ export function App() {
 		setTranscript([]);
 		setTodos([]);
 		setSpend(null);
+		setPlan(info.plan);
 		setWorking(false);
 		setAwaitingApproval(false);
 		setView({ kind: "chat" });
 		setPickerError(null);
 	}, []);
+
+	const agentLabel = agentLabelForPlan(plan);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -189,6 +197,11 @@ export function App() {
 			case "session_reset": {
 				setTodos([]);
 				setSpend(null);
+				setPlan(null);
+				break;
+			}
+			case "plan_changed": {
+				setPlan(event.plan);
 				break;
 			}
 		}
@@ -327,6 +340,38 @@ export function App() {
 		applySession(info);
 	}
 
+	async function handleExecute() {
+		if (status !== "idle") return;
+		setWorking(true);
+		try {
+			const info = await executePlan();
+			applySession(info);
+			// applySession resets to idle, but the executor turn it just
+			// started is already running.
+			setWorking(true);
+		} catch (error) {
+			setWorking(false);
+			appendError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	async function handleComplete() {
+		await runPlanAction(markCompleted);
+	}
+
+	async function handleAbandon() {
+		await runPlanAction(abandonPlan);
+	}
+
+	async function runPlanAction(action: () => Promise<PlanInfo>) {
+		if (status !== "idle") return;
+		try {
+			setPlan(await action());
+		} catch (error) {
+			appendError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	const repoLabel = session === null ? "no repo" : shortPath(session.repo_root);
 	const branch = session?.branch ?? "HEAD";
 	const configOptions = session?.config_options ?? [];
@@ -371,9 +416,13 @@ export function App() {
 						repoLabel={repoLabel}
 						branch={branch}
 						status={status}
+						plan={plan}
 						onOpenPicker={handleRepoButton}
 						onNewChat={handleNewChat}
 						onStop={handleStop}
+						onExecute={handleExecute}
+						onComplete={handleComplete}
+						onAbandon={handleAbandon}
 					/>
 					<div className="mainrow">
 						<div className="chatcol">
@@ -381,6 +430,7 @@ export function App() {
 								<Transcript
 									items={transcript}
 									repoLabel={repoLabel}
+									agentLabel={agentLabel}
 									onRetry={handleRetry}
 									onAnswer={handleAnswer}
 								>
@@ -411,6 +461,11 @@ function failureItem(
 	retryable: boolean,
 ): TranscriptItem {
 	return { kind: "error", id: crypto.randomUUID(), raw, hint, retryable };
+}
+
+function agentLabelForPlan(plan: PlanInfo | null): string {
+	if (plan === null) return "AGENT";
+	return plan.phase === "scoping" ? "PLANNER" : "EXECUTOR";
 }
 
 function shortPath(path: string): string {

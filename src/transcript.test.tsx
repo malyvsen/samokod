@@ -10,6 +10,7 @@ function transcript(text: string) {
 		<Transcript
 			items={[{ kind: "user", id: "u1", text }]}
 			repoLabel="~/repo"
+			agentLabel="AGENT"
 			onRetry={vi.fn()}
 			onAnswer={vi.fn()}
 		/>

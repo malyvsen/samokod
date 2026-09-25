@@ -768,6 +768,53 @@ body {
 	color: #050508;
 }
 
+.dopt.danger {
+	color: #ffb4b4;
+}
+
+.dopt.danger:hover {
+	background: rgba(255, 92, 92, 0.14);
+	color: #ffb4b4;
+}
+
+.dopt:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+.dopt:disabled:hover {
+	background: transparent;
+	color: #e8e6e1;
+}
+
+.dopt[data-tip] {
+	position: relative;
+}
+
+.dopt[data-tip]:hover::after {
+	content: attr(data-tip);
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	padding: 2px 0 0;
+	font-size: 11px;
+	white-space: nowrap;
+	color: #8f8c85;
+	z-index: 6;
+}
+
+.dsel.plan-scoping {
+	width: auto;
+	color: #ffd98a;
+	border-color: rgba(255, 200, 60, 0.55);
+}
+
+.dsel.plan-executing {
+	width: auto;
+	color: #7dffc4;
+	border-color: rgba(125, 255, 196, 0.4);
+}
+
 .dopt .tick {
 	width: 14px;
 	flex: none;

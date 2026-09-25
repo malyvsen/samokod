@@ -1,8 +1,11 @@
-// Backend failures for the agent lifecycle. The command edge renders these
-// as strings for the frontend.
+// Shared backend views: failures, events, and session payloads crossing the
+// command edge as JSON. The command edge renders errors as strings.
 use std::collections::HashMap;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+
+use crate::plans::{PlanError, PlanRef};
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum AgentError {
@@ -14,6 +17,16 @@ pub enum AgentError {
     RequestFailed { raw: String },
     #[error("no session: {raw}")]
     NoSession { raw: String },
+    #[error("plan failed: {raw}")]
+    Plan { raw: String },
+}
+
+impl From<PlanError> for AgentError {
+    fn from(error: PlanError) -> Self {
+        AgentError::Plan {
+            raw: error.to_string(),
+        }
+    }
 }
 
 /// One `▸` tool status line regardless of tool kind.
@@ -82,6 +95,9 @@ pub enum AppEvent {
         cost: f64,
         ctx_pct: f64,
     },
+    PlanChanged {
+        plan: PlanInfo,
+    },
     SessionReset,
 }
 
@@ -127,6 +143,28 @@ pub struct SessionInfo {
     pub repo_root: String,
     pub branch: String,
     pub config_options: Vec<ConfigOptionView>,
+    /// The chat's plan. Every chat owns exactly one.
+    pub plan: PlanInfo,
+}
+
+/// Plan state for the topbar dropdown. Mirrors `plans::Phase`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanInfo {
+    pub name: String,
+    pub phase: crate::plans::Phase,
+    pub has_plan_md: bool,
+}
+
+impl PlanInfo {
+    /// Frontend plan payload with fresh `plan.md` presence. Pure except the
+    /// existence check.
+    pub fn of(repo_root: &Path, plan: &PlanRef) -> Self {
+        PlanInfo {
+            name: plan.name.clone(),
+            phase: plan.phase,
+            has_plan_md: plan.has_plan_md(repo_root),
+        }
+    }
 }
 
 /// Recent repo row for the picker.

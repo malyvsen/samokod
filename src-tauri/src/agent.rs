@@ -1,7 +1,7 @@
 // Agent lifecycle: spawn `opencode acp` once, initialize it, open sessions
 // bound to repository roots, and stream prompt turns as events.
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter};
@@ -12,11 +12,13 @@ use crate::acp::{
 };
 use crate::awake;
 use crate::error_hint::{classify_error, is_transport_error};
+use crate::opencode;
+use crate::plans;
 use crate::spend::context_pct;
 use crate::todos::{diff_todos, todos_from_call, todos_from_update};
 use crate::types::{
-    AgentError, AppEvent, ConfigOptionValueView, ConfigOptionView, PermissionView, SessionInfo,
-    TodoView,
+    AgentError, AppEvent, ConfigOptionValueView, ConfigOptionView, PermissionView, PlanInfo,
+    SessionInfo, TodoView,
 };
 
 /// User decision for one permission card.
@@ -24,6 +26,52 @@ use crate::types::{
 enum PermissionDecision {
     Selected(String),
     Cancelled,
+}
+
+/// Plan owned by the current chat. One chat owns one plan.
+#[derive(Debug, Clone)]
+struct ActivePlan {
+    name: String,
+    phase: plans::Phase,
+    /// Planner role already prepended to the first scoping message.
+    prefixed: bool,
+}
+
+impl ActivePlan {
+    fn scoping(name: String) -> Self {
+        ActivePlan {
+            name,
+            phase: plans::Phase::Scoping,
+            prefixed: false,
+        }
+    }
+
+    fn executing(name: String) -> Self {
+        ActivePlan {
+            name,
+            phase: plans::Phase::Executing,
+            prefixed: true,
+        }
+    }
+
+    fn transitioned(next: plans::PlanRef) -> Self {
+        ActivePlan {
+            name: next.name,
+            phase: next.phase,
+            prefixed: true,
+        }
+    }
+
+    fn plan_ref(&self) -> plans::PlanRef {
+        plans::PlanRef {
+            name: self.name.clone(),
+            phase: self.phase,
+        }
+    }
+
+    fn info(&self, repo_root: &Path) -> PlanInfo {
+        PlanInfo::of(repo_root, &self.plan_ref())
+    }
 }
 
 #[derive(Default)]
@@ -39,6 +87,7 @@ struct State {
     last_model: Option<String>,
     pending: HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>,
     todos: Vec<TodoView>,
+    plan: Option<ActivePlan>,
 }
 
 impl State {
@@ -55,12 +104,14 @@ impl State {
     }
 
     /// Reset every session-scoped field, keeping the agent connection.
+    /// The new plan arrives with the session: one chat owns one plan.
     fn reset_session(
         &mut self,
         session_id: String,
         repo_root: PathBuf,
         branch: String,
         model: Option<String>,
+        plan: ActivePlan,
     ) {
         self.session_id = Some(session_id);
         self.repo_root = Some(repo_root);
@@ -70,6 +121,7 @@ impl State {
         self.last_model = model;
         self.pending.clear();
         self.todos.clear();
+        self.plan = Some(plan);
     }
 }
 
@@ -86,69 +138,30 @@ impl AgentManager {
         }
     }
 
-    /// Open a repository: close the old session when the agent advertises it,
-    /// open a fresh session with `cwd` set to the repo root, pin mode to
-    /// build, reapply the stored model, and report the agent's config options.
+    /// Open a repository: ensure the plan structure, abandon any active
+    /// plan, spawn a fresh planner process scoped to a new scoping plan,
+    /// and open a session in planner mode with the stored model reapplied.
     pub async fn open_repo(
         &self,
         repo_root: PathBuf,
         branch: String,
         stored_model: Option<String>,
     ) -> Result<SessionInfo, AgentError> {
-        let connection = self.ensure_connection().await?;
-        if let Some((old_connection, old_id, supports_close)) = self.session_snapshot()
-            && supports_close
-            && let Err(error) = old_connection
-                .send_request(acp::CloseSessionRequest::new(acp::SessionId::new(
-                    old_id.as_str(),
-                )))
-                .block_task()
-                .await
-        {
-            log::warn!("failed to close previous session {old_id}: {error}");
-        }
-        let response = connection
-            .send_request(acp::build_new_session_request(&repo_root))
-            .block_task()
-            .await
-            .map_err(|error| AgentError::RequestFailed {
-                raw: error.to_string(),
-            })?;
-        let session_id = response.session_id.to_string();
-        let mut options = config_views(&response.config_options.unwrap_or_default());
-        if let Some(pinned) =
-            pin_build_mode(&connection, &acp::SessionId::new(session_id.clone())).await
-        {
-            options = pinned;
-        }
-        let mut applied_model: Option<String> = None;
-        if let Some(model) = stored_model
-            && let Some(updated) = set_model_value(
-                &connection,
-                &acp::SessionId::new(session_id.clone()),
-                &model,
+        plans::ensure_structure(&repo_root)?;
+        self.abandon_active_plan(&repo_root)?;
+        self.shutdown_connection().await;
+        let scoping = plans::create_scoping(&repo_root)?;
+        let plan = ActivePlan::scoping(scoping.name);
+        let (_, _, info) = self
+            .spawn_session(
+                &repo_root,
+                &branch,
+                stored_model,
+                plan,
+                opencode::PLANNER_AGENT,
             )
-            .await
-        {
-            options = updated;
-            applied_model = Some(model);
-        }
-        {
-            let mut state = self.state.lock().expect("state poisoned");
-            state.reset_session(
-                session_id.clone(),
-                repo_root.clone(),
-                branch.clone(),
-                applied_model,
-            );
-        }
-        emit_event(&self.app, AppEvent::SessionReset);
-        Ok(SessionInfo {
-            session_id,
-            repo_root: repo_root.to_string_lossy().to_string(),
-            branch,
-            config_options: options,
-        })
+            .await?;
+        Ok(info)
     }
 
     /// Set one session config option without restarting the session.
@@ -163,17 +176,14 @@ impl AgentManager {
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "open a repository first".to_string(),
                 })?;
-        let response = connection
-            .send_request(acp::build_set_config_request(
-                &acp::SessionId::new(session_id),
-                &config_id,
-                &value,
-            ))
-            .block_task()
-            .await
-            .map_err(|error| AgentError::RequestFailed {
-                raw: error.to_string(),
-            })?;
+        let response = send_config_option(
+            &connection,
+            &acp::SessionId::new(session_id),
+            &config_id,
+            &value,
+        )
+        .await
+        .map_err(|error| AgentError::RequestFailed { raw: error })?;
         if config_id == "model" {
             match self.state.lock() {
                 Ok(mut state) => {
@@ -184,11 +194,11 @@ impl AgentManager {
                 }
             }
         }
-        Ok(config_views(&response.config_options))
+        Ok(response)
     }
 
-    /// Open a fresh session on the same root, closing the old one when the
-    /// agent advertises it. Reuses the in-memory model choice.
+    /// Open a fresh chat on the same root, abandoning the active plan.
+    /// Reuses the in-memory model choice.
     pub async fn new_chat(&self) -> Result<SessionInfo, AgentError> {
         let (repo_root, branch, model) =
             self.reopen_snapshot()
@@ -196,6 +206,167 @@ impl AgentManager {
                     raw: "open a repository first".to_string(),
                 })?;
         self.open_repo(repo_root, branch, model).await
+    }
+
+    /// Approve the scoping plan: move it to executing, switch to a fresh
+    /// executor process, and start it immediately. The prompt stays hidden:
+    /// no user bubble, the chat opens working.
+    pub async fn execute_plan(&self) -> Result<SessionInfo, AgentError> {
+        ensure_idle(&self.state)?;
+        let (repo_root, branch, model) =
+            self.reopen_snapshot()
+                .ok_or_else(|| AgentError::NoSession {
+                    raw: "open a repository first".to_string(),
+                })?;
+        let active = self
+            .plan_snapshot()
+            .map(|(_, plan)| plan)
+            .filter(|plan| plan.phase == plans::Phase::Scoping)
+            .ok_or_else(|| AgentError::RequestFailed {
+                raw: "no scoping plan to execute".to_string(),
+            })?;
+        let next = plans::execute(&repo_root, &active.plan_ref())?;
+        let plan = ActivePlan::executing(next.name.clone());
+        // Record the move before any fallible spawn: disk and state agree
+        // from here on, and a failed spawn recovers via auto-abandon.
+        self.set_plan(plan.clone());
+        self.shutdown_connection().await;
+        let (connection, session_id, info) = self
+            .spawn_session(&repo_root, &branch, model, plan, opencode::EXECUTOR_AGENT)
+            .await?;
+        let text = opencode::executor_first_message(&opencode::plan_display(&next));
+        self.start_turn(connection, session_id, text, None).await?;
+        Ok(info)
+    }
+
+    /// Finish the executing plan. The chat ends here; the phase label stays.
+    pub async fn mark_completed(&self) -> Result<PlanInfo, AgentError> {
+        ensure_idle(&self.state)?;
+        let (repo_root, active) = self.active_plan_snapshot()?;
+        let next = plans::complete(&repo_root, &active.plan_ref())?;
+        Ok(self.replace_plan(&repo_root, next))
+    }
+
+    /// Drop an active plan. Keeps the session open on a terminal label.
+    pub async fn abandon_plan(&self) -> Result<PlanInfo, AgentError> {
+        ensure_idle(&self.state)?;
+        let (repo_root, active) = self.active_plan_snapshot()?;
+        let next = plans::abandon(&repo_root, &active.plan_ref())?;
+        Ok(self.replace_plan(&repo_root, next))
+    }
+
+    /// Spawn a fresh agent process scoped to one plan and open a session on
+    /// it: pin the agent mode, reapply the stored model, and report the
+    /// session. Shared by every chat opener.
+    async fn spawn_session(
+        &self,
+        repo_root: &Path,
+        branch: &str,
+        model: Option<String>,
+        plan: ActivePlan,
+        agent: &str,
+    ) -> Result<(ConnectionTo<Agent>, String, SessionInfo), AgentError> {
+        let scope = opencode::scope_glob(repo_root, plan.phase, &plan.name);
+        let connection = self
+            .ensure_connection_with_env(opencode::agent_env(&scope))
+            .await?;
+        let response = connection
+            .send_request(acp::build_new_session_request(repo_root))
+            .block_task()
+            .await
+            .map_err(|error| AgentError::RequestFailed {
+                raw: error.to_string(),
+            })?;
+        let session_id = response.session_id.to_string();
+        let mut options =
+            pin_agent_mode(&connection, &acp::SessionId::new(session_id.clone()), agent).await?;
+        let mut applied_model: Option<String> = None;
+        if let Some(model) = model
+            && let Some(updated) = set_model_value(
+                &connection,
+                &acp::SessionId::new(session_id.clone()),
+                &model,
+            )
+            .await
+        {
+            options = updated;
+            applied_model = Some(model);
+        }
+        let info = {
+            let mut state = self.state.lock().expect("state poisoned");
+            let view = plan.info(repo_root);
+            state.reset_session(
+                session_id.clone(),
+                repo_root.to_path_buf(),
+                branch.to_string(),
+                applied_model,
+                plan,
+            );
+            session_info(&session_id, repo_root, branch, options, view)
+        };
+        emit_event(&self.app, AppEvent::SessionReset);
+        Ok((connection, session_id, info))
+    }
+
+    /// Current repo plus active plan, or a loud error when chatting is
+    /// impossible. Pure state read.
+    fn active_plan_snapshot(&self) -> Result<(PathBuf, ActivePlan), AgentError> {
+        let (repo_root, _, _) = self
+            .reopen_snapshot()
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
+        let active = self.plan_snapshot().map(|(_, plan)| plan).ok_or_else(|| {
+            AgentError::RequestFailed {
+                raw: "no active plan".to_string(),
+            }
+        })?;
+        Ok((repo_root, active))
+    }
+
+    /// Swap the held plan for a transitioned one and report it.
+    fn replace_plan(&self, repo_root: &Path, next: plans::PlanRef) -> PlanInfo {
+        let plan = ActivePlan::transitioned(next);
+        let view = plan.info(repo_root);
+        self.set_plan(plan);
+        emit_event(&self.app, AppEvent::PlanChanged { plan: view.clone() });
+        view
+    }
+
+    /// Record the held plan. A poisoned lock only logs, matching
+    /// `lock_state`.
+    fn set_plan(&self, plan: ActivePlan) {
+        match self.state.lock() {
+            Ok(mut state) => {
+                state.plan = Some(plan);
+            }
+            Err(error) => {
+                log::warn!("failed to record plan transition: {error}");
+            }
+        }
+    }
+
+    /// Move an active plan to cancelled. No-op without one or when its
+    /// directory is already gone, so a retried open never bricks.
+    fn abandon_active_plan(&self, repo_root: &Path) -> Result<(), AgentError> {
+        let active = match self.state.lock() {
+            Ok(state) => state.plan.clone(),
+            Err(error) => {
+                log::warn!("failed to read plan for abandon: {error}");
+                None
+            }
+        };
+        let Some(active) = active else {
+            return Ok(());
+        };
+        if !active.phase.is_active() {
+            return Ok(());
+        }
+        if !active.plan_ref().path(repo_root).exists() {
+            return Ok(());
+        }
+        plans::abandon(repo_root, &active.plan_ref())?;
+        Ok(())
     }
 
     /// Current repository root, when a session is open.
@@ -232,13 +403,45 @@ impl AgentManager {
     }
 
     /// Send one plain-text prompt. Streams arrive as events; the turn end
-    /// arrives as done or failed.
+    /// arrives as done or failed. The planner role prefixes the user's
+    /// first scoping message only; the transcript keeps the raw text.
     pub async fn send_prompt(&self, text: String) -> Result<(), AgentError> {
         let (connection, session_id, _) =
             self.session_snapshot()
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "open a repository first".to_string(),
                 })?;
+        let snapshot = self.plan_snapshot();
+        let mut watch: Option<(PathBuf, plans::PlanRef)> = None;
+        let mut text = text;
+        if let Some((repo_root, plan)) = snapshot
+            && plan.phase == plans::Phase::Scoping
+        {
+            watch = Some((repo_root, plan.plan_ref()));
+            if !plan.prefixed {
+                if let Ok(mut state) = self.state.lock()
+                    && let Some(current) = state.plan.as_mut()
+                {
+                    current.prefixed = true;
+                }
+                text = opencode::planner_first_message(
+                    &opencode::plan_display(&plan.plan_ref()),
+                    &text,
+                );
+            }
+        }
+        self.start_turn(connection, session_id, text, watch).await
+    }
+
+    /// Guard one turn and stream it as events. Records the prompt so retry
+    /// resends exactly what ran, prefixed or not.
+    async fn start_turn(
+        &self,
+        connection: ConnectionTo<Agent>,
+        session_id: String,
+        text: String,
+        watch: Option<(PathBuf, plans::PlanRef)>,
+    ) -> Result<(), AgentError> {
         {
             let mut state = self.state.lock().expect("state poisoned");
             if state.working {
@@ -260,6 +463,14 @@ impl AgentManager {
                 Ok(_) => {
                     set_working(&state, false);
                     emit_event(&app, AppEvent::TurnDone);
+                    if let Some((repo_root, plan)) = watch {
+                        emit_event(
+                            &app,
+                            AppEvent::PlanChanged {
+                                plan: PlanInfo::of(&repo_root, &plan),
+                            },
+                        );
+                    }
                 }
                 Err(error) => {
                     let raw = error.to_string();
@@ -341,9 +552,42 @@ impl AgentManager {
         }
     }
 
-    /// Ensure a live, initialized connection. Spawns `opencode acp` once,
-    /// reuses it for later sessions, and respawns after a closed transport.
-    pub async fn ensure_connection(&self) -> Result<ConnectionTo<Agent>, AgentError> {
+    /// Drop the live connection so the next ensure spawns a fresh process.
+    /// Pending permission cards resolve as cancelled; the old child exits
+    /// when its stdio closes. Best-effort closes the old session first.
+    async fn shutdown_connection(&self) {
+        let snapshot = self.session_snapshot();
+        match self.state.lock() {
+            Ok(mut state) => {
+                state.connection = None;
+                state.session_id = None;
+            }
+            Err(error) => {
+                log::warn!("failed to drop agent connection: {error}");
+            }
+        }
+        cancel_pending(&self.state);
+        if let Some((connection, id, supports_close)) = snapshot
+            && supports_close
+            && let Err(error) = connection
+                .send_request(acp::CloseSessionRequest::new(acp::SessionId::new(
+                    id.as_str(),
+                )))
+                .block_task()
+                .await
+        {
+            log::warn!("failed to close previous session {id}: {error}");
+        }
+    }
+
+    /// Ensure a live, initialized connection. Spawns a fresh `opencode acp`
+    /// process per chat, reuses it for later turns, and respawns after a
+    /// closed transport. `extra_env` (agent definitions) merges over the
+    /// process environment.
+    async fn ensure_connection_with_env(
+        &self,
+        extra_env: HashMap<String, String>,
+    ) -> Result<ConnectionTo<Agent>, AgentError> {
         if let Some(connection) = self.connection_snapshot() {
             if !connection.is_incoming_closed() {
                 return Ok(connection);
@@ -360,9 +604,9 @@ impl AgentManager {
         let binary = acp::resolve_opencode_binary()?;
         let path_value = acp::agent_path_value();
         log::info!("spawning {} with PATH={}", binary.display(), path_value);
-        let config = AcpAgentConfig::new(binary)
-            .arg("acp")
-            .envs(HashMap::from([("PATH".to_string(), path_value)]));
+        let mut env = HashMap::from([("PATH".to_string(), path_value)]);
+        env.extend(extra_env);
+        let config = AcpAgentConfig::new(binary).arg("acp").envs(env);
         let agent = AcpAgent::new(config);
         let slot = Arc::clone(&self.state);
         let notify_state = Arc::clone(&self.state);
@@ -482,6 +726,44 @@ impl AgentManager {
             state.session_id.clone()?,
             state.supports_close,
         ))
+    }
+
+    /// Current repo plus owned plan, when a chat is open.
+    fn plan_snapshot(&self) -> Option<(PathBuf, ActivePlan)> {
+        let state = lock_state(&self.state)?;
+        Some((state.repo_root.clone()?, state.plan.clone()?))
+    }
+}
+
+/// Build the frontend session payload with its plan. Pure.
+fn session_info(
+    session_id: &str,
+    repo_root: &Path,
+    branch: &str,
+    options: Vec<ConfigOptionView>,
+    plan: PlanInfo,
+) -> SessionInfo {
+    SessionInfo {
+        session_id: session_id.to_string(),
+        repo_root: repo_root.to_string_lossy().to_string(),
+        branch: branch.to_string(),
+        config_options: options,
+        plan,
+    }
+}
+
+/// Refuse plan transitions while a turn runs. A poisoned lock only logs,
+/// matching `lock_state`.
+fn ensure_idle(state: &Mutex<State>) -> Result<(), AgentError> {
+    match state.lock() {
+        Ok(state) if state.working => Err(AgentError::RequestFailed {
+            raw: "a turn is already running".to_string(),
+        }),
+        Ok(_) => Ok(()),
+        Err(error) => {
+            log::warn!("failed to check working state: {error}");
+            Ok(())
+        }
     }
 }
 
@@ -729,21 +1011,18 @@ fn spend_tick(update: &acp::UsageUpdate) -> AppEvent {
     }
 }
 
-async fn pin_build_mode(
+/// Select one agent by mode id. Fails loud: a planner session running as
+/// the wrong agent would silently break write confinement.
+async fn pin_agent_mode(
     connection: &ConnectionTo<Agent>,
     session_id: &acp::SessionId,
-) -> Option<Vec<ConfigOptionView>> {
-    match connection
-        .send_request(acp::build_set_config_request(session_id, "mode", "build"))
-        .block_task()
+    mode: &str,
+) -> Result<Vec<ConfigOptionView>, AgentError> {
+    send_config_option(connection, session_id, "mode", mode)
         .await
-    {
-        Ok(response) => Some(config_views(&response.config_options)),
-        Err(error) => {
-            log::warn!("failed to pin session {session_id} to build mode: {error}");
-            None
-        }
-    }
+        .map_err(|error| AgentError::RequestFailed {
+            raw: format!("failed to select agent {mode}: {error}"),
+        })
 }
 
 async fn set_model_value(
@@ -751,17 +1030,29 @@ async fn set_model_value(
     session_id: &acp::SessionId,
     model: &str,
 ) -> Option<Vec<ConfigOptionView>> {
-    match connection
-        .send_request(acp::build_set_config_request(session_id, "model", model))
-        .block_task()
-        .await
-    {
-        Ok(response) => Some(config_views(&response.config_options)),
+    match send_config_option(connection, session_id, "model", model).await {
+        Ok(response) => Some(response),
         Err(error) => {
             log::warn!("failed to reapply stored model {model}: {error}");
             None
         }
     }
+}
+
+/// One `session/set_config_option` round trip. Callers decide how loud
+/// the failure is.
+async fn send_config_option(
+    connection: &ConnectionTo<Agent>,
+    session_id: &acp::SessionId,
+    config_id: &str,
+    value: &str,
+) -> Result<Vec<ConfigOptionView>, String> {
+    connection
+        .send_request(acp::build_set_config_request(session_id, config_id, value))
+        .block_task()
+        .await
+        .map(|response| config_views(&response.config_options))
+        .map_err(|error| error.to_string())
 }
 
 /// Convert wire session config options to views.
@@ -963,9 +1254,11 @@ mod tests {
             PathBuf::from("/tmp"),
             "main".to_string(),
             None,
+            ActivePlan::scoping("2026-09-25.10-54-59".to_string()),
         );
         assert!(!state.working);
         assert!(state.awake.is_none());
+        assert!(state.plan.is_some());
     }
 
     async fn open_test_session(

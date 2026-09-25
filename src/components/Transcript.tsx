@@ -11,12 +11,14 @@ import type {
 export function Transcript({
 	items,
 	repoLabel,
+	agentLabel,
 	onRetry,
 	onAnswer,
 	children,
 }: {
 	items: TranscriptItem[];
 	repoLabel: string;
+	agentLabel: string;
 	onRetry: () => void;
 	onAnswer: (toolCallId: string, optionId: string) => void;
 	children?: ReactNode;
@@ -42,7 +44,7 @@ export function Transcript({
 					if (item.kind === "agent") {
 						return (
 							<div className="msg agent" key={item.id}>
-								<div className="who">AGENT</div>
+								<div className="who">{agentLabel}</div>
 								<ReactMarkdown>{item.text}</ReactMarkdown>
 							</div>
 						);

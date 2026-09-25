@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
 	AppEvent,
 	ConfigOptionView,
+	PlanInfo,
 	Prefs,
 	RepoInfo,
 	SessionInfo,
@@ -22,6 +23,18 @@ export function openRepo(path: string): Promise<SessionInfo> {
 
 export function newChat(): Promise<SessionInfo> {
 	return invoke<SessionInfo>("new_chat");
+}
+
+export function executePlan(): Promise<SessionInfo> {
+	return invoke<SessionInfo>("execute_plan");
+}
+
+export function markCompleted(): Promise<PlanInfo> {
+	return invoke<PlanInfo>("mark_completed");
+}
+
+export function abandonPlan(): Promise<PlanInfo> {
+	return invoke<PlanInfo>("abandon_plan");
 }
 
 export function sendPrompt(text: string): Promise<void> {

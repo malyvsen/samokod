@@ -23,6 +23,16 @@ export interface SessionInfo {
 	repo_root: string;
 	branch: string;
 	config_options: ConfigOptionView[];
+	/** The chat's plan. Every chat owns exactly one. */
+	plan: PlanInfo;
+}
+
+export type PlanPhase = "scoping" | "executing" | "completed" | "cancelled";
+
+export interface PlanInfo {
+	name: string;
+	phase: PlanPhase;
+	has_plan_md: boolean;
 }
 
 export interface RecentRepo {
@@ -83,6 +93,7 @@ export type AppEvent =
 			cost: number;
 			ctx_pct: number;
 	  }
+	| { type: "plan_changed"; plan: PlanInfo }
 	| { type: "session_reset" };
 
 export type TranscriptItem =

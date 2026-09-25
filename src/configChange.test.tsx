@@ -2,7 +2,8 @@ import { render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
-import type { ConfigOptionView, SessionInfo } from "./types";
+import { testSession } from "./fixtures";
+import type { ConfigOptionView } from "./types";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
@@ -57,15 +58,6 @@ function effortOption(currentValue: string): ConfigOptionView {
 	};
 }
 
-function sessionWith(options: ConfigOptionView[]): SessionInfo {
-	return {
-		session_id: "ses-1",
-		repo_root: "/repo",
-		branch: "main",
-		config_options: options,
-	};
-}
-
 function deferred<T>() {
 	let resolve!: (value: T) => void;
 	let reject!: (reason?: unknown) => void;
@@ -95,7 +87,7 @@ async function openChatWith(options: ConfigOptionView[]) {
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo", branch: "main" }],
 	});
-	api.openRepo.mockResolvedValue(sessionWith(options));
+	api.openRepo.mockResolvedValue(testSession(options));
 	const user = userEvent.setup();
 	render(<App />);
 	await user.click(await screen.findByRole("button", { name: "open" }));
