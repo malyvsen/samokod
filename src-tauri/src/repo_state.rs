@@ -25,6 +25,35 @@ pub enum ConfigRole {
     Effort,
 }
 
+impl ConfigRole {
+    /// Both roles, model first: effort options can depend on the model.
+    pub const ALL: [ConfigRole; 2] = [ConfigRole::Model, ConfigRole::Effort];
+
+    /// Role name for logs. Matches the `RepoState` field names.
+    pub fn name(self) -> &'static str {
+        match self {
+            ConfigRole::Model => "model",
+            ConfigRole::Effort => "effort",
+        }
+    }
+
+    /// Current value for this role. Pure.
+    pub fn get(self, roles: &RepoState) -> Option<&String> {
+        match self {
+            ConfigRole::Model => roles.model.as_ref(),
+            ConfigRole::Effort => roles.effort.as_ref(),
+        }
+    }
+
+    /// Write this role, preserving the other. Pure.
+    pub fn set(self, roles: &mut RepoState, value: Option<String>) {
+        match self {
+            ConfigRole::Model => roles.model = value,
+            ConfigRole::Effort => roles.effort = value,
+        }
+    }
+}
+
 /// Classify an agent-advertised option into our roles. Mirrors the
 /// frontend's `splitOptions`: model by category, effort by `thought_level`
 /// category or `effort` id. One predicate, so a future rename touches here
@@ -63,13 +92,24 @@ pub fn load_repo_state(repo_root: &Path) -> RepoState {
     }
 }
 
-/// Save one role into the repo file, preserving the other.
-pub fn save_role(repo_root: &Path, role: ConfigRole, value: &str) {
-    let mut state = load_repo_state(repo_root);
-    match role {
-        ConfigRole::Model => state.model = Some(value.to_string()),
-        ConfigRole::Effort => state.effort = Some(value.to_string()),
+/// Current model/effort values by role. Absent roles stay `None`. Pure.
+pub fn roles_from_options(options: &[ConfigOptionView]) -> RepoState {
+    let mut roles = RepoState::default();
+    for option in options {
+        match classify_option(option) {
+            Some(role) if role.get(&roles).is_none() => {
+                role.set(&mut roles, Some(option.current_value.clone()));
+            }
+            _ => {}
+        }
     }
+    roles
+}
+
+/// Write one role as set or cleared, preserving the other key.
+pub fn set_role(repo_root: &Path, role: ConfigRole, value: Option<&str>) {
+    let mut state = load_repo_state(repo_root);
+    role.set(&mut state, value.map(str::to_string));
     let path = repo_root.join(STATE_PATH);
     if let Some(parent) = path.parent()
         && let Err(error) = std::fs::create_dir_all(parent)
@@ -91,11 +131,11 @@ pub fn save_role(repo_root: &Path, role: ConfigRole, value: &str) {
 mod tests {
     use super::*;
 
-    fn view(id: &str, category: Option<&str>) -> ConfigOptionView {
+    fn view(id: &str, category: Option<&str>, value: &str) -> ConfigOptionView {
         ConfigOptionView {
             id: id.to_string(),
             name: id.to_string(),
-            current_value: "v".to_string(),
+            current_value: value.to_string(),
             options: vec![],
             category: category.map(str::to_string),
         }
@@ -104,30 +144,88 @@ mod tests {
     #[test]
     fn classifies_model_and_effort() {
         assert_eq!(
-            classify_option(&view("llm", Some("model"))),
+            classify_option(&view("llm", Some("model"), "v")),
             Some(ConfigRole::Model)
         );
         assert_eq!(
-            classify_option(&view("x", Some("thought_level"))),
+            classify_option(&view("x", Some("thought_level"), "v")),
             Some(ConfigRole::Effort)
         );
         assert_eq!(
-            classify_option(&view("effort", None)),
+            classify_option(&view("effort", None, "v")),
             Some(ConfigRole::Effort)
         );
-        assert_eq!(classify_option(&view("mode", Some("mode"))), None);
+        assert_eq!(classify_option(&view("mode", Some("mode"), "v")), None);
     }
 
     #[test]
     fn round_trips_through_disk() {
         let dir = tempfile::tempdir().expect("tempdir");
-        save_role(dir.path(), ConfigRole::Model, "m1");
-        save_role(dir.path(), ConfigRole::Effort, "high");
+        set_role(dir.path(), ConfigRole::Model, Some("m1"));
+        set_role(dir.path(), ConfigRole::Effort, Some("high"));
         assert_eq!(
             load_repo_state(dir.path()),
             RepoState {
                 model: Some("m1".to_string()),
                 effort: Some("high".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn roles_from_both_present() {
+        let options = vec![
+            view("llm", Some("model"), "m1"),
+            view("effort", Some("thought_level"), "high"),
+        ];
+        assert_eq!(
+            roles_from_options(&options),
+            RepoState {
+                model: Some("m1".to_string()),
+                effort: Some("high".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn roles_absent_when_effort_missing() {
+        let options = vec![view("llm", Some("model"), "m1")];
+        assert_eq!(
+            roles_from_options(&options),
+            RepoState {
+                model: Some("m1".to_string()),
+                effort: None,
+            }
+        );
+    }
+
+    #[test]
+    fn roles_ignore_mode_and_extras() {
+        let options = vec![
+            view("mode", Some("mode"), "planner"),
+            view("ctx", Some("model_config"), "big"),
+            view("llm", Some("model"), "m1"),
+        ];
+        assert_eq!(
+            roles_from_options(&options),
+            RepoState {
+                model: Some("m1".to_string()),
+                effort: None,
+            }
+        );
+    }
+
+    #[test]
+    fn clear_preserves_other_key() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        set_role(dir.path(), ConfigRole::Model, Some("m1"));
+        set_role(dir.path(), ConfigRole::Effort, Some("xhigh"));
+        set_role(dir.path(), ConfigRole::Effort, None);
+        assert_eq!(
+            load_repo_state(dir.path()),
+            RepoState {
+                model: Some("m1".to_string()),
+                effort: None,
             }
         );
     }

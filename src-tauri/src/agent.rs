@@ -89,8 +89,7 @@ struct State {
     working: bool,
     awake: Option<awake::Guard>,
     last_prompt: Option<String>,
-    last_model: Option<String>,
-    last_effort: Option<String>,
+    last_roles: crate::repo_state::RepoState,
     pending: HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>,
     todos: Vec<TodoView>,
     plan: Option<ActivePlan>,
@@ -116,8 +115,7 @@ impl State {
         session_id: String,
         repo_root: PathBuf,
         branch: String,
-        model: Option<String>,
-        effort: Option<String>,
+        roles: crate::repo_state::RepoState,
         plan: ActivePlan,
     ) {
         self.session_id = Some(session_id);
@@ -125,8 +123,7 @@ impl State {
         self.branch = branch;
         self.set_working(false);
         self.last_prompt = None;
-        self.last_model = model;
-        self.last_effort = effort;
+        self.last_roles = roles;
         self.pending.clear();
         self.todos.clear();
         self.plan = Some(plan);
@@ -258,29 +255,29 @@ impl AgentManager {
         )
         .await
         .map_err(|error| AgentError::RequestFailed { raw: error })?;
-        // Classify the changed option from the response list and write
-        // through to the repo file plus in-memory last values.
-        if let Some(option) = response.iter().find(|option| option.id == config_id)
-            && let Some(role) = crate::repo_state::classify_option(option)
-        {
-            let value = option.current_value.clone();
-            match self.state.lock() {
-                Ok(mut state) => match role {
-                    crate::repo_state::ConfigRole::Model => {
-                        state.last_model = Some(value.clone());
-                    }
-                    crate::repo_state::ConfigRole::Effort => {
-                        state.last_effort = Some(value.clone());
-                    }
-                },
-                Err(error) => {
-                    log::warn!("failed to remember config choice: {error}");
-                }
+        // Re-sync both roles from the full response list: dependent options
+        // can vanish in the same response, clearing the stored role.
+        let roles = crate::repo_state::roles_from_options(&response);
+        let moved = match self.state.lock() {
+            Ok(mut state) => {
+                let moved: Vec<crate::repo_state::ConfigRole> = crate::repo_state::ConfigRole::ALL
+                    .into_iter()
+                    .filter(|role| role.get(&state.last_roles) != role.get(&roles))
+                    .collect();
+                state.last_roles = roles.clone();
+                Some(moved)
             }
-            if let Some(repo) = self.current_repo() {
-                crate::repo_state::save_role(&repo, role, &value);
+            Err(error) => {
+                log::warn!("failed to remember config choice: {error}");
+                None
+            }
+        };
+        if let (Some(moved), Some(repo)) = (moved, self.current_repo()) {
+            for role in moved {
+                crate::repo_state::set_role(&repo, role, role.get(&roles).map(String::as_str));
             }
         }
+        log_roles("selected", &roles);
         Ok(response)
     }
 
@@ -360,42 +357,27 @@ impl AgentManager {
             pin_agent_mode(&connection, &acp::SessionId::new(session_id.clone()), agent).await?;
         // Reapply model first, then effort; each absent or inapplicable role
         // is skipped with a warn-log while the open continues on defaults.
-        let mut applied_model: Option<String> = None;
-        let mut applied_effort: Option<String> = None;
-        if let Some(model) = stored.model {
-            let id = option_id_for_role(&options, crate::repo_state::ConfigRole::Model);
-            match id {
-                Some(id) => {
-                    let session = acp::SessionId::new(session_id.clone());
-                    match send_config_option(&connection, &session, &id, &model).await {
-                        Ok(updated) => {
-                            options = updated;
-                            applied_model = Some(model);
-                        }
-                        Err(error) => log::warn!("failed to reapply stored model {model}: {error}"),
-                    }
+        let mut applied = crate::repo_state::RepoState::default();
+        for role in crate::repo_state::ConfigRole::ALL {
+            let Some(wanted) = role.get(&stored).cloned() else {
+                continue;
+            };
+            let Some(id) = option_id_for_role(&options, role) else {
+                log::warn!("stored {} has no matching option, skipping", role.name());
+                continue;
+            };
+            let session = acp::SessionId::new(session_id.clone());
+            match send_config_option(&connection, &session, &id, &wanted).await {
+                Ok(updated) => {
+                    options = updated;
+                    role.set(&mut applied, Some(wanted));
                 }
-                None => log::warn!("stored model has no matching option, skipping"),
+                Err(error) => {
+                    log::warn!("failed to reapply stored {} {wanted}: {error}", role.name())
+                }
             }
         }
-        if let Some(effort) = stored.effort {
-            let id = option_id_for_role(&options, crate::repo_state::ConfigRole::Effort);
-            match id {
-                Some(id) => {
-                    let session = acp::SessionId::new(session_id.clone());
-                    match send_config_option(&connection, &session, &id, &effort).await {
-                        Ok(updated) => {
-                            options = updated;
-                            applied_effort = Some(effort);
-                        }
-                        Err(error) => {
-                            log::warn!("failed to reapply stored effort {effort}: {error}")
-                        }
-                    }
-                }
-                None => log::warn!("stored effort has no matching option, skipping"),
-            }
-        }
+        log_roles("applied", &applied);
         let info = {
             let mut state = self.state.lock().expect("state poisoned");
             let view = plan.info(repo_root);
@@ -403,8 +385,7 @@ impl AgentManager {
                 session_id.clone(),
                 repo_root.to_path_buf(),
                 branch.to_string(),
-                applied_model,
-                applied_effort,
+                applied,
                 plan,
             );
             session_info(&session_id, repo_root, branch, options, view)
@@ -553,10 +534,7 @@ impl AgentManager {
             (
                 repo_root,
                 state.branch.clone(),
-                crate::repo_state::RepoState {
-                    model: state.last_model.clone(),
-                    effort: state.last_effort.clone(),
-                },
+                state.last_roles.clone(),
                 plan,
             )
         };
@@ -847,10 +825,7 @@ impl AgentManager {
         Some((
             state.repo_root.clone()?,
             state.branch.clone(),
-            crate::repo_state::RepoState {
-                model: state.last_model.clone(),
-                effort: state.last_effort.clone(),
-            },
+            state.last_roles.clone(),
         ))
     }
 
@@ -1175,19 +1150,19 @@ fn option_id_for_role(
         .map(|option| option.id.clone())
 }
 
-#[allow(dead_code)]
-async fn set_model_value(
-    connection: &ConnectionTo<Agent>,
-    session_id: &acp::SessionId,
-    model: &str,
-) -> Option<Vec<ConfigOptionView>> {
-    match send_config_option(connection, session_id, "model", model).await {
-        Ok(response) => Some(response),
-        Err(error) => {
-            log::warn!("failed to reapply stored model {model}: {error}");
-            None
-        }
-    }
+/// Log value for a role, marking cleared roles. Pure.
+fn role_label(value: Option<&str>) -> &str {
+    value.unwrap_or("<cleared>")
+}
+
+/// One info-log for both roles after a select or reapply. Pure formatting,
+/// logging edge.
+fn log_roles(action: &str, roles: &crate::repo_state::RepoState) {
+    log::info!(
+        "{action} model={} effort={}",
+        role_label(roles.model.as_deref()),
+        role_label(roles.effort.as_deref())
+    );
 }
 
 /// One `session/set_config_option` round trip. Callers decide how loud
@@ -1404,8 +1379,7 @@ mod tests {
             "session".to_string(),
             PathBuf::from("/tmp"),
             "main".to_string(),
-            None,
-            None,
+            crate::repo_state::RepoState::default(),
             ActivePlan::scoping("2026-09-25.10-54-59".to_string()),
         );
         assert!(!state.working);
