@@ -197,7 +197,6 @@ export function App() {
 			case "session_reset": {
 				setTodos([]);
 				setSpend(null);
-				setPlan(null);
 				break;
 			}
 			case "plan_changed": {
