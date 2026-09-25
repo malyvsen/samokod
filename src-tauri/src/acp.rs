@@ -175,7 +175,7 @@ fn query_login_shell(shell: &Path) -> Vec<PathBuf> {
     let timeout = std::time::Duration::from_secs(2);
     match rx.recv_timeout(timeout) {
         Ok(Ok(output)) if output.status.success() => {
-            split_path_value(&String::from_utf8_lossy(&output.stdout))
+            parse_login_shell_output(&String::from_utf8_lossy(&output.stdout))
         }
         Ok(Ok(output)) => {
             log::warn!("shell PATH query exited unsuccessfully: {}", output.status);
@@ -190,6 +190,17 @@ fn query_login_shell(shell: &Path) -> Vec<PathBuf> {
             Vec::new()
         }
     }
+}
+
+/// Login shells can print noise before `$PATH`; the value is the last
+/// non-empty line.
+fn parse_login_shell_output(output: &str) -> Vec<PathBuf> {
+    output
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .map(split_path_value)
+        .unwrap_or_default()
 }
 
 fn parse_path_helper(output: &str) -> Vec<PathBuf> {
@@ -301,6 +312,12 @@ mod tests {
     #[test]
     fn path_value_splits_on_colon() {
         let dirs = split_path_value("/usr/bin:/bin\n");
+        assert_eq!(dirs, vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
+    }
+
+    #[test]
+    fn login_shell_takes_last_non_empty_line() {
+        let dirs = parse_login_shell_output("noise\n \n/usr/bin:/bin\n");
         assert_eq!(dirs, vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
     }
 
