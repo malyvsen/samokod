@@ -196,17 +196,6 @@ impl AgentManager {
         Ok(response)
     }
 
-    /// Open a fresh chat on the same root, abandoning the active plan.
-    /// Reuses the in-memory model choice.
-    pub async fn new_chat(&self) -> Result<SessionInfo, AgentError> {
-        let (repo_root, branch, model) =
-            self.reopen_snapshot()
-                .ok_or_else(|| AgentError::NoSession {
-                    raw: "open a repository first".to_string(),
-                })?;
-        self.open_repo(repo_root, branch, model).await
-    }
-
     /// Approve the scoping plan: move it to executing, switch to a fresh
     /// executor process, and start it immediately. The prompt stays hidden:
     /// no user bubble, the chat opens working.

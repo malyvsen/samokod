@@ -22,7 +22,6 @@ function topBar(
 			status={status}
 			plan={options.plan ?? null}
 			onOpenPicker={vi.fn()}
-			onNewChat={vi.fn()}
 			onStop={options.onStop ?? vi.fn()}
 			onExecute={options.onExecute ?? vi.fn()}
 			onComplete={options.onComplete ?? vi.fn()}
@@ -76,16 +75,18 @@ describe("top bar", () => {
 		).not.toBeInTheDocument();
 	});
 
-	test("scoping without plan.md disables execute with a tip", async () => {
+	test("scoping without plan.md disables execute with a visible hint", async () => {
 		const user = userEvent.setup();
 		render(topBar("idle", { plan: testPlan("scoping", false) }));
 		await user.click(
 			screen.getByRole("button", { name: "plan phase scoping" }),
 		);
-		const execute = screen.getByRole("button", { name: "execute" });
+		const execute = screen.getByRole("button", {
+			name: "Execute Needs plan.md",
+		});
 		expect(execute).toBeDisabled();
-		expect(execute).toHaveAttribute("data-tip", "Needs plan.md");
-		expect(screen.getByRole("button", { name: "abandon" })).toBeInTheDocument();
+		expect(screen.getByText("Needs plan.md")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Abandon" })).toBeInTheDocument();
 	});
 
 	test("scoping with plan.md enables execute", async () => {
@@ -96,7 +97,7 @@ describe("top bar", () => {
 		await user.click(
 			screen.getByRole("button", { name: "plan phase scoping" }),
 		);
-		await user.click(screen.getByRole("button", { name: "execute" }));
+		await user.click(screen.getByRole("button", { name: "Execute" }));
 		expect(onExecute).toHaveBeenCalledTimes(1);
 	});
 
@@ -107,9 +108,9 @@ describe("top bar", () => {
 			screen.getByRole("button", { name: "plan phase executing" }),
 		);
 		expect(
-			screen.getByRole("button", { name: "mark completed" }),
+			screen.getByRole("button", { name: "Mark completed" }),
 		).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "abandon" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Abandon" })).toBeInTheDocument();
 	});
 
 	test("completed phase is a plain label", () => {

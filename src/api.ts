@@ -21,10 +21,6 @@ export function openRepo(path: string): Promise<SessionInfo> {
 	return invoke<SessionInfo>("open_repo", { path });
 }
 
-export function newChat(): Promise<SessionInfo> {
-	return invoke<SessionInfo>("new_chat");
-}
-
 export function executePlan(): Promise<SessionInfo> {
 	return invoke<SessionInfo>("execute_plan");
 }

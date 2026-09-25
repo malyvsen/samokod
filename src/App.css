@@ -345,11 +345,14 @@ body {
 
 .topbar {
 	position: relative;
-	z-index: 1;
+	/* Above the transcript so the downward plan menu stays clickable. */
+	z-index: 2;
 	display: flex;
 	align-items: center;
 	gap: 10px;
 	padding: 10px 20px;
+	/* Pins bar height when finished phases render borderless text. */
+	min-height: 47px;
 	border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 	background: rgba(5, 5, 8, 0.55);
 }
@@ -787,30 +790,12 @@ body {
 	color: #e8e6e1;
 }
 
-.dopt[data-tip] {
-	position: relative;
-}
-
-.dopt[data-tip]:hover::after {
-	content: attr(data-tip);
-	position: absolute;
-	top: calc(100% + 6px);
-	left: 0;
-	padding: 2px 0 0;
-	font-size: 11px;
-	white-space: nowrap;
-	color: #8f8c85;
-	z-index: 6;
-}
-
 .dsel.plan-scoping {
-	width: auto;
 	color: #ffd98a;
 	border-color: rgba(255, 200, 60, 0.55);
 }
 
 .dsel.plan-executing {
-	width: auto;
 	color: #7dffc4;
 	border-color: rgba(125, 255, 196, 0.4);
 }
@@ -818,6 +803,33 @@ body {
 .dopt .tick {
 	width: 14px;
 	flex: none;
+}
+
+.topbar .dsel {
+	width: auto;
+	min-height: 0;
+	padding: 4px 8px;
+	background: transparent;
+}
+
+.topbar .dsel:hover {
+	border-color: #fff;
+}
+
+.topbar .dpop {
+	top: calc(100% + 6px);
+	bottom: auto;
+}
+
+.topbar .dopt {
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 2px;
+}
+
+.dopt .sub {
+	font-size: 11px;
+	color: #8f8c85;
 }
 
 .topbar .stop-wrap {

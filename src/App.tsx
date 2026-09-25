@@ -7,7 +7,6 @@ import {
 	executePlan,
 	getPrefs,
 	markCompleted,
-	newChat,
 	onAppEvent,
 	openRepo,
 	retryLast,
@@ -333,12 +332,6 @@ export function App() {
 		setView({ kind: "picker", returnToChat: true });
 	}
 
-	async function handleNewChat() {
-		if (status !== "idle") return;
-		const info = await newChat();
-		applySession(info);
-	}
-
 	async function handleExecute() {
 		if (status !== "idle") return;
 		setWorking(true);
@@ -417,7 +410,6 @@ export function App() {
 						status={status}
 						plan={plan}
 						onOpenPicker={handleRepoButton}
-						onNewChat={handleNewChat}
 						onStop={handleStop}
 						onExecute={handleExecute}
 						onComplete={handleComplete}

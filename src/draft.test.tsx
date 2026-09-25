@@ -11,7 +11,6 @@ const api = vi.hoisted(() => ({
 	getPrefs: vi.fn(),
 	validateRepo: vi.fn(),
 	openRepo: vi.fn(),
-	newChat: vi.fn(),
 	sendPrompt: vi.fn(),
 	retryLast: vi.fn(),
 	cancelTurn: vi.fn(),

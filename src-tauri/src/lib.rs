@@ -55,11 +55,6 @@ async fn open_repo(
 }
 
 #[tauri::command]
-async fn new_chat(state: State<'_, AgentManager>) -> Result<SessionInfo, String> {
-    state.new_chat().await.map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 async fn execute_plan(state: State<'_, AgentManager>) -> Result<SessionInfo, String> {
     state
         .execute_plan()
@@ -177,7 +172,6 @@ pub fn run() {
             get_prefs,
             validate_repo_path,
             open_repo,
-            new_chat,
             execute_plan,
             mark_completed,
             abandon_plan,

@@ -13,7 +13,6 @@ export function TopBar({
 	status,
 	plan,
 	onOpenPicker,
-	onNewChat,
 	onStop,
 	onExecute,
 	onComplete,
@@ -24,7 +23,6 @@ export function TopBar({
 	status: AgentStatus;
 	plan: PlanInfo | null;
 	onOpenPicker: () => void;
-	onNewChat: () => void;
 	onStop: () => void;
 	onExecute: () => void;
 	onComplete: () => void;
@@ -59,14 +57,6 @@ export function TopBar({
 				onComplete={onComplete}
 				onAbandon={onAbandon}
 			/>
-			<button
-				className="tbtn"
-				type="button"
-				disabled={busy}
-				onClick={onNewChat}
-			>
-				new chat
-			</button>
 			{busy ? (
 				<span className="stop-wrap">
 					{pill}
@@ -91,9 +81,9 @@ const PHASE_LABEL: Record<PlanPhase, string> = {
 
 interface PlanOption {
 	label: string;
-	tip: string | undefined;
+	tip?: string | undefined;
 	disabled: boolean;
-	danger: boolean;
+	danger?: boolean;
 	onSelect: () => void;
 }
 
@@ -118,24 +108,20 @@ function PlanMenu({
 	const lead: PlanOption =
 		plan.phase === "scoping"
 			? {
-					label: "execute",
+					label: "Execute",
 					tip: plan.has_plan_md ? undefined : "Needs plan.md",
 					disabled: !plan.has_plan_md,
-					danger: false,
 					onSelect: onExecute,
 				}
 			: {
-					label: "mark completed",
-					tip: undefined,
+					label: "Mark completed",
 					disabled: false,
-					danger: false,
 					onSelect: onComplete,
 				};
 	const options: PlanOption[] = [
 		lead,
 		{
-			label: "abandon",
-			tip: undefined,
+			label: "Abandon",
 			disabled: false,
 			danger: true,
 			onSelect: onAbandon,
@@ -161,13 +147,20 @@ function PlanMenu({
 							key={option.label}
 							type="button"
 							disabled={option.disabled}
-							data-tip={option.tip}
+							aria-label={
+								option.tip === undefined
+									? option.label
+									: `${option.label} ${option.tip}`
+							}
 							onClick={() => {
 								option.onSelect();
 								setOpen(false);
 							}}
 						>
-							{option.label}
+							<span>{option.label}</span>
+							{option.tip !== undefined && (
+								<span className="sub">{option.tip}</span>
+							)}
 						</button>
 					))}
 				</span>
