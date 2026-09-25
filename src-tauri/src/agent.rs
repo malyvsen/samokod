@@ -372,9 +372,8 @@ impl AgentManager {
         plan: ActivePlan,
         agent: &str,
     ) -> Result<(ConnectionTo<Agent>, String, SessionInfo), AgentError> {
-        let scope = opencode::scope_glob(repo_root, plan.phase, &plan.name);
         let connection = self
-            .ensure_connection_with_env(opencode::agent_env(&scope))
+            .ensure_connection_with_env(opencode::agent_env(&plan.plan_ref()))
             .await?;
         let response = connection
             .send_request(acp::build_new_session_request(repo_root))

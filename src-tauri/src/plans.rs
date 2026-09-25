@@ -40,6 +40,12 @@ pub struct PlanRef {
 }
 
 impl PlanRef {
+    /// Repo-relative edit scope for one plan dir, as OpenCode's `edit`
+    /// tool sees it. Rule order stays load-bearing, see `opencode.rs`.
+    pub fn scope_glob(&self) -> String {
+        format!(".samokod/plans/{}/{}/**", self.phase.dir_name(), self.name)
+    }
+
     pub fn path(&self, repo_root: &Path) -> PathBuf {
         phase_dir(repo_root, self.phase).join(&self.name)
     }
