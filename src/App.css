@@ -38,9 +38,8 @@ body {
 	line-height: 1.5;
 }
 
-.app * {
-	/* biome-ignore lint/complexity/noImportantStyles: sharp corners are part of the shell theme */
-	border-radius: 0 !important;
+.app :where(:not(.dot)) {
+	border-radius: 0;
 }
 
 .aurora {
@@ -370,11 +369,6 @@ body {
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-}
-
-.repo-static b {
-	color: #fff;
-	font-weight: 600;
 }
 
 .tbtn {

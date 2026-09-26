@@ -30,7 +30,7 @@ export function TopBar({
 		<div className="topbar">
 			<span className="brand">SAMOKOD</span>
 			<span className="repo-static">
-				<b>{repoLabel}</b> · {branch}
+				{repoLabel} · {branch}
 			</span>
 			{busy ? (
 				<span className="stop-wrap">

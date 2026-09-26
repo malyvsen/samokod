@@ -67,11 +67,19 @@ describe("top bar", () => {
 	);
 
 	test("repo chip is static text", () => {
-		render(topBar("idle"));
-		expect(screen.getByText("~/repo")).toBeInTheDocument();
+		const { container } = render(topBar("idle"));
+		const chip = container.querySelector(".repo-static");
+		expect(chip?.textContent).toBe("~/repo · main");
 		expect(
 			screen.queryByRole("button", { name: /repo/ }),
 		).not.toBeInTheDocument();
+	});
+
+	test("repo chip carries no bold segment", () => {
+		const { container } = render(topBar("idle"));
+		expect(
+			container.querySelector(".repo-static b, .repo-static strong"),
+		).toBeNull();
 	});
 
 	test("there is no plan menu", () => {

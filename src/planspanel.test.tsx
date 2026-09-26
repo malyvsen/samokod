@@ -259,6 +259,13 @@ describe("plans panel", () => {
 		}
 	});
 
+	test("the sharp-corners reset leaves dots circular in CSS", () => {
+		const css = readFileSync("src/App.css", "utf8");
+		expect(css).not.toContain(".app *");
+		const reset = /\.app[^{]*\{[^}]*border-radius[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(reset).toContain(".dot");
+	});
+
 	test("the select button fills the whole row in CSS", () => {
 		const css = readFileSync("src/App.css", "utf8");
 		const row = /\.session\s+\.srow\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
