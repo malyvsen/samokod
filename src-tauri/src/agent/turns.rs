@@ -50,8 +50,8 @@ impl AgentManager {
         self.select_key(session.clone());
         self.touch_activity(&session.plan);
         let mut text = text;
-        if let Some(plan) = self.claim_planner_prefix(&session) {
-            text = opencode::planner_first_message(&opencode::plan_display(&plan), &text);
+        if let Some(prefixed) = self.claim_role_prefix(&session, &text) {
+            text = prefixed;
         }
         self.start_turn(connection, session_id, session, text).await
     }
@@ -162,15 +162,21 @@ impl AgentManager {
 
     /// Claim the one-time role prefix for the first message of one ACP
     /// conversation. One locked check-and-mark, so a retried turn never
-    /// prefixes twice.
-    fn claim_planner_prefix(&self, key: &SessionKey) -> Option<plans::PlanRef> {
+    /// prefixes twice. Covers both roles: a restored execution session
+    /// gets the executor template again, mirroring the planner path.
+    fn claim_role_prefix(&self, key: &SessionKey, user_text: &str) -> Option<String> {
         let mut state = lock_state(&self.state)?;
         let live = state.sessions.get_mut(key)?;
-        if !live.plan.is_scoping() || live.plan.prefixed {
+        if live.plan.prefixed {
             return None;
         }
+        let text = role_prefix_text(
+            live.plan.phase,
+            &opencode::plan_display(&live.plan.plan_ref()),
+            user_text,
+        )?;
         live.plan.prefixed = true;
-        Some(live.plan.plan_ref())
+        Some(text)
     }
 }
 
@@ -289,6 +295,21 @@ fn snoop_todos_from_update(
     }
 }
 
+/// Role template for the first message of one ACP conversation. Pure:
+/// restored sessions of either role get their template again, so a fresh
+/// ACP conversation still knows its job; finished plans never prefix.
+fn role_prefix_text(phase: plans::Phase, display: &str, user_text: &str) -> Option<String> {
+    match phase {
+        plans::Phase::Scoping => Some(opencode::planner_first_message(display, user_text)),
+        plans::Phase::Executing => Some(format!(
+            "{}\n\n{}",
+            opencode::executor_first_message(display),
+            user_text.trim()
+        )),
+        plans::Phase::Completed | plans::Phase::Cancelled => None,
+    }
+}
+
 /// Replace the held list with a fresh todo list and emit when it moved.
 /// Identical lists stay silent.
 fn update_todos(state: &Mutex<State>, app: &AppHandle, key: &SessionKey, fresh: Vec<TodoView>) {
@@ -312,4 +333,37 @@ fn update_todos(state: &Mutex<State>, app: &AppHandle, key: &SessionKey, fresh: 
             changes,
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plans::Phase;
+
+    #[test]
+    fn scoping_prefix_combines_role_and_user_text() {
+        let display = ".samokod/plans/scoping/ts";
+        let text =
+            role_prefix_text(Phase::Scoping, display, "  do things  ").expect("scoping prefixes");
+        assert_eq!(
+            text,
+            opencode::planner_first_message(display, "  do things  ")
+        );
+    }
+
+    #[test]
+    fn executing_prefix_combines_role_and_user_text() {
+        let display = ".samokod/plans/executing/ts.slug";
+        let text = role_prefix_text(Phase::Executing, display, "  do things  ")
+            .expect("executing prefixes");
+        assert!(text.contains(&opencode::executor_first_message(display)));
+        assert!(text.contains("do things"));
+    }
+
+    #[test]
+    fn finished_phases_never_prefix() {
+        for phase in [Phase::Completed, Phase::Cancelled] {
+            assert!(role_prefix_text(phase, "dir", "hi").is_none());
+        }
+    }
 }

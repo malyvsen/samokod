@@ -77,10 +77,6 @@ impl ActivePlan {
             phase: self.phase,
         }
     }
-
-    pub(crate) fn is_scoping(&self) -> bool {
-        self.phase == plans::Phase::Scoping
-    }
 }
 
 /// One live agent session: its own `opencode acp` process, connection, ACP
@@ -301,10 +297,11 @@ impl AgentManager {
             SessionRole::Executing => ActivePlan::executing(key.plan.clone()),
         };
         // A known session keeps its prefix state across transport deaths;
-        // a restored one starts unprefixed so the role prepends again.
-        if let Some(prefixed) = stored_prefixed {
-            plan.prefixed = prefixed;
-        }
+        // anything without an entry (restored sessions, new lazy plans)
+        // starts unprefixed so the role template prepends to its first
+        // message. Eager executors bypass this path: spawn keeps their
+        // prefixed flag, since their role already went out hidden.
+        plan.prefixed = stored_prefixed.unwrap_or(false);
         let agent = opencode::agent_for(plan.phase);
         let (connection, session_id, _) =
             self.spawn_session(&repo_root, &branch, plan, agent).await?;
