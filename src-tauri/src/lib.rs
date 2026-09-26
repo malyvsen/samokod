@@ -14,7 +14,7 @@ mod spend;
 mod todos;
 mod types;
 mod updates;
-pub mod worktrees;
+mod worktrees;
 
 use std::path::PathBuf;
 

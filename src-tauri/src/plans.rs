@@ -184,13 +184,21 @@ pub fn mark_executed(repo_root: &Path, plan: &PlanRef) {
     }
 }
 
-/// Whether the plan owns an execution session: every executing and
-/// completed plan, plus cancelled plans carrying the approval marker.
-pub fn has_execution(repo_root: &Path, plan: &PlanRef) -> bool {
+/// Session roles one plan owns: scoping always runs, executing joins
+/// once approved and stays as history. Pure except the cancelled marker
+/// read.
+pub fn roles_for(repo_root: &Path, plan: &PlanRef) -> Vec<crate::types::SessionRole> {
+    use crate::types::SessionRole;
     match plan.phase {
-        Phase::Executing | Phase::Completed => true,
-        Phase::Scoping => false,
-        Phase::Cancelled => plan.path(repo_root).join(EXECUTED_MARKER).is_file(),
+        Phase::Scoping => vec![SessionRole::Scoping],
+        Phase::Executing | Phase::Completed => vec![SessionRole::Scoping, SessionRole::Executing],
+        Phase::Cancelled => {
+            if plan.path(repo_root).join(EXECUTED_MARKER).is_file() {
+                vec![SessionRole::Scoping, SessionRole::Executing]
+            } else {
+                vec![SessionRole::Scoping]
+            }
+        }
     }
 }
 
@@ -455,27 +463,30 @@ mod tests {
     }
 
     #[test]
-    fn execution_marker_survives_cancel() {
+    fn execution_roles_survive_cancel() {
+        use crate::types::SessionRole;
+        let scoping_only = vec![SessionRole::Scoping];
+        let both = vec![SessionRole::Scoping, SessionRole::Executing];
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
         let plain = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
-        assert!(!has_execution(root, &plain));
+        assert_eq!(roles_for(root, &plain), scoping_only);
         std::fs::write(plain.plan_md(root), "# Shiny\n").expect("write");
         let executing = execute(root, &plain).expect("execute");
         mark_executed(root, &executing);
-        assert!(has_execution(root, &executing));
+        assert_eq!(roles_for(root, &executing), both);
         let done = complete(root, &executing).expect("complete");
-        assert!(has_execution(root, &done));
+        assert_eq!(roles_for(root, &done), both);
         let second = materialize_scoping(root, "2026-09-26.08-41-04").expect("second");
         std::fs::write(second.plan_md(root), "# Second\n").expect("write");
         let running = execute(root, &second).expect("execute");
         mark_executed(root, &running);
         let cancelled = abandon(root, &running).expect("abandon");
-        assert!(has_execution(root, &cancelled));
+        assert_eq!(roles_for(root, &cancelled), both);
         let fresh = materialize_scoping(root, "2026-09-26.08-41-05").expect("fresh");
         let dropped = abandon(root, &fresh).expect("abandon");
-        assert!(!has_execution(root, &dropped));
+        assert_eq!(roles_for(root, &dropped), scoping_only);
     }
 
     #[test]

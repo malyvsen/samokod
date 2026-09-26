@@ -75,6 +75,18 @@ impl ActivePlan {
         })
     }
 
+    /// Working directory for the session: the plan worktree for executing
+    /// plans, the main root for scoping plans. Plan files always stay in
+    /// the main checkout; only the agent's cwd moves.
+    pub(crate) fn cwd(&self, repo_root: &Path) -> PathBuf {
+        match self.phase {
+            plans::Phase::Executing => crate::worktrees::worktree_path(repo_root, &self.name),
+            plans::Phase::Scoping | plans::Phase::Completed | plans::Phase::Cancelled => {
+                repo_root.to_path_buf()
+            }
+        }
+    }
+
     pub(crate) fn plan_ref(&self) -> plans::PlanRef {
         plans::PlanRef {
             name: self.name.clone(),
@@ -182,8 +194,9 @@ impl AgentManager {
         let connection = self
             .ensure_connection_for(&key, &plan, opencode::agent_env(&plan.plan_ref()))
             .await?;
+        let cwd = plan.cwd(repo_root);
         let response = connection
-            .send_request(acp::build_new_session_request(repo_root))
+            .send_request(acp::build_new_session_request(&cwd))
             .block_task()
             .await
             .map_err(|error| AgentError::RequestFailed {
@@ -397,6 +410,7 @@ impl AgentManager {
                 state.current = None;
                 state.awake = None;
                 state.pending_scoping = None;
+                state.worktrees.clear();
             }
             Err(error) => {
                 log::warn!("failed to clear sessions: {error}");

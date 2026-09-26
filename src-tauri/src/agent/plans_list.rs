@@ -165,18 +165,14 @@ pub(crate) fn sorted_entries(
         .collect()
 }
 
-/// One status row per session a plan owns: its scoping session, plus its
-/// execution session once approved.
+/// One status row per session a plan owns, from `roles_for`: scoping
+/// always, executing once approved, each staying as history.
 pub(crate) fn session_statuses(
     repo_root: &Path,
     plan: &plans::PlanRef,
     sessions: &HashMap<SessionKey, LiveSession>,
 ) -> Vec<SessionStatusView> {
-    let mut roles = vec![SessionRole::Scoping];
-    if plans::has_execution(repo_root, plan) {
-        roles.push(SessionRole::Executing);
-    }
-    roles
+    plans::roles_for(repo_root, plan)
         .into_iter()
         .map(|role| {
             let key = SessionKey {

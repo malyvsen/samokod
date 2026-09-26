@@ -39,6 +39,9 @@ pub(crate) struct State {
     /// Background warms in flight, one per session key. Single-flights
     /// `warm_session` against a racing `send_prompt`.
     warming: HashSet<SessionKey>,
+    /// Worktree checkouts per executing plan: path, branch, base commit,
+    /// and the main branch at approval. Rebuilt from disk on open.
+    worktrees: HashMap<String, crate::worktrees::WorktreeRecord>,
 }
 
 impl State {
@@ -172,20 +175,45 @@ impl AgentManager {
         }
     }
 
-    /// Open a repository: ensure the plan structure, rescan every plan,
-    /// and select the most-recent session. Spawns no agents: each session
+    /// Open a repository: ensure the plan structure, prune stale worktree
+    /// metadata, re-register surviving worktrees, rescan every plan, and
+    /// select the most-recent session. Spawns no agents: each session
     /// starts lazily on its first prompt, with transcripts and TODOs kept
     /// run-local. With zero scoping dirs, reserves a pending session
     /// without touching disk.
     pub async fn open_repo(&self, repo_root: PathBuf) -> Result<OpenRepoResult, AgentError> {
         plans::ensure_structure(&repo_root)?;
+        crate::worktrees::prune(&repo_root)?;
         self.clear_sessions();
         {
             let mut state = self.state.lock().expect("state poisoned");
             state.repo_root = Some(repo_root.clone());
             state.branch =
                 crate::branch::current_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string());
-            if plans::scan_plans(&repo_root)
+            // Crash recovery: surviving worktrees rejoin the map with the
+            // current branch as main; their base commit is unknown and
+            // unused for merge decisions.
+            let main_branch = state.branch.clone();
+            let scanned = plans::scan_plans(&repo_root);
+            for plan in &scanned {
+                if plan.phase != plans::Phase::Executing {
+                    continue;
+                }
+                let path = crate::worktrees::worktree_path(&repo_root, &plan.name);
+                if !path.is_dir() {
+                    continue;
+                }
+                state.worktrees.insert(
+                    plan.name.clone(),
+                    crate::worktrees::WorktreeRecord {
+                        path,
+                        branch: crate::worktrees::branch_name(&plan.name),
+                        base: String::new(),
+                        main_branch: main_branch.clone(),
+                    },
+                );
+            }
+            if scanned
                 .iter()
                 .all(|plan| plan.phase != plans::Phase::Scoping)
             {
@@ -326,10 +354,11 @@ impl AgentManager {
         }
     }
 
-    /// Approve the scoping plan: move it to executing, switch to a fresh
-    /// executor process, and start it immediately. The prompt stays hidden:
-    /// no user bubble, the chat opens working. The selection follows the
-    /// new execution session.
+    /// Approve the scoping plan: snapshot the branch and commit, create
+    /// the worktree on a fresh branch, move the plan to executing, and
+    /// start the executor inside the worktree with the absolute plan path.
+    /// The prompt stays hidden: no user bubble, the chat opens working.
+    /// The selection follows the new execution session.
     pub async fn execute_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
         ensure_idle(&self.state, &session)?;
         let (repo_root, branch) = self
@@ -337,6 +366,7 @@ impl AgentManager {
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
+        let base = crate::worktrees::head_commit(&repo_root)?;
         let from = plans::PlanRef {
             name: session.plan.clone(),
             phase: plans::Phase::Scoping,
@@ -348,6 +378,15 @@ impl AgentManager {
         }
         let next = plans::execute(&repo_root, &from)?;
         plans::mark_executed(&repo_root, &next);
+        let record = crate::worktrees::create(&repo_root, &next.name, &base, &branch)?;
+        match self.state.lock() {
+            Ok(mut state) => {
+                state.worktrees.insert(next.name.clone(), record);
+            }
+            Err(error) => {
+                log::warn!("failed to record worktree: {error}");
+            }
+        }
         self.drop_live(&session).await;
         self.move_activity(&from.name, &next.name);
         let mut plan = ActivePlan::executing(next.name.clone());
@@ -356,7 +395,8 @@ impl AgentManager {
         let agent = opencode::agent_for(plan.phase);
         let (connection, session_id, key) =
             self.spawn_session(&repo_root, &branch, plan, agent).await?;
-        let text = opencode::executor_first_message(&opencode::plan_display(&next));
+        let plan_dir_abs = next.path(&repo_root).to_string_lossy().to_string();
+        let text = opencode::executor_first_message(&plan_dir_abs);
         self.touch_activity(&next.name);
         self.start_turn(connection, session_id, key, text).await?;
         Ok(self.plans_update())
@@ -520,8 +560,9 @@ impl AgentManager {
         scoping_draft_for(&state_guard, &repo_root, &session)
     }
 
-    /// Cancel an executing plan. The selection stays on the cancelled (now
-    /// read-only) execution session.
+    /// Cancel an executing plan: force-remove its worktree, delete its
+    /// branch, and move the plan to cancelled. The selection stays on the
+    /// cancelled (now read-only) execution session.
     pub async fn cancel_execution(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
         ensure_idle(&self.state, &session)?;
         let (repo_root, _) = self
@@ -538,6 +579,7 @@ impl AgentManager {
                 raw: "no executing plan to cancel".to_string(),
             });
         }
+        self.remove_worktree(&repo_root, &from.name, true)?;
         let next = plans::abandon(&repo_root, &from)?;
         self.drop_live(&session).await;
         self.move_activity(&from.name, &next.name);
@@ -546,6 +588,32 @@ impl AgentManager {
             role: SessionRole::Executing,
         });
         Ok(self.plans_update())
+    }
+
+    /// Delete one plan worktree and its branch, forgetting the map entry.
+    /// Force only on explicit user action; finishes run clean-gated
+    /// without force. A missing map entry falls back to the derived path
+    /// and branch so recovered plans still clean up.
+    fn remove_worktree(
+        &self,
+        repo_root: &Path,
+        plan_name: &str,
+        force: bool,
+    ) -> Result<(), AgentError> {
+        let record =
+            lock_state(&self.state).and_then(|state| state.worktrees.get(plan_name).cloned());
+        let (path, branch) = match record {
+            Some(record) => (record.path, record.branch),
+            None => (
+                crate::worktrees::worktree_path(repo_root, plan_name),
+                crate::worktrees::branch_name(plan_name),
+            ),
+        };
+        crate::worktrees::remove(repo_root, &path, &branch, force)?;
+        if let Some(mut state) = lock_state(&self.state) {
+            state.worktrees.remove(plan_name);
+        }
+        Ok(())
     }
 }
 
@@ -1071,6 +1139,21 @@ mod tests {
     #[test]
     fn scoping_starts_prefixed() {
         assert!(ActivePlan::scoping("n".to_string()).prefixed);
+    }
+
+    #[test]
+    fn executing_runs_inside_its_worktree() {
+        use std::path::Path;
+        let root = Path::new("/repo");
+        let name = "2026-09-26.14-53-26.shiny-feature".to_string();
+        assert_eq!(
+            ActivePlan::executing(name.clone()).cwd(root),
+            crate::worktrees::worktree_path(root, &name)
+        );
+        assert_eq!(
+            ActivePlan::scoping(name).cwd(root),
+            Path::new("/repo").to_path_buf()
+        );
     }
 
     #[test]

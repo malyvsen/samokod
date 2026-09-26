@@ -49,8 +49,18 @@ pub fn create(
     })
 }
 
+/// Tip commit of the main checkout. Snapshot at approval so the worktree
+/// starts exactly where the main branch was.
+pub fn head_commit(repo_root: &Path) -> Result<String, WorktreeError> {
+    Ok(run_git(repo_root, &["rev-parse", "HEAD"])?
+        .trim()
+        .to_string())
+}
+
 /// Whether the worktree has uncommitted changes.
 /// A worktree with uncommitted changes never merges.
+// Live until the MERGING phase wires them into merge gating.
+#[allow(dead_code)]
 pub fn is_dirty(path: &Path) -> Result<bool, WorktreeError> {
     let output = run_git(path, &["status", "--porcelain"])?;
     Ok(!output.trim().is_empty())
@@ -58,6 +68,8 @@ pub fn is_dirty(path: &Path) -> Result<bool, WorktreeError> {
 
 /// Whether `main_branch` is an ancestor of `branch`: the fast path.
 /// Exit 0 means ancestor, exit 1 means diverged; other failures are loud.
+// Live until the MERGING phase wires them into merge gating.
+#[allow(dead_code)]
 pub fn is_ffable(repo_root: &Path, main_branch: &str, branch: &str) -> Result<bool, WorktreeError> {
     let output = git_command(repo_root)
         .args(["merge-base", "--is-ancestor", main_branch, branch])
@@ -216,7 +228,15 @@ mod tests {
         }
     }
 
-    fn head_commit(repo: &Path) -> String {
+    #[test]
+    fn head_commit_reports_main_tip() {
+        let dir = git_repo();
+        let root = dir.path();
+        let expected = head_commit_shell(root);
+        assert_eq!(head_commit(root).expect("head"), expected);
+    }
+
+    fn head_commit_shell(repo: &Path) -> String {
         let output = Command::new("git")
             .args(["rev-parse", "HEAD"])
             .current_dir(repo)
@@ -271,7 +291,7 @@ mod tests {
         let dir = git_repo();
         let root = dir.path();
         let main = current_branch(root);
-        let base = head_commit(root);
+        let base = head_commit(root).expect("head");
         let record =
             create(root, "2026-09-26.14-53-26.shiny-feature", &base, &main).expect("create");
         assert_eq!(record.branch, "samokod/shiny-feature");
@@ -288,7 +308,7 @@ mod tests {
         let dir = git_repo();
         let root = dir.path();
         let main = current_branch(root);
-        let base = head_commit(root);
+        let base = head_commit(root).expect("head");
         let record = create(root, "2026-09-26.14-53-26.dirty-check", &base, &main).expect("create");
         assert!(!is_dirty(&record.path).expect("clean"));
         std::fs::write(record.path.join("wip.txt"), "wip\n").expect("write");
@@ -300,7 +320,7 @@ mod tests {
         let dir = git_repo();
         let root = dir.path();
         let main = current_branch(root);
-        let base = head_commit(root);
+        let base = head_commit(root).expect("head");
         let name = "2026-09-26.14-53-26.ff-check";
         let branch = branch_name(name);
         let record = create(root, name, &base, &main).expect("create");
@@ -315,7 +335,7 @@ mod tests {
         let dir = git_repo();
         let root = dir.path();
         let main = current_branch(root);
-        let base = head_commit(root);
+        let base = head_commit(root).expect("head");
         let record = create(root, "2026-09-26.14-53-26.gone-soon", &base, &main).expect("create");
         let path = record.path.clone();
         let branch = record.branch.clone();
@@ -339,7 +359,7 @@ mod tests {
         let dir = git_repo();
         let root = dir.path();
         let main = current_branch(root);
-        let base = head_commit(root);
+        let base = head_commit(root).expect("head");
         let record = create(root, "2026-09-26.14-53-26.stale-check", &base, &main).expect("create");
         std::fs::remove_dir_all(&record.path).expect("rmdir");
         prune(root).expect("prune");

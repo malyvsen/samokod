@@ -193,14 +193,22 @@ impl AgentManager {
     /// Claim the one-time role prefix for the first message of one ACP
     /// conversation. One locked check-and-mark, so a retried turn never
     /// prefixes twice. Only executing prefixes; scoping goes through
-    /// verbatim.
+    /// verbatim. The plan path is absolute into the main checkout, since
+    /// the executor runs with the worktree as its working directory.
     fn claim_role_prefix(&self, key: &SessionKey, user_text: &str) -> Option<String> {
         let mut state = lock_state(&self.state)?;
+        let repo_root = state.repo_root.clone()?;
         let live = state.sessions.get_mut(key)?;
         if live.plan.phase != plans::Phase::Executing || live.plan.prefixed {
             return None;
         }
-        let text = executor_prefix_text(&opencode::plan_display(&live.plan.plan_ref()), user_text);
+        let plan_dir_abs = live
+            .plan
+            .plan_ref()
+            .path(&repo_root)
+            .to_string_lossy()
+            .to_string();
+        let text = executor_prefix_text(&plan_dir_abs, user_text);
         live.plan.prefixed = true;
         Some(text)
     }

@@ -26,6 +26,14 @@ impl From<PlanError> for AgentError {
     }
 }
 
+impl From<crate::worktrees::WorktreeError> for AgentError {
+    fn from(error: crate::worktrees::WorktreeError) -> Self {
+        AgentError::RequestFailed {
+            raw: error.to_string(),
+        }
+    }
+}
+
 /// One `▸` tool status line regardless of tool kind.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolLineView {
