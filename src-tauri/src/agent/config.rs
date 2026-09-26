@@ -193,3 +193,31 @@ fn select_values(options: &SessionConfigSelectOptions) -> Vec<ConfigOptionValueV
         _ => Vec::new(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn view(id: &str, category: Option<&str>) -> ConfigOptionView {
+        ConfigOptionView {
+            id: id.to_string(),
+            name: id.to_string(),
+            current_value: "v".to_string(),
+            options: vec![],
+            category: category.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn stale_role_skips_when_option_absent() {
+        let options = vec![view("llm", Some("model"))];
+        assert_eq!(
+            option_id_for_role(&options, crate::repo_state::ConfigRole::Model),
+            Some("llm".to_string())
+        );
+        assert_eq!(
+            option_id_for_role(&options, crate::repo_state::ConfigRole::Effort),
+            None
+        );
+    }
+}

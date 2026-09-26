@@ -2,7 +2,7 @@ import { act, render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
-import { testEntry, testKey } from "./fixtures";
+import { testDefaults, testEntry, testKey } from "./fixtures";
 import type { AppEvent } from "./types";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -22,6 +22,7 @@ const api = vi.hoisted(() => ({
 	cancelTurn: vi.fn(),
 	answerPermission: vi.fn(),
 	setConfigOption: vi.fn(),
+	warmSession: vi.fn(),
 	onAppEvent: vi.fn(() => () => {}),
 }));
 vi.mock("./api", () => api);
@@ -46,7 +47,9 @@ beforeEach(() => {
 		branch: "main",
 		plans: [testEntry()],
 		selected: testKey(),
+		config_defaults: testDefaults(),
 	});
+	api.warmSession.mockResolvedValue(undefined);
 });
 
 function emit(event: AppEvent) {
@@ -96,6 +99,7 @@ describe("plan", () => {
 				testEntry("2026-09-25.10-54-59.slug", "completed", "Shiny feature"),
 			],
 			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
+			config_defaults: testDefaults(),
 		});
 		await openChat();
 		emit({
@@ -132,6 +136,7 @@ describe("plan", () => {
 				testEntry("2026-09-25.10-54-59.draft-idea", "cancelled", "Draft idea"),
 			],
 			selected: { plan: "2026-09-25.10-54-59.draft-idea", role: "scoping" },
+			config_defaults: testDefaults(),
 		});
 		api.sendPrompt.mockResolvedValue(undefined);
 		const user = await openChat();
@@ -157,6 +162,7 @@ describe("plan", () => {
 		api.abandonPlan.mockResolvedValue({
 			plans: [testEntry("bbb", "scoping", "Beta", true)],
 			selected: { plan: "bbb", role: "scoping" },
+			config_defaults: testDefaults(),
 		});
 		const user = await openChat();
 		emit({ type: "agent_text", session: testKey(), chunk: "ephemeral" });
@@ -211,6 +217,7 @@ describe("plan", () => {
 				testEntry("bbb", "scoping", "Beta", true),
 			],
 			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
 		});
 		api.selectPlan.mockImplementation(async (session: unknown) => ({
 			plans: [
@@ -218,6 +225,7 @@ describe("plan", () => {
 				testEntry("bbb", "scoping", "Beta", true),
 			],
 			selected: session,
+			config_defaults: testDefaults(),
 		}));
 		api.sendPrompt.mockResolvedValue(undefined);
 		const user = await openChat();
@@ -256,6 +264,7 @@ describe("plan", () => {
 				testEntry("bbb", "scoping", "Beta", true),
 			],
 			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
 		});
 		api.selectPlan.mockResolvedValue({
 			plans: [
@@ -263,6 +272,7 @@ describe("plan", () => {
 				testEntry("bbb", "scoping", "Beta", true),
 			],
 			selected: { plan: "bbb", role: "scoping" },
+			config_defaults: testDefaults(),
 		});
 		const user = await openChat();
 		const aaa = { plan: "aaa", role: "scoping" } as const;
@@ -287,6 +297,7 @@ describe("plan", () => {
 				testEntry("2026-09-25.11-00-00", "scoping", "Untitled", false),
 			],
 			selected: { plan: "2026-09-25.11-00-00", role: "scoping" },
+			config_defaults: testDefaults(),
 		});
 		const user = await openChat();
 		emit({ type: "agent_text", session: testKey(), chunk: "old chat" });

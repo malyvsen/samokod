@@ -55,9 +55,15 @@ export interface PlanEntry {
 	sessions: SessionStatusView[];
 }
 
+export interface RepoDefaults {
+	model: string | null;
+	effort: string | null;
+}
+
 export interface PlansUpdate {
 	plans: PlanEntry[];
 	selected: SessionKey;
+	config_defaults: RepoDefaults;
 }
 
 export interface OpenRepoResult {
@@ -65,6 +71,7 @@ export interface OpenRepoResult {
 	branch: string;
 	plans: PlanEntry[];
 	selected: SessionKey;
+	config_defaults: RepoDefaults;
 }
 
 export interface RecentRepo {

@@ -23,6 +23,7 @@ import { DraftBubble } from "./components/DraftBubble";
 import { PlansPanel } from "./components/PlansPanel";
 import { RepoPicker } from "./components/RepoPicker";
 import { SidePanel } from "./components/SidePanel";
+import { toSelectorModel } from "./components/selectors";
 import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
 import {
@@ -40,11 +41,13 @@ import {
 	errorItem,
 	updateEntry,
 } from "./sessions/store";
+import { useWarmSession } from "./sessions/warm";
 import type {
 	AppEvent,
 	PlanEntry,
 	PlansUpdate,
 	RecentRepo,
+	RepoDefaults,
 	SessionKey,
 } from "./types";
 import { sameSession, sessionKeyOf } from "./types";
@@ -61,6 +64,10 @@ export function App() {
 	const [plans, setPlans] = useState<PlanEntry[]>([]);
 	const [selectedKey, setSelectedKey] = useState<SessionKey | null>(null);
 	const [chats, setChats] = useState<Chats>({});
+	const [configDefaults, setConfigDefaults] = useState<RepoDefaults>({
+		model: null,
+		effort: null,
+	});
 	const appRef = useRef<HTMLDivElement>(null);
 	const notifyEdit = useAuroraMotion(appRef);
 	const transcriptRef = useRef<HTMLDivElement>(null);
@@ -85,11 +92,17 @@ export function App() {
 	const applyPlans = useCallback((update: PlansUpdate) => {
 		setPlans(update.plans);
 		setSelectedKey(update.selected);
+		setConfigDefaults(update.config_defaults);
 	}, []);
 
 	const entry = selectedEntry(plans, selectedKey);
 	const readOnly = isReadOnly(entry);
 	const agentLabel = agentLabelForPhase(entry?.phase);
+	const isLive = chat.configOptions.length > 0;
+	useWarmSession(selectedKey, isLive, readOnly);
+	const selectors = readOnly
+		? { kind: "live" as const, options: chat.configOptions }
+		: toSelectorModel(chat.configOptions, configDefaults);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -106,20 +119,18 @@ export function App() {
 		};
 	}, []);
 
-	const handleEvent = useCallback(
-		(event: AppEvent) => {
-			if (event.type === "plans_changed") {
-				applyPlans({ plans: event.plans, selected: event.selected });
-				return;
-			}
-			if (event.type === "branch_changed") {
-				setBranch(event.branch);
-				return;
-			}
-			setChats((current) => applySessionEvent(current, event));
-		},
-		[applyPlans],
-	);
+	const handleEvent = useCallback((event: AppEvent) => {
+		if (event.type === "plans_changed") {
+			setPlans(event.plans);
+			setSelectedKey(event.selected);
+			return;
+		}
+		if (event.type === "branch_changed") {
+			setBranch(event.branch);
+			return;
+		}
+		setChats((current) => applySessionEvent(current, event));
+	}, []);
 
 	useEffect(() => onAppEvent(handleEvent), [handleEvent]);
 
@@ -182,7 +193,7 @@ export function App() {
 			setRepoRoot(opened.repo_root);
 			setBranch(opened.branch);
 			setChats({});
-			applyPlans({ plans: opened.plans, selected: opened.selected });
+			applyPlans(opened);
 			setView({ kind: "chat" });
 			setPickerError(null);
 			setRecent((await getPrefs()).recent);
@@ -446,7 +457,7 @@ export function App() {
 							todos={chat.todos}
 							spend={chat.spend}
 							sessionId={selectedId ?? ""}
-							options={chat.configOptions}
+							selectors={selectors}
 							disabled={busy || readOnly}
 							onChange={handleConfigChange}
 						/>

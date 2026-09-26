@@ -78,6 +78,10 @@ export function setConfigOption(
 	return invoke("set_config_option", { session, configId, value });
 }
 
+export function warmSession(session: SessionKey): Promise<void> {
+	return invoke("warm_session", { session });
+}
+
 export function onAppEvent(handler: (event: AppEvent) => void): () => void {
 	let cancelled = false;
 	let unlisten: (() => void) | undefined;

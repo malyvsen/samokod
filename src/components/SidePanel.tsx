@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { spendLines } from "../spend";
 import { doneCount, todoMark, todoRowClass } from "../todos";
-import type { ConfigOptionView, SpendView, TodoView } from "../types";
-import { EffortPlaceholder, OptionDropdown, splitOptions } from "./selectors";
+import type { SpendView, TodoView } from "../types";
+import {
+	EffortPlaceholder,
+	OptionDropdown,
+	pendingOptions,
+	type SelectorModel,
+	splitOptions,
+} from "./selectors";
 
 const LINE_SPEEDS = [70, 28];
 const EMPTY_LINES: [string, string] = ["$0.00", "0% context"];
@@ -11,60 +17,54 @@ export function SidePanel({
 	todos,
 	spend,
 	sessionId,
-	options,
+	selectors,
 	disabled,
 	onChange,
 }: {
 	todos: TodoView[];
 	spend: SpendView | null;
 	sessionId: string;
-	options: ConfigOptionView[];
+	selectors: SelectorModel;
 	disabled: boolean;
 	onChange: (configId: string, value: string) => void;
 }) {
 	const target = spend === null ? EMPTY_LINES : spendLines(spend);
 	const [shown, typing] = useTypedLines(target, sessionId);
 	const done = doneCount(todos);
-	const { model, effort, extras } = splitOptions(options);
+	if (selectors.kind === "pending") {
+		const pending = pendingOptions(selectors.defaults);
+		return (
+			<div className="side">
+				<Cost shown={shown} typing={typing} />
+				<TodoList todos={todos} done={done} />
+				<div className="pin">
+					<div className="sect">
+						<div className="slabel">MODEL</div>
+						<OptionDropdown
+							option={pending.model}
+							disabled={true}
+							onChange={onChange}
+						/>
+					</div>
+					<div className="sect">
+						<div className="slabel">EFFORT</div>
+						<OptionDropdown
+							option={pending.effort}
+							disabled={true}
+							onChange={onChange}
+						/>
+					</div>
+				</div>
+			</div>
+		);
+	}
+	const { model, effort, extras } = splitOptions(selectors.options);
 	const hasSelectors =
 		model !== undefined || effort !== undefined || extras.length > 0;
 	return (
 		<div className="side">
-			<div className="cost">
-				<b>
-					{shown[0] ?? ""}
-					{typing === 0 && <Caret />}
-				</b>
-				<span className="context">
-					{shown[1] ?? ""}
-					{typing === 1 && <Caret />}
-				</span>
-			</div>
-			<div className="head">
-				<span>TODOS</span>
-				{todos.length > 0 && (
-					<span className="count">
-						{done}/{todos.length}
-					</span>
-				)}
-			</div>
-			{todos.length === 0 ? (
-				<div className="row dim">
-					<span className="txt">No todos yet</span>
-				</div>
-			) : (
-				todos.map((todo) => (
-					<div
-						className={`row ${todoRowClass(todo.status)}`}
-						data-full={todo.content}
-						key={todo.content}
-					>
-						<span className="mark">[{todoMark(todo.status)}]</span>
-						<span className="txt">{todo.content}</span>
-						<span className="prio">{todo.priority}</span>
-					</div>
-				))
-			)}
+			<Cost shown={shown} typing={typing} />
+			<TodoList todos={todos} done={done} />
 			{hasSelectors && (
 				<div className="pin">
 					{model !== undefined && (
@@ -100,6 +100,53 @@ export function SidePanel({
 				</div>
 			)}
 		</div>
+	);
+}
+
+function Cost({ shown, typing }: { shown: string[]; typing: number }) {
+	return (
+		<div className="cost">
+			<b>
+				{shown[0] ?? ""}
+				{typing === 0 && <Caret />}
+			</b>
+			<span className="context">
+				{shown[1] ?? ""}
+				{typing === 1 && <Caret />}
+			</span>
+		</div>
+	);
+}
+
+function TodoList({ todos, done }: { todos: TodoView[]; done: number }) {
+	return (
+		<>
+			<div className="head">
+				<span>TODOS</span>
+				{todos.length > 0 && (
+					<span className="count">
+						{done}/{todos.length}
+					</span>
+				)}
+			</div>
+			{todos.length === 0 ? (
+				<div className="row dim">
+					<span className="txt">No todos yet</span>
+				</div>
+			) : (
+				todos.map((todo) => (
+					<div
+						className={`row ${todoRowClass(todo.status)}`}
+						data-full={todo.content}
+						key={todo.content}
+					>
+						<span className="mark">[{todoMark(todo.status)}]</span>
+						<span className="txt">{todo.content}</span>
+						<span className="prio">{todo.priority}</span>
+					</div>
+				))
+			)}
+		</>
 	);
 }
 

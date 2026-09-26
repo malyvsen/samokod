@@ -1,5 +1,63 @@
 import { useState } from "react";
-import type { ConfigOptionValueView, ConfigOptionView } from "../types";
+import type {
+	ConfigOptionValueView,
+	ConfigOptionView,
+	RepoDefaults,
+} from "../types";
+
+export type SelectorModel =
+	| { kind: "live"; options: ConfigOptionView[] }
+	| { kind: "pending"; defaults: RepoDefaults };
+
+export function toSelectorModel(
+	liveOptions: ConfigOptionView[],
+	defaults: RepoDefaults,
+): SelectorModel {
+	if (liveOptions.length > 0) {
+		return { kind: "live", options: liveOptions };
+	}
+	return { kind: "pending", defaults };
+}
+
+export function pendingOptions(defaults: RepoDefaults): {
+	model: ConfigOptionView;
+	effort: ConfigOptionView;
+} {
+	return {
+		model:
+			defaults.model === null
+				? {
+						id: "model",
+						name: "Model",
+						currentValue: "",
+						options: [],
+						category: "model",
+					}
+				: {
+						id: "model",
+						name: "Model",
+						currentValue: defaults.model,
+						options: [{ value: defaults.model, name: defaults.model }],
+						category: "model",
+					},
+		effort:
+			defaults.effort === null
+				? {
+						id: "effort",
+						name: "Effort",
+						currentValue: "",
+						options: [],
+						category: "thought_level",
+					}
+				: {
+						id: "effort",
+						name: "Effort",
+						currentValue: defaults.effort,
+						options: [{ value: defaults.effort, name: defaults.effort }],
+						category: "thought_level",
+					},
+	};
+}
 
 export function splitOptions(options: ConfigOptionView[]): {
 	model: ConfigOptionView | undefined;

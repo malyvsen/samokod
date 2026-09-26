@@ -9,7 +9,8 @@ use tauri::AppHandle;
 
 use crate::plans;
 use crate::types::{
-    AppEvent, OpenRepoResult, PlanEntry, PlansUpdate, SessionKey, SessionRole, SessionStatusView,
+    AppEvent, OpenRepoResult, PlanEntry, PlansUpdate, RepoDefaults, SessionKey, SessionRole,
+    SessionStatusView,
 };
 
 use super::AgentManager;
@@ -35,11 +36,13 @@ impl AgentManager {
                 .unwrap_or_default(),
             role: SessionRole::Scoping,
         });
+        let config_defaults = defaults_for(&repo_root);
         OpenRepoResult {
             repo_root: repo_root.to_string_lossy().to_string(),
             branch,
             plans,
             selected,
+            config_defaults,
         }
     }
 
@@ -63,7 +66,12 @@ impl AgentManager {
                 role: SessionRole::Scoping,
             })
         });
-        PlansUpdate { plans, selected }
+        let config_defaults = defaults_for(&repo_root);
+        PlansUpdate {
+            plans,
+            selected,
+            config_defaults,
+        }
     }
 
     pub(crate) fn push_plans(&self) {
@@ -187,6 +195,16 @@ pub(crate) fn session_statuses(
         .collect()
 }
 
+/// Stored model/effort defaults for the instant picker paint. Pure file
+/// read; missing files yield empty defaults.
+fn defaults_for(repo_root: &Path) -> RepoDefaults {
+    let stored = crate::repo_state::load_repo_state(repo_root);
+    RepoDefaults {
+        model: stored.model,
+        effort: stored.effort,
+    }
+}
+
 /// Most-recent session across the sorted plans: the execution session when
 /// the plan owns one, else scoping.
 pub(crate) fn most_recent_key(plans: &[PlanEntry]) -> Option<SessionKey> {
@@ -226,5 +244,35 @@ pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
     };
     if let Some(selected) = selected {
         emit_event(app, AppEvent::PlansChanged { plans, selected });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_mirror_stored_repo_state() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(
+            defaults_for(dir.path()),
+            RepoDefaults {
+                model: None,
+                effort: None,
+            }
+        );
+        crate::repo_state::set_role(dir.path(), crate::repo_state::ConfigRole::Model, Some("m1"));
+        crate::repo_state::set_role(
+            dir.path(),
+            crate::repo_state::ConfigRole::Effort,
+            Some("high"),
+        );
+        assert_eq!(
+            defaults_for(dir.path()),
+            RepoDefaults {
+                model: Some("m1".to_string()),
+                effort: Some("high".to_string()),
+            }
+        );
     }
 }

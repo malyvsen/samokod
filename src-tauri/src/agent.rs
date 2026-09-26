@@ -1,6 +1,6 @@
 // Agent lifecycle: one `opencode acp` child process per live session,
 // sessions keyed by plan directory name plus role, plans listed from disk.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -17,6 +17,7 @@ mod permissions;
 mod plans_list;
 mod session;
 mod turns;
+mod warm;
 
 pub(crate) use session::{ActivePlan, LiveSession};
 
@@ -35,6 +36,9 @@ pub(crate) struct State {
     /// normal `Untitled` entry until the first `send_prompt` materializes
     /// it; vanishing on abandon or select-away leaves no trace.
     pending_scoping: Option<String>,
+    /// Background warms in flight, one per session key. Single-flights
+    /// `warm_session` against a racing `send_prompt`.
+    warming: HashSet<SessionKey>,
 }
 
 impl State {
@@ -182,7 +186,17 @@ impl AgentManager {
                 && current.plan == pending
                 && is_empty_scoping(&state, &repo_root, &pending)
             {
-                return Ok(self.plans_update());
+                drop(state);
+                let update = self.plans_update();
+                let manager = AgentManager {
+                    state: Arc::clone(&self.state),
+                    app: self.app.clone(),
+                };
+                let key = update.selected.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = manager.warm_session(key).await;
+                });
+                return Ok(update);
             }
         }
         let name = {
@@ -201,7 +215,16 @@ impl AgentManager {
                 log::warn!("failed to select new plan: {error}");
             }
         }
-        Ok(self.plans_update())
+        let update = self.plans_update();
+        let manager = AgentManager {
+            state: Arc::clone(&self.state),
+            app: self.app.clone(),
+        };
+        let key = update.selected.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = manager.warm_session(key).await;
+        });
+        Ok(update)
     }
 
     /// Re-check the branch for the open repo. Failures keep the last value.

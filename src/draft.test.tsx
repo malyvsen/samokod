@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
-import { testEntry, testKey } from "./fixtures";
+import { testDefaults, testEntry, testKey } from "./fixtures";
 import type { AppEvent } from "./types";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -22,6 +22,7 @@ const api = vi.hoisted(() => ({
 	cancelTurn: vi.fn(),
 	answerPermission: vi.fn(),
 	setConfigOption: vi.fn(),
+	warmSession: vi.fn(),
 	onAppEvent: vi.fn(() => () => {}),
 }));
 vi.mock("./api", () => api);
@@ -53,7 +54,9 @@ beforeEach(() => {
 		branch: "main",
 		plans: [testEntry()],
 		selected: testKey(),
+		config_defaults: testDefaults(),
 	});
+	api.warmSession.mockResolvedValue(undefined);
 });
 
 async function openChat() {

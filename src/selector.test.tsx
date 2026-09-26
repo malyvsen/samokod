@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { SidePanel } from "./components/SidePanel";
+import { toSelectorModel } from "./components/selectors";
 import type { ConfigOptionView } from "./types";
 
 const standard: ConfigOptionView[] = [
@@ -80,7 +81,7 @@ function selectors(
 			todos={[]}
 			spend={null}
 			sessionId="s1"
-			options={options}
+			selectors={{ kind: "live", options }}
 			disabled={disabled}
 			onChange={onChange}
 		/>
@@ -191,5 +192,23 @@ describe("sidebar selectors", () => {
 			expect.stringContaining("Low"),
 			expect.stringContaining("High"),
 		]);
+	});
+});
+
+describe("toSelectorModel", () => {
+	test("empty live plus defaults maps to pending", () => {
+		const model = toSelectorModel([], { model: "m1", effort: "high" });
+		expect(model).toEqual({
+			kind: "pending",
+			defaults: { model: "m1", effort: "high" },
+		});
+	});
+
+	test("non-empty live maps to live and keeps options", () => {
+		const model = toSelectorModel(standard, { model: "stale", effort: null });
+		expect(model.kind).toBe("live");
+		if (model.kind === "live") {
+			expect(model.options).toBe(standard);
+		}
 	});
 });

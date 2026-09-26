@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { onAppEvent, selectPlan, setConfigOption } from "./api";
+import { onAppEvent, selectPlan, setConfigOption, warmSession } from "./api";
 import { testKey } from "./fixtures";
 import type { AppEvent } from "./types";
 
@@ -32,9 +32,21 @@ describe("config options", () => {
 	});
 
 	test("select_plan targets the session", async () => {
-		vi.mocked(invoke).mockResolvedValue({ plans: [], selected: testKey() });
+		vi.mocked(invoke).mockResolvedValue({
+			plans: [],
+			selected: testKey(),
+			config_defaults: { model: null, effort: null },
+		});
 		await selectPlan(testKey());
 		expect(invoke).toHaveBeenCalledWith("select_plan", {
+			session: testKey(),
+		});
+	});
+
+	test("warm_session targets the session", async () => {
+		vi.mocked(invoke).mockResolvedValue(undefined);
+		await warmSession(testKey());
+		expect(invoke).toHaveBeenCalledWith("warm_session", {
 			session: testKey(),
 		});
 	});

@@ -16,6 +16,7 @@ use super::config::{log_roles, option_id_for_role, pin_agent_mode, send_config_o
 use super::permissions::handle_permission_request;
 use super::plans_list::push_sorted;
 use super::turns::handle_notification;
+use super::warm::{release_warm, try_claim_warm};
 use super::{emit_event, lock_state, map_startup_error, set_failed};
 
 /// User decision for one permission card.
@@ -266,7 +267,8 @@ impl AgentManager {
     /// Live connection for one session, spawning lazily on the first
     /// prompt: same plan directory, mode pin, stored model/effort
     /// reapplied. Restored sessions start unprefixed, so the role template
-    /// prepends to their first message again.
+    /// prepends to their first message again. Single-flights against a
+    /// racing warm: one spawner wins, the other polls for liveness.
     pub(crate) async fn ensure_live(
         &self,
         key: &SessionKey,
@@ -276,6 +278,77 @@ impl AgentManager {
         {
             return Ok((connection, session_id));
         }
+        let claimed = match self.state.lock() {
+            Ok(mut state) => try_claim_warm(&mut state.warming, key),
+            Err(error) => {
+                log::warn!("failed to claim live session: {error}");
+                false
+            }
+        };
+        if claimed {
+            let result = self.ensure_live_claimed(key).await;
+            match self.state.lock() {
+                Ok(mut state) => release_warm(&mut state.warming, key),
+                Err(error) => log::warn!("failed to release live session: {error}"),
+            }
+            return result;
+        }
+        let timeout = std::time::Duration::from_secs(10);
+        let interval = std::time::Duration::from_millis(50);
+        let start = std::time::Instant::now();
+        loop {
+            tokio::time::sleep(interval).await;
+            if let Some((connection, session_id, _, _)) = self.session_snapshot_for(key)
+                && !connection.is_incoming_closed()
+            {
+                return Ok((connection, session_id));
+            }
+            let still_warming = lock_state(&self.state)
+                .map(|state| state.warming.contains(key))
+                .unwrap_or(false);
+            if !still_warming {
+                if let Some((connection, session_id, _, _)) = self.session_snapshot_for(key)
+                    && !connection.is_incoming_closed()
+                {
+                    return Ok((connection, session_id));
+                }
+                let reclaimed = match self.state.lock() {
+                    Ok(mut state) => try_claim_warm(&mut state.warming, key),
+                    Err(error) => {
+                        log::warn!("failed to reclaim live session: {error}");
+                        false
+                    }
+                };
+                if reclaimed {
+                    let result = self.ensure_live_claimed(key).await;
+                    match self.state.lock() {
+                        Ok(mut state) => release_warm(&mut state.warming, key),
+                        Err(error) => log::warn!("failed to release live session: {error}"),
+                    }
+                    return result;
+                }
+            }
+            if start.elapsed() >= timeout {
+                if let Some((connection, session_id, _, _)) = self.session_snapshot_for(key)
+                    && !connection.is_incoming_closed()
+                {
+                    return Ok((connection, session_id));
+                }
+                return Err(AgentError::RequestFailed {
+                    raw: "session is warming, try again".to_string(),
+                });
+            }
+        }
+    }
+
+    /// Spawn path assuming the warm claim is already held. Shared by
+    /// `ensure_live` (which claims) and `warm_session` (which holds its
+    /// own claim). Pending scoping names spawn without a directory; the
+    /// first prompt materializes it later.
+    pub(crate) async fn ensure_live_claimed(
+        &self,
+        key: &SessionKey,
+    ) -> Result<(ConnectionTo<Agent>, String), AgentError> {
         let (repo_root, branch) = self
             .reopen_snapshot()
             .ok_or_else(|| AgentError::NoSession {
@@ -285,7 +358,13 @@ impl AgentManager {
             name: key.plan.clone(),
             phase: role_phase(key.role),
         };
-        if !plan_ref.path(&repo_root).is_dir() {
+        let is_pending = lock_state(&self.state)
+            .map(|state| {
+                state.pending_scoping.as_deref() == Some(key.plan.as_str())
+                    && key.role == SessionRole::Scoping
+            })
+            .unwrap_or(false);
+        if !plan_ref.path(&repo_root).is_dir() && !is_pending {
             return Err(AgentError::NoSession {
                 raw: "plan is gone".to_string(),
             });

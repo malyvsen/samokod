@@ -1,10 +1,17 @@
 import type {
 	PlanEntry,
 	PlanPhase,
+	RepoDefaults,
 	SessionKey,
 	SessionRole,
 	SessionStatusView,
 } from "./types";
+
+export function testDefaults(
+	overrides: Partial<RepoDefaults> = {},
+): RepoDefaults {
+	return { model: null, effort: null, ...overrides };
+}
 
 export function testKey(
 	plan = "2026-09-25.10-54-59",

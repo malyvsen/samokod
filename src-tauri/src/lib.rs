@@ -176,6 +176,14 @@ async fn set_config_option(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn warm_session(state: State<'_, AgentManager>, session: SessionKey) -> Result<(), String> {
+    state
+        .warm_session(session)
+        .await
+        .map_err(|error| error.to_string())
+}
+
 fn log_level() -> log::LevelFilter {
     match std::env::var("SAMOKOD_LOG")
         .unwrap_or_default()
@@ -227,7 +235,8 @@ pub fn run() {
             retry_last,
             cancel_turn,
             answer_permission,
-            set_config_option
+            set_config_option,
+            warm_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

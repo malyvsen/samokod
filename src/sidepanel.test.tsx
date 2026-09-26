@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { SidePanel } from "./components/SidePanel";
+import { toSelectorModel } from "./components/selectors";
 import type { ConfigOptionView, SpendView, TodoView } from "./types";
 
 const TODOS: TodoView[] = [
@@ -53,6 +54,7 @@ type PanelProps = {
 	spend?: SpendView | null;
 	sessionId?: string;
 	options?: ConfigOptionView[];
+	selectors?: import("./components/selectors").SelectorModel;
 	disabled?: boolean;
 	onChange?: (configId: string, value: string) => void;
 };
@@ -63,7 +65,10 @@ function panelElement(props: PanelProps = {}) {
 			todos={props.todos ?? []}
 			spend={props.spend ?? null}
 			sessionId={props.sessionId ?? "s1"}
-			options={props.options ?? []}
+			selectors={
+				props.selectors ??
+				toSelectorModel(props.options ?? [], { model: null, effort: null })
+			}
 			disabled={props.disabled ?? false}
 			onChange={props.onChange ?? vi.fn()}
 		/>
@@ -88,7 +93,10 @@ describe("side panel", () => {
 		expect(screen.getByText("$0.00")).toBeInTheDocument();
 		expect(screen.getByText("No todos yet")).toBeInTheDocument();
 		expect(screen.queryByText("TODOS")).toBeInTheDocument();
-		expect(screen.queryByText("EFFORT")).not.toBeInTheDocument();
+		expect(screen.getByText("MODEL")).toBeInTheDocument();
+		expect(screen.getByText("EFFORT")).toBeInTheDocument();
+		expect(screen.getByLabelText("Model")).toBeDisabled();
+		expect(screen.getByLabelText("Effort")).toBeDisabled();
 	});
 
 	test("live list shows count and rows", () => {
@@ -135,5 +143,45 @@ describe("side panel", () => {
 		fireEvent.click(screen.getByLabelText("Model"));
 		fireEvent.click(screen.getByText("A"));
 		expect(onChange).toHaveBeenCalledWith("model", "a");
+	});
+
+	test("pending renders disabled stored labels", () => {
+		panel({
+			selectors: {
+				kind: "pending",
+				defaults: { model: "stored-model", effort: "stored-effort" },
+			},
+		});
+		expect(screen.getByText("MODEL")).toBeInTheDocument();
+		expect(screen.getByText("EFFORT")).toBeInTheDocument();
+		expect(screen.getByText("stored-model")).toBeInTheDocument();
+		expect(screen.getByText("stored-effort")).toBeInTheDocument();
+		expect(screen.getByLabelText("Model")).toBeDisabled();
+		expect(screen.getByLabelText("Effort")).toBeDisabled();
+		expect(screen.queryByText("Effort unavailable")).not.toBeInTheDocument();
+	});
+
+	test("pending without stored values shows disabled fallbacks", () => {
+		panel({
+			selectors: { kind: "pending", defaults: { model: null, effort: null } },
+		});
+		expect(screen.getByLabelText("Model")).toBeDisabled();
+		expect(screen.getByLabelText("Effort")).toBeDisabled();
+		expect(screen.getByText("Model")).toBeInTheDocument();
+		expect(screen.getByText("Effort")).toBeInTheDocument();
+	});
+
+	test("live drops stale labels for authoritative lists", () => {
+		const view = panel({
+			selectors: {
+				kind: "pending",
+				defaults: { model: "stale-model", effort: null },
+			},
+		});
+		expect(screen.getByText("stale-model")).toBeInTheDocument();
+		view.rerender(panelElement({ options: OPTIONS }));
+		expect(screen.queryByText("stale-model")).not.toBeInTheDocument();
+		expect(screen.getByText("B")).toBeInTheDocument();
+		expect(screen.queryByText("Effort unavailable")).not.toBeInTheDocument();
 	});
 });

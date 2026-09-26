@@ -92,12 +92,22 @@ pub struct PlanEntry {
     pub sessions: Vec<SessionStatusView>,
 }
 
+/// Stored model/effort defaults for the instant disabled picker paint.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RepoDefaults {
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<String>,
+}
+
 /// Plans list pushed after every transition, activity, or title change,
 /// and returned by plan commands.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlansUpdate {
     pub plans: Vec<PlanEntry>,
     pub selected: SessionKey,
+    pub config_defaults: RepoDefaults,
 }
 
 /// Repository payload returned after opening a repo. No agents spawn here;
@@ -108,6 +118,7 @@ pub struct OpenRepoResult {
     pub branch: String,
     pub plans: Vec<PlanEntry>,
     pub selected: SessionKey,
+    pub config_defaults: RepoDefaults,
 }
 
 /// Frontend event envelope. One Tauri event name carries every variant so
