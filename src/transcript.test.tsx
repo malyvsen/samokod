@@ -17,6 +17,52 @@ function transcript(text: string) {
 	);
 }
 
+describe("transcript retry", () => {
+	test("retryable errors offer retry when writable", () => {
+		render(
+			<Transcript
+				items={[
+					{
+						kind: "error",
+						id: "e1",
+						raw: "boom",
+						hint: "retry the turn",
+						retryable: true,
+					},
+				]}
+				repoLabel="~/repo"
+				agentLabel="AGENT"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		expect(screen.getByRole("button", { name: "retry" })).toBeInTheDocument();
+	});
+
+	test("read-only transcripts hide retry", () => {
+		render(
+			<Transcript
+				items={[
+					{
+						kind: "error",
+						id: "e1",
+						raw: "boom",
+						hint: "retry the turn",
+						retryable: true,
+					},
+				]}
+				repoLabel="~/repo"
+				agentLabel="AGENT"
+				onRetry={null}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		expect(
+			screen.queryByRole("button", { name: "retry" }),
+		).not.toBeInTheDocument();
+	});
+});
+
 describe("transcript user messages", () => {
 	test("renders user text with newlines intact", () => {
 		render(transcript(multiline));
