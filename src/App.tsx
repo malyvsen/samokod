@@ -27,6 +27,7 @@ import { Transcript } from "./components/Transcript";
 import {
 	agentLabelForPhase,
 	agentStatusOf,
+	isReadOnly,
 	selectedChat,
 	selectedEntry,
 } from "./sessions/select";
@@ -86,6 +87,7 @@ export function App() {
 	}, []);
 
 	const entry = selectedEntry(plans, selectedKey);
+	const readOnly = isReadOnly(entry);
 	const agentLabel = agentLabelForPhase(entry?.phase);
 
 	useEffect(() => {
@@ -214,7 +216,7 @@ export function App() {
 
 	async function handleSend(text: string) {
 		const key = selectedRef.current;
-		if (text === "" || busy || key === null) return;
+		if (text === "" || busy || readOnly || key === null) return;
 		updateChat(key, (chat) => ({
 			...chat,
 			transcript: [
@@ -245,7 +247,7 @@ export function App() {
 
 	async function handleAnswer(toolCallId: string, optionId: string) {
 		const key = selectedRef.current;
-		if (key === null) return;
+		if (readOnly || key === null) return;
 		await answerPermission(key, toolCallId, optionId);
 		updateChat(key, (chat) => ({
 			...chat,
@@ -256,7 +258,7 @@ export function App() {
 
 	async function handleConfigChange(configId: string, value: string) {
 		const key = selectedRef.current;
-		if (busy || key === null) return;
+		if (busy || readOnly || key === null) return;
 		configGeneration.current += 1;
 		const generation = configGeneration.current;
 		try {
@@ -271,7 +273,7 @@ export function App() {
 
 	async function handleRetry() {
 		const key = selectedRef.current;
-		if (busy || key === null) return;
+		if (busy || readOnly || key === null) return;
 		updateChat(key, (chat) => ({ ...chat, failed: false }));
 		try {
 			const retried = await retryLast(key);
@@ -391,11 +393,16 @@ export function App() {
 									items={chat.transcript}
 									repoLabel={repoLabel}
 									agentLabel={agentLabel}
-									onRetry={handleRetry}
+									onRetry={readOnly ? null : handleRetry}
 									onAnswer={handleAnswer}
 								>
-									{!busy && (
+									{!busy && !readOnly && (
 										<DraftBubble onSend={handleSend} onEdit={notifyEdit} />
+									)}
+									{readOnly && (
+										<div className="ro-note">
+											This session is read-only - the plan is finished.
+										</div>
 									)}
 								</Transcript>
 							</div>
@@ -405,7 +412,7 @@ export function App() {
 							spend={chat.spend}
 							sessionId={selectedId ?? ""}
 							options={chat.configOptions}
-							disabled={busy}
+							disabled={busy || readOnly}
 							onChange={handleConfigChange}
 						/>
 					</div>

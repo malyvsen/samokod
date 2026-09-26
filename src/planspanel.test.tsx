@@ -259,6 +259,12 @@ describe("plans panel", () => {
 		}
 	});
 
+	test("the select button fills the whole row in CSS", () => {
+		const css = readFileSync("src/App.css", "utf8");
+		const row = /\.session\s+\.srow\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(row).toContain("align-self: stretch");
+	});
+
 	test("action buttons stay hover-only in CSS", () => {
 		const css = readFileSync("src/App.css", "utf8");
 		const hidden = /\.plans\s+\.sbtn\s*\{[^}]*\}/.exec(css)?.[0] ?? "";

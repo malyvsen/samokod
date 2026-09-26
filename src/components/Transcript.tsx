@@ -19,7 +19,7 @@ export function Transcript({
 	items: TranscriptItem[];
 	repoLabel: string;
 	agentLabel: string;
-	onRetry: () => void;
+	onRetry: (() => void) | null;
 	onAnswer: (toolCallId: string, optionId: string) => void;
 	children?: ReactNode;
 }) {
@@ -121,7 +121,7 @@ export function Transcript({
 						<div className="errbar" key={item.id}>
 							<div className="erow">
 								<span data-full={item.raw}>✕ {item.raw}</span>
-								{item.retryable && (
+								{item.retryable && onRetry !== null && (
 									<button className="tbtn" type="button" onClick={onRetry}>
 										retry
 									</button>

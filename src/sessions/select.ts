@@ -26,6 +26,12 @@ export function selectedEntry(
 	return plans.find((plan) => plan.name === selectedKey.plan);
 }
 
+/// Finished plans are read-only: the selection stays on the session, but
+/// no input, retry, or config change may run against it.
+export function isReadOnly(entry: PlanEntry | undefined): boolean {
+	return entry?.phase === "completed" || entry?.phase === "cancelled";
+}
+
 export function agentLabelForPhase(
 	phase: PlanEntry["phase"] | undefined,
 ): string {
