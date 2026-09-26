@@ -18,7 +18,7 @@ export interface ToolLineView {
 	status: string;
 }
 
-export type SessionRole = "scoping" | "executing";
+export type SessionRole = "scoping" | "executing" | "merging";
 
 export interface SessionKey {
 	plan: string;
@@ -45,7 +45,18 @@ export interface SessionStatusView {
 	live: boolean;
 }
 
-export type PlanPhase = "scoping" | "executing" | "completed" | "cancelled";
+export type PlanPhase =
+	| "scoping"
+	| "executing"
+	| "merging"
+	| "completed"
+	| "cancelled";
+
+export interface WorktreeStatus {
+	branch: string;
+	dirty: boolean;
+	ffable: boolean;
+}
 
 export interface PlanEntry {
 	name: string;
@@ -53,6 +64,7 @@ export interface PlanEntry {
 	title: string;
 	has_plan_md: boolean;
 	sessions: SessionStatusView[];
+	worktree: WorktreeStatus | null;
 }
 
 export interface RepoDefaults {

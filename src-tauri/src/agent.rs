@@ -402,11 +402,61 @@ impl AgentManager {
         Ok(self.plans_update())
     }
 
-    /// Finish the executing plan. The selection stays on the completed
-    /// (now read-only) execution session; fresh plans come from `+ NEW PLAN`.
+    /// Finish a plan. A clean fast-forwardable executing plan completes
+    /// directly with no agent and no MERGING row: fast-forward, remove the
+    /// worktree, delete the branch. A clean merging plan finishes the same
+    /// way after its rebase. Dirty worktrees refuse, diverged branches
+    /// rebase first. The selection stays on the finished session; fresh
+    /// plans come from `+ NEW PLAN`.
     pub async fn mark_completed(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
         ensure_idle(&self.state, &session)?;
         let (repo_root, _) = self
+            .reopen_snapshot()
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
+        let phase = match session.role {
+            SessionRole::Executing => plans::Phase::Executing,
+            SessionRole::Merging => plans::Phase::Merging,
+            SessionRole::Scoping => {
+                return Err(AgentError::RequestFailed {
+                    raw: "no executing plan to complete".to_string(),
+                });
+            }
+        };
+        let from = plans::PlanRef {
+            name: session.plan.clone(),
+            phase,
+        };
+        if !from.path(&repo_root).is_dir() {
+            return Err(AgentError::RequestFailed {
+                raw: "no active plan to complete".to_string(),
+            });
+        }
+        let status = self.worktree_status_for(&repo_root, &from.name)?;
+        gate_merge(status.dirty, status.ffable, MergeStep::Finish)?;
+        crate::worktrees::fast_forward(&repo_root, &status.main_branch, &status.branch)?;
+        self.remove_worktree(&repo_root, &from.name, false)?;
+        let next = match phase {
+            plans::Phase::Executing => plans::complete(&repo_root, &from)?,
+            plans::Phase::Merging => plans::finish_merge(&repo_root, &from)?,
+            _ => unreachable!("gated on executing or merging above"),
+        };
+        self.drop_plan_lives(&from.name).await;
+        self.move_activity(&from.name, &next.name);
+        self.select_key(SessionKey {
+            plan: next.name,
+            role: session.role,
+        });
+        Ok(self.plans_update())
+    }
+
+    /// Move a clean diverged executing plan to merging and start the merge
+    /// agent in the worktree. Clean fast-forwardable plans finish directly
+    /// instead; dirty worktrees refuse without spawning an agent.
+    pub async fn begin_merge(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
+        ensure_idle(&self.state, &session)?;
+        let (repo_root, branch) = self
             .reopen_snapshot()
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
@@ -417,16 +467,29 @@ impl AgentManager {
         };
         if session.role != SessionRole::Executing || !from.path(&repo_root).is_dir() {
             return Err(AgentError::RequestFailed {
-                raw: "no executing plan to complete".to_string(),
+                raw: "no executing plan to merge".to_string(),
             });
         }
-        let next = plans::complete(&repo_root, &from)?;
+        let status = self.worktree_status_for(&repo_root, &from.name)?;
+        gate_merge(status.dirty, status.ffable, MergeStep::Rebase)?;
+        let next = plans::begin_merge(&repo_root, &from)?;
+        plans::mark_merging(&repo_root, &next);
         self.drop_live(&session).await;
-        self.move_activity(&from.name, &next.name);
-        self.select_key(SessionKey {
-            plan: next.name,
-            role: SessionRole::Executing,
-        });
+        let mut plan = ActivePlan::merging(next.name.clone());
+        // The role goes out hidden below, so later turns never prefix again.
+        plan.prefixed = true;
+        let agent = opencode::agent_for(plan.phase);
+        let (connection, session_id, key) =
+            self.spawn_session(&repo_root, &branch, plan, agent).await?;
+        let plan_md_abs = next.plan_md(&repo_root).to_string_lossy().to_string();
+        let text = opencode::merger_first_message(
+            &status.branch,
+            &status.main_branch,
+            &status.path.to_string_lossy(),
+            &plan_md_abs,
+        );
+        self.touch_activity(&next.name);
+        self.start_turn(connection, session_id, key, text).await?;
         Ok(self.plans_update())
     }
 
@@ -458,6 +521,8 @@ impl AgentManager {
                             &state.sessions,
                             &state.activity,
                             state.pending_scoping.as_deref(),
+                            &state.worktrees,
+                            &state.branch,
                         );
                         if let Some(key) = plans_list::most_recent_key(&plans) {
                             state.current = Some(key);
@@ -560,9 +625,9 @@ impl AgentManager {
         scoping_draft_for(&state_guard, &repo_root, &session)
     }
 
-    /// Cancel an executing plan: force-remove its worktree, delete its
-    /// branch, and move the plan to cancelled. The selection stays on the
-    /// cancelled (now read-only) execution session.
+    /// Cancel an executing or merging plan: force-remove its worktree,
+    /// delete its branch, and move the plan to cancelled. The selection
+    /// stays on the cancelled (now read-only) session.
     pub async fn cancel_execution(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
         ensure_idle(&self.state, &session)?;
         let (repo_root, _) = self
@@ -570,24 +635,79 @@ impl AgentManager {
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
+        let phase = match session.role {
+            SessionRole::Executing => plans::Phase::Executing,
+            SessionRole::Merging => plans::Phase::Merging,
+            SessionRole::Scoping => {
+                return Err(AgentError::RequestFailed {
+                    raw: "no active plan to cancel".to_string(),
+                });
+            }
+        };
         let from = plans::PlanRef {
             name: session.plan.clone(),
-            phase: plans::Phase::Executing,
+            phase,
         };
-        if session.role != SessionRole::Executing || !from.path(&repo_root).is_dir() {
+        if !from.path(&repo_root).is_dir() {
             return Err(AgentError::RequestFailed {
-                raw: "no executing plan to cancel".to_string(),
+                raw: "no active plan to cancel".to_string(),
             });
         }
         self.remove_worktree(&repo_root, &from.name, true)?;
         let next = plans::abandon(&repo_root, &from)?;
-        self.drop_live(&session).await;
+        self.drop_plan_lives(&from.name).await;
         self.move_activity(&from.name, &next.name);
         self.select_key(SessionKey {
             plan: next.name,
-            role: SessionRole::Executing,
+            role: session.role,
         });
         Ok(self.plans_update())
+    }
+
+    /// Live worktree coordinates plus merge state for one plan. Map
+    /// entries win; missing ones fall back to derived names with the
+    /// current branch as main so recovered plans still merge.
+    fn worktree_status_for(
+        &self,
+        repo_root: &Path,
+        plan_name: &str,
+    ) -> Result<WorktreeLive, AgentError> {
+        let (record, main_fallback) = match lock_state(&self.state) {
+            Some(state) => (
+                state.worktrees.get(plan_name).cloned(),
+                state.branch.clone(),
+            ),
+            None => (None, String::new()),
+        };
+        let (path, branch, main_branch) = match record {
+            Some(record) => (record.path, record.branch, record.main_branch),
+            None => (
+                crate::worktrees::worktree_path(repo_root, plan_name),
+                crate::worktrees::branch_name(plan_name),
+                main_fallback,
+            ),
+        };
+        let dirty = crate::worktrees::is_dirty(&path)?;
+        let ffable = crate::worktrees::is_ffable(repo_root, &main_branch, &branch)?;
+        Ok(WorktreeLive {
+            path,
+            branch,
+            main_branch,
+            dirty,
+            ffable,
+        })
+    }
+
+    /// Drop every live session a plan owns. Finishes and cancels land on
+    /// history rows; the transcripts stay frontend-side.
+    async fn drop_plan_lives(&self, plan_name: &str) {
+        for role in [SessionRole::Executing, SessionRole::Merging] {
+            self.drop_live(&SessionKey {
+                plan: plan_name.to_string(),
+                role,
+            })
+            .await;
+        }
     }
 
     /// Delete one plan worktree and its branch, forgetting the map entry.
@@ -614,6 +734,51 @@ impl AgentManager {
             state.worktrees.remove(plan_name);
         }
         Ok(())
+    }
+}
+
+/// Live worktree coordinates plus merge state for one plan.
+struct WorktreeLive {
+    path: PathBuf,
+    branch: String,
+    main_branch: String,
+    dirty: bool,
+    ffable: bool,
+}
+
+/// Which merge step the user asked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MergeStep {
+    Rebase,
+    Finish,
+}
+
+/// Refuse a merge step that cannot run. A dirty worktree never merges;
+/// an already fast-forwardable branch finishes directly instead of
+/// rebasing; a diverged branch rebases before finishing. Pure.
+fn gate_merge(dirty: bool, ffable: bool, step: MergeStep) -> Result<(), AgentError> {
+    if dirty {
+        return Err(AgentError::RequestFailed {
+            raw: "commit or discard worktree changes first".to_string(),
+        });
+    }
+    match step {
+        MergeStep::Rebase => {
+            if ffable {
+                return Err(AgentError::RequestFailed {
+                    raw: "already fast-forwardable, finish it directly".to_string(),
+                });
+            }
+            Ok(())
+        }
+        MergeStep::Finish => {
+            if !ffable {
+                return Err(AgentError::RequestFailed {
+                    raw: "main moved on, rebase the plan branch first".to_string(),
+                });
+            }
+            Ok(())
+        }
     }
 }
 
@@ -935,15 +1100,24 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Cancelled, "c", Some("C"));
         write_plan_dir(root, plans::Phase::Completed, "b", Some("B"));
+        write_plan_dir(root, plans::Phase::Merging, "m", Some("M"));
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
         write_plan_dir(root, plans::Phase::Scoping, "s", Some("S"));
-        let entries = sorted_entries(root, &HashMap::new(), &empty_activity(), None);
+        let entries = sorted_entries(
+            root,
+            &HashMap::new(),
+            &empty_activity(),
+            None,
+            &HashMap::new(),
+            "main",
+        );
         let phases: Vec<plans::Phase> = entries.iter().map(|entry| entry.phase).collect();
         assert_eq!(
             phases,
             vec![
                 plans::Phase::Scoping,
                 plans::Phase::Executing,
+                plans::Phase::Merging,
                 plans::Phase::Completed,
                 plans::Phase::Cancelled,
             ]
@@ -960,7 +1134,14 @@ mod tests {
         write_plan_dir(root, plans::Phase::Scoping, "new", Some("New"));
         let mut activity = empty_activity();
         activity.insert("old".to_string(), Instant::now());
-        let entries = sorted_entries(root, &HashMap::new(), &activity, None);
+        let entries = sorted_entries(
+            root,
+            &HashMap::new(),
+            &activity,
+            None,
+            &HashMap::new(),
+            "main",
+        );
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "old");
         assert_eq!(entries[1].name, "new");
@@ -973,7 +1154,14 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Scoping, "first", Some("First"));
         write_plan_dir(root, plans::Phase::Scoping, "second", Some("Second"));
-        let entries = sorted_entries(root, &HashMap::new(), &empty_activity(), None);
+        let entries = sorted_entries(
+            root,
+            &HashMap::new(),
+            &empty_activity(),
+            None,
+            &HashMap::new(),
+            "main",
+        );
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "second");
         assert_eq!(entries[1].name, "first");
@@ -985,7 +1173,14 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Scoping, "bare", None);
-        let entries = sorted_entries(root, &HashMap::new(), &empty_activity(), None);
+        let entries = sorted_entries(
+            root,
+            &HashMap::new(),
+            &empty_activity(),
+            None,
+            &HashMap::new(),
+            "main",
+        );
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "Untitled");
         assert_eq!(entries[0].sessions.len(), 1);
@@ -997,7 +1192,14 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
-        let entries = sorted_entries(root, &HashMap::new(), &empty_activity(), None);
+        let entries = sorted_entries(
+            root,
+            &HashMap::new(),
+            &empty_activity(),
+            None,
+            &HashMap::new(),
+            "main",
+        );
         assert_eq!(
             most_recent_key(&entries),
             Some(SessionKey {
@@ -1006,6 +1208,41 @@ mod tests {
             })
         );
         assert!(most_recent_key(&[]).is_none());
+    }
+
+    #[test]
+    fn most_recent_prefers_merging_session() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        write_plan_dir(root, plans::Phase::Merging, "m", Some("M"));
+        let entries = sorted_entries(
+            root,
+            &HashMap::new(),
+            &empty_activity(),
+            None,
+            &HashMap::new(),
+            "main",
+        );
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].sessions.len(), 3);
+        assert_eq!(
+            most_recent_key(&entries),
+            Some(SessionKey {
+                plan: "m".to_string(),
+                role: SessionRole::Merging,
+            })
+        );
+    }
+
+    #[test]
+    fn merge_gate_refuses_dirty_and_misplaced_steps() {
+        assert!(gate_merge(false, true, MergeStep::Finish).is_ok());
+        assert!(gate_merge(false, false, MergeStep::Rebase).is_ok());
+        assert!(gate_merge(true, true, MergeStep::Finish).is_err());
+        assert!(gate_merge(true, false, MergeStep::Rebase).is_err());
+        assert!(gate_merge(false, false, MergeStep::Finish).is_err());
+        assert!(gate_merge(false, true, MergeStep::Rebase).is_err());
     }
 
     #[test]
@@ -1025,7 +1262,14 @@ mod tests {
         live.working = true;
         live.approval = true;
         let sessions = HashMap::from([(key, live)]);
-        let entries = sorted_entries(root, &sessions, &empty_activity(), None);
+        let entries = sorted_entries(
+            root,
+            &sessions,
+            &empty_activity(),
+            None,
+            &HashMap::new(),
+            "main",
+        );
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 2);
         let executing = entries[0]
@@ -1051,7 +1295,14 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Cancelled, "c", Some("C"));
-        let entries = sorted_entries(root, &HashMap::new(), &empty_activity(), None);
+        let entries = sorted_entries(
+            root,
+            &HashMap::new(),
+            &empty_activity(),
+            None,
+            &HashMap::new(),
+            "main",
+        );
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 1);
         assert_eq!(entries[0].sessions[0].role, SessionRole::Scoping);
@@ -1071,7 +1322,14 @@ mod tests {
             .path(root)
             .exists()
         );
-        let entries = sorted_entries(root, &HashMap::new(), &empty_activity(), Some(name));
+        let entries = sorted_entries(
+            root,
+            &HashMap::new(),
+            &empty_activity(),
+            Some(name),
+            &HashMap::new(),
+            "main",
+        );
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, name);
         assert_eq!(entries[0].title, "Untitled");
@@ -1362,6 +1620,8 @@ mod tests {
             &state.sessions,
             &state.activity,
             state.pending_scoping.as_deref(),
+            &HashMap::new(),
+            "main",
         );
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, target.plan);

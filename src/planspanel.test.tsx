@@ -3,12 +3,15 @@ import { render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { PlansPanel } from "./components/PlansPanel";
-import { testEntryWith, testStatus } from "./fixtures";
+import { testEntryWith, testStatus, testWorktree } from "./fixtures";
 import type { PlanEntry } from "./types";
 
 function panelProps(
 	plans: PlanEntry[],
-	selected: { plan: string; role: "scoping" | "executing" } | null = null,
+	selected: {
+		plan: string;
+		role: "scoping" | "executing" | "merging";
+	} | null = null,
 ) {
 	return {
 		plans,
@@ -19,6 +22,7 @@ function panelProps(
 		onAbandon: vi.fn(),
 		onCancel: vi.fn(),
 		onDone: vi.fn(),
+		onBeginMerge: vi.fn(),
 	};
 }
 
@@ -33,10 +37,25 @@ function scopingPlan() {
 }
 
 function executingPlan() {
-	return testEntryWith("2026-09-25.10-54-59.slug", "executing", "Shiny", true, [
-		testStatus("scoping"),
-		testStatus("executing"),
-	]);
+	return testEntryWith(
+		"2026-09-25.10-54-59.slug",
+		"executing",
+		"Shiny",
+		true,
+		[testStatus("scoping"), testStatus("executing")],
+		testWorktree(),
+	);
+}
+
+function mergingPlan() {
+	return testEntryWith(
+		"2026-09-25.10-54-59.slug",
+		"merging",
+		"Shiny",
+		true,
+		[testStatus("scoping"), testStatus("executing"), testStatus("merging")],
+		testWorktree(),
+	);
 }
 
 describe("plans panel", () => {
@@ -135,11 +154,74 @@ describe("plans panel", () => {
 		if (row === null) throw new Error("row missing");
 		const buttons = within(row as HTMLElement);
 		expect(
-			buttons.getByRole("button", { name: "Cancel 2026-09-25.10-54-59.slug" }),
+			buttons.getByRole("button", {
+				name: "Cancel 2026-09-25.10-54-59.slug and delete branch",
+			}),
 		).toBeInTheDocument();
 		expect(
 			buttons.getByRole("button", {
-				name: "Mark 2026-09-25.10-54-59.slug done",
+				name: "Merge 2026-09-25.10-54-59.slug to main",
+			}),
+		).toBeInTheDocument();
+	});
+
+	test("diverged execution rows offer rebase instead of done", () => {
+		const diverged = testEntryWith(
+			"2026-09-25.10-54-59.slug",
+			"executing",
+			"Shiny",
+			true,
+			[testStatus("scoping"), testStatus("executing")],
+			testWorktree({ ffable: false }),
+		);
+		render(<PlansPanel {...panelProps([diverged])} />);
+		expect(
+			screen.getByRole("button", {
+				name: "Rebase 2026-09-25.10-54-59.slug onto latest main",
+			}),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", {
+				name: "Merge 2026-09-25.10-54-59.slug to main",
+			}),
+		).toBeNull();
+	});
+
+	test("dirty execution rows disable merging with a tooltip", () => {
+		const dirty = testEntryWith(
+			"2026-09-25.10-54-59.slug",
+			"executing",
+			"Shiny",
+			true,
+			[testStatus("scoping"), testStatus("executing")],
+			testWorktree({ dirty: true }),
+		);
+		render(<PlansPanel {...panelProps([dirty])} />);
+		const merge = screen.getByRole("button", {
+			name: "Merge 2026-09-25.10-54-59.slug to main",
+		});
+		expect(merge).toBeDisabled();
+		expect(merge.getAttribute("title")).toBe(
+			"Commit or discard worktree changes first",
+		);
+	});
+
+	test("merging plans list three sessions with cancel and finish", () => {
+		render(<PlansPanel {...panelProps([mergingPlan()])} />);
+		expect(screen.getByText("Scoping")).toBeInTheDocument();
+		expect(screen.getByText("Execution")).toBeInTheDocument();
+		expect(screen.getByText("Merging")).toBeInTheDocument();
+		const row = screen
+			.getByRole("button", { name: "Shiny Merging" })
+			.closest(".session");
+		if (row === null) throw new Error("row missing");
+		const buttons = within(row as HTMLElement);
+		expect(
+			buttons.getByRole("button", { name: "Cancel merge and delete branch" }),
+		).toBeInTheDocument();
+		expect(
+			buttons.getByRole("button", {
+				name: "Finish 2026-09-25.10-54-59.slug merge",
 			}),
 		).toBeInTheDocument();
 	});
@@ -221,7 +303,7 @@ describe("plans panel", () => {
 		render(<PlansPanel {...props} />);
 		await user.click(
 			screen.getByRole("button", {
-				name: "Mark 2026-09-25.10-54-59.slug done",
+				name: "Merge 2026-09-25.10-54-59.slug to main",
 			}),
 		);
 		expect(props.onDone).toHaveBeenCalledWith({
@@ -229,6 +311,30 @@ describe("plans panel", () => {
 			role: "executing",
 		});
 		expect(props.onAbandon).not.toHaveBeenCalled();
+	});
+
+	test("rebase actions call back with the executing session", async () => {
+		const diverged = testEntryWith(
+			"2026-09-25.10-54-59.slug",
+			"executing",
+			"Shiny",
+			true,
+			[testStatus("scoping"), testStatus("executing")],
+			testWorktree({ ffable: false }),
+		);
+		const props = panelProps([diverged]);
+		const user = userEvent.setup();
+		render(<PlansPanel {...props} />);
+		await user.click(
+			screen.getByRole("button", {
+				name: "Rebase 2026-09-25.10-54-59.slug onto latest main",
+			}),
+		);
+		expect(props.onBeginMerge).toHaveBeenCalledWith({
+			plan: "2026-09-25.10-54-59.slug",
+			role: "executing",
+		});
+		expect(props.onDone).not.toHaveBeenCalled();
 	});
 
 	test("selecting a row marks it selected", async () => {

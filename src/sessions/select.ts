@@ -40,6 +40,8 @@ export function agentLabelForPhase(
 			return "PLANNER";
 		case "executing":
 			return "EXECUTOR";
+		case "merging":
+			return "MERGER";
 		default:
 			return "AGENT";
 	}

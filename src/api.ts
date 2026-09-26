@@ -38,6 +38,10 @@ export function markCompleted(session: SessionKey): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("mark_completed", { session });
 }
 
+export function beginMerge(session: SessionKey): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("begin_merge", { session });
+}
+
 export function abandonPlan(session: SessionKey): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("abandon_plan", { session });
 }

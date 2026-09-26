@@ -10,6 +10,7 @@ export function PlansPanel({
 	onAbandon,
 	onCancel,
 	onDone,
+	onBeginMerge,
 }: {
 	plans: PlanEntry[];
 	selected: SessionKey | null;
@@ -19,6 +20,7 @@ export function PlansPanel({
 	onAbandon: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
 	onDone: (session: SessionKey) => void;
+	onBeginMerge: (session: SessionKey) => void;
 }) {
 	return (
 		<div className="plans">
@@ -38,6 +40,7 @@ export function PlansPanel({
 							planTitle={plan.title}
 							phase={plan.phase}
 							hasPlanMd={plan.has_plan_md}
+							worktree={plan.worktree}
 							status={status}
 							selected={selected}
 							onSelect={onSelect}
@@ -45,6 +48,7 @@ export function PlansPanel({
 							onAbandon={onAbandon}
 							onCancel={onCancel}
 							onDone={onDone}
+							onBeginMerge={onBeginMerge}
 						/>
 					))}
 				</div>

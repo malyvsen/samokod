@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	abandonPlan,
 	answerPermission,
+	beginMerge,
 	cancelExecution,
 	cancelTurn,
 	createPlan,
@@ -348,6 +349,18 @@ export function App() {
 		await runPlansAction(key, (session) => markCompleted(session));
 	}
 
+	async function handleBeginMerge(key: SessionKey) {
+		updateChat(key, (chat) => ({ ...chat, working: true }));
+		try {
+			const update = await beginMerge(key);
+			setChats((current) => carryChats(current, key, update, true));
+			applyPlans(update);
+		} catch (error) {
+			updateChat(key, (chat) => ({ ...chat, working: false }));
+			appendError(key, error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	async function handleAbandon(key: SessionKey) {
 		const wasEmpty = !hasUserMessage(chats, key);
 		updateChat(key, (chat) => ({ ...chat, working: true }));
@@ -435,6 +448,7 @@ export function App() {
 							onAbandon={(key) => void handleAbandon(key)}
 							onCancel={(key) => void handleCancel(key)}
 							onDone={(key) => void handleDone(key)}
+							onBeginMerge={(key) => void handleBeginMerge(key)}
 						/>
 						<div className="chatcol">
 							<div className="transcript" ref={transcriptRef}>

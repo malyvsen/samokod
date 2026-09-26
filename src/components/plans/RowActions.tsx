@@ -1,12 +1,15 @@
-import type { PlanPhase, SessionRole } from "../../types";
+import type { PlanPhase, SessionRole, WorktreeStatus } from "../../types";
 
-export type RowActionKind = "scoping" | "executing" | "history";
+export type RowActionKind = "scoping" | "executing" | "merging" | "history";
 
 export function actionKind(phase: PlanPhase, role: SessionRole): RowActionKind {
 	if (phase === "scoping" && role === "scoping") return "scoping";
 	if (phase === "executing" && role === "executing") return "executing";
+	if (phase === "merging" && role === "merging") return "merging";
 	return "history";
 }
+
+const DIRTY_TITLE = "Commit or discard worktree changes first";
 
 export type RowActionsProps =
 	| {
@@ -21,6 +24,16 @@ export type RowActionsProps =
 			kind: "executing";
 			planName: string;
 			running: boolean;
+			worktree: WorktreeStatus | null;
+			onCancel: () => void;
+			onDone: () => void;
+			onBeginMerge: () => void;
+	  }
+	| {
+			kind: "merging";
+			planName: string;
+			running: boolean;
+			dirty: boolean;
 			onCancel: () => void;
 			onDone: () => void;
 	  }
@@ -49,12 +62,51 @@ export function RowActions(props: RowActionsProps) {
 					</ActionButton>
 				</>
 			);
-		case "executing":
+		case "executing": {
+			const dirty = props.worktree?.dirty ?? false;
+			const needsMerge = props.worktree ? !props.worktree.ffable : false;
+			const disabled = props.running || dirty;
 			return (
 				<>
 					<ActionButton
 						className="abandon"
-						label={`Cancel ${props.planName}`}
+						label={`Cancel ${props.planName} and delete branch`}
+						disabled={props.running}
+						onClick={props.onCancel}
+					>
+						✕
+					</ActionButton>
+					{needsMerge ? (
+						<ActionButton
+							className="promote"
+							label={`Rebase ${props.planName} onto latest main`}
+							disabled={disabled}
+							title={dirty ? DIRTY_TITLE : undefined}
+							onClick={props.onBeginMerge}
+						>
+							&gt;
+						</ActionButton>
+					) : (
+						<ActionButton
+							className="promote"
+							label={`Merge ${props.planName} to main`}
+							disabled={disabled}
+							title={dirty ? DIRTY_TITLE : undefined}
+							onClick={props.onDone}
+						>
+							✓
+						</ActionButton>
+					)}
+				</>
+			);
+		}
+		case "merging": {
+			const disabled = props.running || props.dirty;
+			return (
+				<>
+					<ActionButton
+						className="abandon"
+						label="Cancel merge and delete branch"
 						disabled={props.running}
 						onClick={props.onCancel}
 					>
@@ -62,14 +114,16 @@ export function RowActions(props: RowActionsProps) {
 					</ActionButton>
 					<ActionButton
 						className="promote"
-						label={`Mark ${props.planName} done`}
-						disabled={props.running}
+						label={`Finish ${props.planName} merge`}
+						disabled={disabled}
+						title={props.dirty ? DIRTY_TITLE : undefined}
 						onClick={props.onDone}
 					>
 						✓
 					</ActionButton>
 				</>
 			);
+		}
 		case "history":
 			return null;
 		default: {
@@ -83,12 +137,14 @@ function ActionButton({
 	className,
 	label,
 	disabled,
+	title,
 	onClick,
 	children,
 }: {
 	className: string;
 	label: string;
 	disabled: boolean;
+	title?: string | undefined;
 	onClick: () => void;
 	children: string;
 }) {
@@ -98,6 +154,7 @@ function ActionButton({
 			type="button"
 			aria-label={label}
 			disabled={disabled}
+			title={title}
 			onClick={(event) => {
 				event.stopPropagation();
 				onClick();

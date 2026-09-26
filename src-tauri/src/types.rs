@@ -62,12 +62,14 @@ pub struct PermissionView {
 }
 
 /// Role of one session inside a plan. A plan owns one scoping session,
-/// plus one executing session once approved.
+/// plus one executing session once approved, plus one merging session on
+/// the conflict path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionRole {
     Scoping,
     Executing,
+    Merging,
 }
 
 /// Key of one live session: plan directory name plus role.
@@ -98,6 +100,18 @@ pub struct PlanEntry {
     pub title: String,
     pub has_plan_md: bool,
     pub sessions: Vec<SessionStatusView>,
+    /// Live worktree state for executing and merging plans: branch,
+    /// dirtiness, and fast-forwardability. Recomputed on every list
+    /// update so rows can choose the correct merge button.
+    pub worktree: Option<WorktreeStatusView>,
+}
+
+/// Live worktree state for one executing or merging plan.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorktreeStatusView {
+    pub branch: String,
+    pub dirty: bool,
+    pub ffable: bool,
 }
 
 /// Stored model/effort defaults for the instant disabled picker paint.

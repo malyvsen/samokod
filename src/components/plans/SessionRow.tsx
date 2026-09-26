@@ -1,4 +1,9 @@
-import type { PlanPhase, SessionKey, SessionStatusView } from "../../types";
+import type {
+	PlanPhase,
+	SessionKey,
+	SessionStatusView,
+	WorktreeStatus,
+} from "../../types";
 import { sameSession } from "../../types";
 import { actionKind, RowActions } from "./RowActions";
 import { dotClass, sessionLabel } from "./sessionDot";
@@ -8,6 +13,7 @@ export function SessionRow({
 	planTitle,
 	phase,
 	hasPlanMd,
+	worktree,
 	status,
 	selected,
 	onSelect,
@@ -15,11 +21,13 @@ export function SessionRow({
 	onAbandon,
 	onCancel,
 	onDone,
+	onBeginMerge,
 }: {
 	planName: string;
 	planTitle: string;
 	phase: PlanPhase;
 	hasPlanMd: boolean;
+	worktree: WorktreeStatus | null;
 	status: SessionStatusView;
 	selected: SessionKey | null;
 	onSelect: (session: SessionKey) => void;
@@ -27,6 +35,7 @@ export function SessionRow({
 	onAbandon: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
 	onDone: (session: SessionKey) => void;
+	onBeginMerge: (session: SessionKey) => void;
 }) {
 	const key: SessionKey = { plan: planName, role: status.role };
 	const isSelected = sameSession(selected, key);
@@ -57,6 +66,17 @@ export function SessionRow({
 					kind={kind}
 					planName={planName}
 					running={status.working}
+					worktree={worktree}
+					onCancel={() => onCancel(key)}
+					onDone={() => onDone(key)}
+					onBeginMerge={() => onBeginMerge(key)}
+				/>
+			) : kind === "merging" ? (
+				<RowActions
+					kind={kind}
+					planName={planName}
+					running={status.working}
+					dirty={worktree?.dirty ?? false}
 					onCancel={() => onCancel(key)}
 					onDone={() => onDone(key)}
 				/>

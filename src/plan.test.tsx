@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
 	createPlan: vi.fn(),
 	executePlan: vi.fn(),
 	markCompleted: vi.fn(),
+	beginMerge: vi.fn(),
 	abandonPlan: vi.fn(),
 	cancelExecution: vi.fn(),
 	selectPlan: vi.fn(),
@@ -126,7 +127,7 @@ describe("plan", () => {
 		const row = execution.closest(".session");
 		if (row === null) throw new Error("execution row missing");
 		await within(row as HTMLElement)
-			.findByRole("button", { name: "Mark 2026-09-25.10-54-59.slug done" })
+			.findByRole("button", { name: "Merge 2026-09-25.10-54-59.slug to main" })
 			.then((button) => button.click());
 		expect(api.markCompleted).toHaveBeenCalledTimes(1);
 		expect(screen.getByText("executor chat")).toBeInTheDocument();

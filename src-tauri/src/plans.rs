@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 pub enum Phase {
     Scoping,
     Executing,
+    Merging,
     Completed,
     Cancelled,
 }
@@ -20,6 +21,7 @@ impl Phase {
         match self {
             Phase::Scoping => "scoping",
             Phase::Executing => "executing",
+            Phase::Merging => "merging",
             Phase::Completed => "completed",
             Phase::Cancelled => "cancelled",
         }
@@ -27,7 +29,7 @@ impl Phase {
 
     /// Phases with a live chat. Only these auto-abandon on chat switch.
     pub fn is_active(self) -> bool {
-        matches!(self, Phase::Scoping | Phase::Executing)
+        matches!(self, Phase::Scoping | Phase::Executing | Phase::Merging)
     }
 }
 
@@ -78,6 +80,7 @@ pub fn ensure_structure(repo_root: &Path) -> Result<(), PlanError> {
     for phase in [
         Phase::Scoping,
         Phase::Executing,
+        Phase::Merging,
         Phase::Completed,
         Phase::Cancelled,
     ] {
@@ -128,6 +131,29 @@ pub fn complete(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> 
     Ok(next)
 }
 
+/// Move a diverged executing plan to merging without renaming. The fast
+/// path never touches `merging/`: it completes straight from executing.
+pub fn begin_merge(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
+    require_phase(plan, Phase::Executing)?;
+    let next = PlanRef {
+        name: plan.name.clone(),
+        phase: Phase::Merging,
+    };
+    rename(repo_root, plan, &next)?;
+    Ok(next)
+}
+
+/// Finish a rebased merging plan. Name travels unchanged.
+pub fn finish_merge(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
+    require_phase(plan, Phase::Merging)?;
+    let next = PlanRef {
+        name: plan.name.clone(),
+        phase: Phase::Completed,
+    };
+    rename(repo_root, plan, &next)?;
+    Ok(next)
+}
+
 /// Drop an active plan. Scoping plans gain a slug when they have a heading,
 /// everything else keeps its name.
 pub fn abandon(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
@@ -158,20 +184,28 @@ fn slugged_name(repo_root: &Path, plan: &PlanRef) -> Option<String> {
     Some(format!("{}.{}", plan.name, slugify(&title)))
 }
 
-/// Sort rank for the plans list: scoping, executing, completed, cancelled.
+/// Sort rank for the plans list: scoping, executing, merging,
+/// completed, cancelled.
 pub fn phase_rank(phase: Phase) -> u8 {
     match phase {
         Phase::Scoping => 0,
         Phase::Executing => 1,
-        Phase::Completed => 2,
-        Phase::Cancelled => 3,
+        Phase::Merging => 2,
+        Phase::Completed => 3,
+        Phase::Cancelled => 4,
     }
 }
 
 /// Marker left inside a plan directory once its scoping chat was approved.
-/// It travels with the directory through executing, completed, and
-/// cancelled, so a rescan still knows the plan owns an execution session.
+/// It travels with the directory through executing, merging, completed,
+/// and cancelled, so a rescan still knows the plan owns an execution
+/// session.
 const EXECUTED_MARKER: &str = ".executed";
+
+/// Marker left once a diverged plan entered merging. It travels with the
+/// directory, so completed and cancelled plans still know they own a
+/// merging session as history.
+const MERGING_MARKER: &str = ".merging";
 
 /// Record that a plan was approved for execution. Best-effort: a missing
 /// marker only collapses a cancelled plan to one row after a restart.
@@ -184,20 +218,42 @@ pub fn mark_executed(repo_root: &Path, plan: &PlanRef) {
     }
 }
 
+/// Record that a plan entered merging. Best-effort like `mark_executed`.
+pub fn mark_merging(repo_root: &Path, plan: &PlanRef) {
+    if let Err(error) = std::fs::write(plan.path(repo_root).join(MERGING_MARKER), "") {
+        log::warn!(
+            "failed to mark {} as merging: {error}",
+            plan.path(repo_root).display()
+        );
+    }
+}
+
 /// Session roles one plan owns: scoping always runs, executing joins
-/// once approved and stays as history. Pure except the cancelled marker
-/// read.
+/// once approved, merging joins on the conflict path. Finished plans keep
+/// their rows as history: completed and cancelled plans show the merging
+/// row only with the merging marker, the executing row with either
+/// marker. Pure except the marker reads.
 pub fn roles_for(repo_root: &Path, plan: &PlanRef) -> Vec<crate::types::SessionRole> {
     use crate::types::SessionRole;
     match plan.phase {
         Phase::Scoping => vec![SessionRole::Scoping],
-        Phase::Executing | Phase::Completed => vec![SessionRole::Scoping, SessionRole::Executing],
-        Phase::Cancelled => {
-            if plan.path(repo_root).join(EXECUTED_MARKER).is_file() {
-                vec![SessionRole::Scoping, SessionRole::Executing]
-            } else {
-                vec![SessionRole::Scoping]
+        Phase::Executing => vec![SessionRole::Scoping, SessionRole::Executing],
+        Phase::Merging => vec![
+            SessionRole::Scoping,
+            SessionRole::Executing,
+            SessionRole::Merging,
+        ],
+        Phase::Completed | Phase::Cancelled => {
+            let merging = plan.path(repo_root).join(MERGING_MARKER).is_file();
+            let executed = merging || plan.path(repo_root).join(EXECUTED_MARKER).is_file();
+            let mut roles = vec![SessionRole::Scoping];
+            if executed {
+                roles.push(SessionRole::Executing);
             }
+            if merging {
+                roles.push(SessionRole::Merging);
+            }
+            roles
         }
     }
 }
@@ -209,13 +265,14 @@ pub fn plan_title(repo_root: &Path, plan: &PlanRef) -> String {
     extract_title(&text).unwrap_or_else(|| "Untitled".to_string())
 }
 
-/// Every plan directory across all four phases. Missing phase dirs yield no
-/// rows; callers run `ensure_structure` first on open.
+/// Every plan directory across all five phases. Missing phase dirs yield
+/// no rows; callers run `ensure_structure` first on open.
 pub fn scan_plans(repo_root: &Path) -> Vec<PlanRef> {
     let mut plans = Vec::new();
     for phase in [
         Phase::Scoping,
         Phase::Executing,
+        Phase::Merging,
         Phase::Completed,
         Phase::Cancelled,
     ] {
@@ -343,19 +400,21 @@ mod tests {
         let dirs: HashSet<&str> = [
             Phase::Scoping,
             Phase::Executing,
+            Phase::Merging,
             Phase::Completed,
             Phase::Cancelled,
         ]
         .iter()
         .map(|phase| phase.dir_name())
         .collect();
-        assert_eq!(dirs.len(), 4);
+        assert_eq!(dirs.len(), 5);
     }
 
     #[test]
-    fn only_scoping_and_executing_are_active() {
+    fn only_active_phases_run_chats() {
         assert!(Phase::Scoping.is_active());
         assert!(Phase::Executing.is_active());
+        assert!(Phase::Merging.is_active());
         assert!(!Phase::Completed.is_active());
         assert!(!Phase::Cancelled.is_active());
     }
@@ -467,6 +526,11 @@ mod tests {
         use crate::types::SessionRole;
         let scoping_only = vec![SessionRole::Scoping];
         let both = vec![SessionRole::Scoping, SessionRole::Executing];
+        let all = vec![
+            SessionRole::Scoping,
+            SessionRole::Executing,
+            SessionRole::Merging,
+        ];
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
@@ -482,11 +546,50 @@ mod tests {
         std::fs::write(second.plan_md(root), "# Second\n").expect("write");
         let running = execute(root, &second).expect("execute");
         mark_executed(root, &running);
-        let cancelled = abandon(root, &running).expect("abandon");
-        assert_eq!(roles_for(root, &cancelled), both);
-        let fresh = materialize_scoping(root, "2026-09-26.08-41-05").expect("fresh");
-        let dropped = abandon(root, &fresh).expect("abandon");
-        assert_eq!(roles_for(root, &dropped), scoping_only);
+        let merging = begin_merge(root, &running).expect("begin");
+        mark_merging(root, &merging);
+        assert_eq!(roles_for(root, &merging), all);
+        let rebased = finish_merge(root, &merging).expect("finish");
+        assert_eq!(roles_for(root, &rebased), all);
+        let third = materialize_scoping(root, "2026-09-26.08-41-05").expect("third");
+        std::fs::write(third.plan_md(root), "# Third\n").expect("write");
+        let diverged = execute(root, &third).expect("execute");
+        mark_executed(root, &diverged);
+        let dropped = abandon(root, &diverged).expect("abandon");
+        assert_eq!(roles_for(root, &dropped), both);
+        let fresh = materialize_scoping(root, "2026-09-26.08-41-06").expect("fresh");
+        let bare = abandon(root, &fresh).expect("abandon");
+        assert_eq!(roles_for(root, &bare), scoping_only);
+    }
+
+    #[test]
+    fn merge_moves_through_merging_without_renaming() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
+        std::fs::write(scoping.plan_md(root), "# Shiny\n").expect("write");
+        let executing = execute(root, &scoping).expect("execute");
+        let merging = begin_merge(root, &executing).expect("begin");
+        assert_eq!(merging.phase, Phase::Merging);
+        assert_eq!(merging.name, executing.name);
+        assert!(!executing.path(root).exists());
+        assert!(merging.path(root).is_dir());
+        assert!(matches!(
+            begin_merge(root, &merging),
+            Err(PlanError::WrongPhase { .. })
+        ));
+        let done = finish_merge(root, &merging).expect("finish");
+        assert_eq!(done.phase, Phase::Completed);
+        assert_eq!(done.name, merging.name);
+        assert!(matches!(
+            finish_merge(root, &done),
+            Err(PlanError::WrongPhase { .. })
+        ));
+        assert!(matches!(
+            complete(root, &merging),
+            Err(PlanError::WrongPhase { .. })
+        ));
     }
 
     #[test]
@@ -518,6 +621,7 @@ mod tests {
         for phase in [
             Phase::Scoping,
             Phase::Executing,
+            Phase::Merging,
             Phase::Completed,
             Phase::Cancelled,
         ] {

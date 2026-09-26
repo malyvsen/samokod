@@ -10,7 +10,7 @@ use tauri::AppHandle;
 use crate::plans;
 use crate::types::{
     AppEvent, OpenRepoResult, PlanEntry, PlansUpdate, RepoDefaults, SessionKey, SessionRole,
-    SessionStatusView,
+    SessionStatusView, WorktreeStatusView,
 };
 
 use super::AgentManager;
@@ -28,6 +28,8 @@ impl AgentManager {
             &state.sessions,
             &state.activity,
             state.pending_scoping.as_deref(),
+            &state.worktrees,
+            &state.branch,
         );
         let selected = most_recent_key(&plans).unwrap_or_else(|| SessionKey {
             plan: plans
@@ -56,6 +58,8 @@ impl AgentManager {
             &state.sessions,
             &state.activity,
             state.pending_scoping.as_deref(),
+            &state.worktrees,
+            &state.branch,
         );
         let selected = state.current.clone().unwrap_or_else(|| {
             most_recent_key(&plans).unwrap_or_else(|| SessionKey {
@@ -125,6 +129,8 @@ pub(crate) fn sorted_entries(
     sessions: &HashMap<SessionKey, LiveSession>,
     activity: &HashMap<String, Instant>,
     pending: Option<&str>,
+    worktrees: &HashMap<String, crate::worktrees::WorktreeRecord>,
+    main_branch: &str,
 ) -> Vec<PlanEntry> {
     let mut plans = plans::scan_plans(repo_root);
     if let Some(name) = pending
@@ -161,6 +167,7 @@ pub(crate) fn sorted_entries(
             title: plans::plan_title(repo_root, plan),
             has_plan_md: plan.has_plan_md(repo_root),
             sessions: session_statuses(repo_root, plan, sessions),
+            worktree: worktree_status(repo_root, worktrees, main_branch, plan),
         })
         .collect()
 }
@@ -201,16 +208,78 @@ fn defaults_for(repo_root: &Path) -> RepoDefaults {
     }
 }
 
-/// Most-recent session across the sorted plans: the execution session when
-/// the plan owns one, else scoping.
+/// Live worktree state for one executing or merging plan. Missing
+/// checkouts fail safe: dirty blocks either merge button, and the backend
+/// refuses the transition the same way. Git errors fail safe the same
+/// way with a warn-log, per the preserve-evidence rule.
+fn worktree_status(
+    repo_root: &Path,
+    worktrees: &HashMap<String, crate::worktrees::WorktreeRecord>,
+    main_branch: &str,
+    plan: &plans::PlanRef,
+) -> Option<WorktreeStatusView> {
+    if !matches!(plan.phase, plans::Phase::Executing | plans::Phase::Merging) {
+        return None;
+    }
+    let (path, branch, main) = match worktrees.get(&plan.name) {
+        Some(record) => (
+            record.path.clone(),
+            record.branch.clone(),
+            record.main_branch.clone(),
+        ),
+        None => (
+            crate::worktrees::worktree_path(repo_root, &plan.name),
+            crate::worktrees::branch_name(&plan.name),
+            main_branch.to_string(),
+        ),
+    };
+    if !path.is_dir() {
+        return Some(WorktreeStatusView {
+            branch,
+            dirty: true,
+            ffable: false,
+        });
+    }
+    let dirty = match crate::worktrees::is_dirty(&path) {
+        Ok(dirty) => dirty,
+        Err(error) => {
+            log::warn!("failed to check worktree dirtiness: {error}");
+            true
+        }
+    };
+    let ffable = match crate::worktrees::is_ffable(repo_root, &main, &branch) {
+        Ok(ffable) => ffable,
+        Err(error) => {
+            log::warn!("failed to check fast-forwardability: {error}");
+            false
+        }
+    };
+    Some(WorktreeStatusView {
+        branch,
+        dirty,
+        ffable,
+    })
+}
+
+/// Most-recent session across the sorted plans: the merging session when
+/// the plan owns one, else executing, else scoping.
 pub(crate) fn most_recent_key(plans: &[PlanEntry]) -> Option<SessionKey> {
     plans.first().map(|entry| {
-        let role = entry
+        let role = if entry
             .sessions
             .iter()
-            .find(|status| status.role == SessionRole::Executing)
-            .map(|_| SessionRole::Executing)
-            .unwrap_or(SessionRole::Scoping);
+            .any(|status| status.role == SessionRole::Merging)
+        {
+            SessionRole::Merging
+        } else if entry
+            .sessions
+            .iter()
+            .any(|status| status.role == SessionRole::Executing)
+        {
+            SessionRole::Executing
+        } else {
+            SessionRole::Scoping
+        };
         SessionKey {
             plan: entry.name.clone(),
             role,
@@ -229,6 +298,8 @@ pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
                 &guard.sessions,
                 &guard.activity,
                 guard.pending_scoping.as_deref(),
+                &guard.worktrees,
+                &guard.branch,
             );
             let selected = guard.current.clone().or_else(|| most_recent_key(&plans));
             (plans, selected)

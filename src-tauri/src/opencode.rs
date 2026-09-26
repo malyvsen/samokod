@@ -8,12 +8,15 @@ use crate::plans::{Phase, PlanRef};
 
 pub const PLANNER_AGENT: &str = "samokod-planner";
 pub const EXECUTOR_AGENT: &str = "samokod-executor";
+pub const MERGER_AGENT: &str = "samokod-merger";
 
 /// Agent id for a phase. Pure.
 pub fn agent_for(phase: Phase) -> &'static str {
     match phase {
         Phase::Scoping => PLANNER_AGENT,
-        Phase::Executing | Phase::Completed | Phase::Cancelled => EXECUTOR_AGENT,
+        Phase::Executing => EXECUTOR_AGENT,
+        Phase::Merging => MERGER_AGENT,
+        Phase::Completed | Phase::Cancelled => EXECUTOR_AGENT,
     }
 }
 
@@ -22,6 +25,7 @@ pub const CONFIG_CONTENT_ENV: &str = "OPENCODE_CONFIG_CONTENT";
 
 const PLANNER_PROMPT: &str = include_str!("prompts/planner.md");
 const EXECUTOR_PROMPT: &str = include_str!("prompts/executor.md");
+const MERGER_PROMPT: &str = include_str!("prompts/merger.md");
 
 /// Extra spawn env pinning both agents. Pure: JSON only, no process access.
 pub fn agent_env(plan: &PlanRef) -> HashMap<String, String> {
@@ -43,6 +47,11 @@ pub fn agent_config(plan: &PlanRef) -> String {
                 "mode": "primary",
                 "description": "Executes one approved plan.",
                 "permission": executor_permissions(),
+            },
+            MERGER_AGENT: {
+                "mode": "primary",
+                "description": "Rebases one plan branch onto the latest main.",
+                "permission": merger_permissions(),
             },
         },
     })
@@ -89,6 +98,21 @@ fn executor_permissions() -> Value {
 const EXECUTOR_EDIT_RULES: [(&str, &str); 3] =
     [("*", "allow"), (".samokod", "ask"), (".samokod/**", "ask")];
 
+/// Merger rebases one plan branch, so every worktree file is editable:
+/// a rebased commit must cover files the main branch added on top. No
+/// permission questions and no subagent research: merging is a focused
+/// rebasing task.
+fn merger_permissions() -> Value {
+    serde_json::json!({
+        "read": "allow",
+        "external_directory": "allow",
+        "edit": "allow",
+        "bash": "allow",
+        "question": "deny",
+        "task": "deny",
+    })
+}
+
 /// Ordered permission object from `(pattern, effect)` pairs. Insertion
 /// order is the contract: OpenCode grants the last matching rule.
 fn rules_object(rules: &[(&str, &str)]) -> Value {
@@ -115,6 +139,21 @@ pub fn scoping_draft(plan_dir: &str) -> String {
 /// hidden on approval, prefixed to the first prompt otherwise. Pure.
 pub fn executor_first_message(plan_dir: &str) -> String {
     EXECUTOR_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
+}
+
+/// Merger role and instruction. Sent hidden when the conflict path starts
+/// the merge agent in the worktree. Pure.
+pub fn merger_first_message(
+    worktree_branch: &str,
+    main_branch: &str,
+    worktree_path: &str,
+    plan_md_abs_path: &str,
+) -> String {
+    MERGER_PROMPT
+        .replace("{{WORKTREE_BRANCH}}", worktree_branch)
+        .replace("{{MAIN_BRANCH}}", main_branch)
+        .replace("{{WORKTREE_PATH}}", worktree_path)
+        .replace("{{PLAN_MD_ABS_PATH}}", plan_md_abs_path)
 }
 
 #[cfg(test)]
@@ -186,9 +225,9 @@ mod tests {
     }
 
     #[test]
-    fn both_agents_are_primary_without_prompt_field() {
+    fn all_agents_are_primary_without_prompt_field() {
         let config = config(&test_plan());
-        for agent in [PLANNER_AGENT, EXECUTOR_AGENT] {
+        for agent in [PLANNER_AGENT, EXECUTOR_AGENT, MERGER_AGENT] {
             let entry = config
                 .pointer(&format!("/agent/{agent}"))
                 .expect("agent present");
@@ -303,6 +342,52 @@ mod tests {
             config["agent"][EXECUTOR_AGENT]["permission"]["question"],
             "deny"
         );
+        assert_eq!(
+            config["agent"][MERGER_AGENT]["permission"]["question"],
+            "deny"
+        );
+    }
+
+    #[test]
+    fn merger_allows_every_worktree_edit_without_subagents() {
+        let config = config(&test_plan());
+        assert_eq!(
+            effect_of(&config, MERGER_AGENT, "edit", "src/App.tsx"),
+            "allow"
+        );
+        assert_eq!(
+            effect_of(&config, MERGER_AGENT, "edit", ".samokod/state.json"),
+            "allow"
+        );
+        assert_eq!(
+            effect_of(&config, MERGER_AGENT, "bash", "git rebase -i main"),
+            "allow"
+        );
+        assert_eq!(config["agent"][MERGER_AGENT]["permission"]["task"], "deny");
+    }
+
+    #[test]
+    fn merging_plans_run_the_merger() {
+        assert_eq!(agent_for(Phase::Merging), MERGER_AGENT);
+        assert_eq!(agent_for(Phase::Executing), EXECUTOR_AGENT);
+        assert_eq!(agent_for(Phase::Scoping), PLANNER_AGENT);
+    }
+
+    #[test]
+    fn merger_message_fills_every_placeholder() {
+        let message = merger_first_message(
+            "samokod/shiny-feature",
+            "main",
+            "/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature",
+            "/repo/.samokod/plans/merging/2026-09-26.14-53-26.shiny-feature/plan.md",
+        );
+        assert!(message.contains("samokod/shiny-feature"));
+        assert!(message.contains("`main`"));
+        assert!(message.contains("/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature"));
+        assert!(!message.contains("{{WORKTREE_BRANCH}}"));
+        assert!(!message.contains("{{MAIN_BRANCH}}"));
+        assert!(!message.contains("{{WORKTREE_PATH}}"));
+        assert!(!message.contains("{{PLAN_MD_ABS_PATH}}"));
     }
 
     #[test]

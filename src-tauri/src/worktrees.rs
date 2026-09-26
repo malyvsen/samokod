@@ -59,8 +59,6 @@ pub fn head_commit(repo_root: &Path) -> Result<String, WorktreeError> {
 
 /// Whether the worktree has uncommitted changes.
 /// A worktree with uncommitted changes never merges.
-// Live until the MERGING phase wires them into merge gating.
-#[allow(dead_code)]
 pub fn is_dirty(path: &Path) -> Result<bool, WorktreeError> {
     let output = run_git(path, &["status", "--porcelain"])?;
     Ok(!output.trim().is_empty())
@@ -68,8 +66,6 @@ pub fn is_dirty(path: &Path) -> Result<bool, WorktreeError> {
 
 /// Whether `main_branch` is an ancestor of `branch`: the fast path.
 /// Exit 0 means ancestor, exit 1 means diverged; other failures are loud.
-// Live until the MERGING phase wires them into merge gating.
-#[allow(dead_code)]
 pub fn is_ffable(repo_root: &Path, main_branch: &str, branch: &str) -> Result<bool, WorktreeError> {
     let output = git_command(repo_root)
         .args(["merge-base", "--is-ancestor", main_branch, branch])
@@ -86,7 +82,9 @@ pub fn is_ffable(repo_root: &Path, main_branch: &str, branch: &str) -> Result<bo
 }
 
 /// Delete the worktree and then its branch. The branch is always deleted,
-/// including on cancel. Only explicit user action passes `force`.
+/// including on cancel. Only explicit user action passes `force`. A
+/// missing worktree path still deletes the branch, but a missing branch
+/// is quiet so cancelling after a partial failure still cleans up.
 pub fn remove(
     repo_root: &Path,
     path: &Path,
@@ -101,9 +99,51 @@ pub fn remove(
         let path_str = path.to_string_lossy().to_string();
         args.push(path_str.as_str());
         run_git(repo_root, &args)?;
+        run_git(repo_root, &["branch", "-D", branch])?;
+    } else {
+        match run_git(repo_root, &["branch", "-D", branch]) {
+            Ok(_) => {}
+            Err(WorktreeError::Git { stderr, .. }) if stderr.contains("not found") => {}
+            Err(error) => return Err(error),
+        }
     }
-    run_git(repo_root, &["branch", "-D", branch])?;
     let _ = run_git(repo_root, &["worktree", "prune"]);
+    Ok(())
+}
+
+/// Fast-forward `main_branch` to `branch`. Refuses a diverged branch
+/// loud. When the main checkout sits on the main branch, merges there so
+/// the working tree follows; otherwise moves the ref atomically with an
+/// old-value guard so a racing finish fails instead of clobbering.
+pub fn fast_forward(
+    repo_root: &Path,
+    main_branch: &str,
+    branch: &str,
+) -> Result<(), WorktreeError> {
+    if !is_ffable(repo_root, main_branch, branch)? {
+        return Err(WorktreeError::NotAncestor {
+            main_branch: main_branch.to_string(),
+            branch: branch.to_string(),
+        });
+    }
+    let current = crate::branch::current_branch(repo_root).unwrap_or_else(|| "HEAD".to_string());
+    if current == main_branch {
+        run_git(repo_root, &["merge", "--ff-only", branch])?;
+    } else {
+        let old = run_git(repo_root, &["rev-parse", "--verify", main_branch])?;
+        let new = run_git(repo_root, &["rev-parse", "--verify", branch])?;
+        run_git(
+            repo_root,
+            &[
+                "update-ref",
+                "-m",
+                "samokod: fast-forward on plan finish",
+                format!("refs/heads/{main_branch}").as_str(),
+                new.trim(),
+                old.trim(),
+            ],
+        )?;
+    }
     Ok(())
 }
 
@@ -155,6 +195,8 @@ pub fn plan_slug(plan_name: &str) -> String {
 pub enum WorktreeError {
     #[error("git {args} failed: {stderr}")]
     Git { args: String, stderr: String },
+    #[error("{branch} is not a fast-forward of {main_branch}")]
+    NotAncestor { main_branch: String, branch: String },
     #[error("worktree io failed: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -206,11 +248,7 @@ mod tests {
             vec!["config", "user.name", "test"],
             vec!["commit", "--allow-empty", "-m", "init"],
         ] {
-            let status = Command::new("git")
-                .args(&args)
-                .current_dir(dir.path())
-                .output()
-                .expect("git");
+            let status = test_git(dir.path(), &args);
             assert!(status.status.success(), "{args:?}");
         }
         dir
@@ -219,13 +257,24 @@ mod tests {
     fn commit_file(repo: &Path, name: &str, contents: &str, message: &str) {
         std::fs::write(repo.join(name), contents).expect("write");
         for args in [vec!["add", name], vec!["commit", "-m", message]] {
-            let status = Command::new("git")
-                .args(&args)
-                .current_dir(repo)
-                .output()
-                .expect("git");
+            let status = test_git(repo, &args);
             assert!(status.status.success(), "{args:?}");
         }
+    }
+
+    /// Test git directed by `repo` alone: hook-inherited location vars
+    /// must not leak in, especially inside worktrees where `.git` is a
+    /// file and a relative index path fails.
+    fn test_git(repo: &Path, args: &[&str]) -> std::process::Output {
+        Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_COMMON_DIR")
+            .output()
+            .expect("git")
     }
 
     #[test]
@@ -237,11 +286,7 @@ mod tests {
     }
 
     fn head_commit_shell(repo: &Path) -> String {
-        let output = Command::new("git")
-            .args(["rev-parse", "HEAD"])
-            .current_dir(repo)
-            .output()
-            .expect("git");
+        let output = test_git(repo, &["rev-parse", "HEAD"]);
         assert!(output.status.success());
         String::from_utf8(output.stdout)
             .expect("utf8")
@@ -250,11 +295,7 @@ mod tests {
     }
 
     fn current_branch(repo: &Path) -> String {
-        let output = Command::new("git")
-            .args(["rev-parse", "--abbrev-ref", "HEAD"])
-            .current_dir(repo)
-            .output()
-            .expect("git");
+        let output = test_git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
         assert!(output.status.success());
         String::from_utf8(output.stdout)
             .expect("utf8")
@@ -331,6 +372,35 @@ mod tests {
     }
 
     #[test]
+    fn fast_forward_advances_main_to_branch() {
+        let dir = git_repo();
+        let root = dir.path();
+        let main = current_branch(root);
+        let base = head_commit(root).expect("head");
+        let record = create(root, "2026-09-26.14-53-26.ff-soon", &base, &main).expect("create");
+        commit_file(&record.path, "work.txt", "work\n", "plan work");
+        let tip = head_commit(&record.path).expect("tip");
+        fast_forward(root, &main, &record.branch).expect("ff");
+        assert_eq!(head_commit(root).expect("head"), tip);
+    }
+
+    #[test]
+    fn fast_forward_refuses_diverged_branch() {
+        let dir = git_repo();
+        let root = dir.path();
+        let main = current_branch(root);
+        let base = head_commit(root).expect("head");
+        let record = create(root, "2026-09-26.14-53-26.no-ff", &base, &main).expect("create");
+        commit_file(&record.path, "work.txt", "work\n", "plan work");
+        commit_file(root, "main.txt", "main\n", "main moves on");
+        assert!(matches!(
+            fast_forward(root, &main, &record.branch),
+            Err(WorktreeError::NotAncestor { .. })
+        ));
+        remove(root, &record.path, &record.branch, true).expect("remove");
+    }
+
+    #[test]
     fn remove_deletes_worktree_and_branch() {
         let dir = git_repo();
         let root = dir.path();
@@ -341,11 +411,7 @@ mod tests {
         let branch = record.branch.clone();
         remove(root, &path, &branch, false).expect("remove");
         assert!(!path.exists());
-        let output = Command::new("git")
-            .args(["branch", "--list", branch.as_str()])
-            .current_dir(root)
-            .output()
-            .expect("git");
+        let output = test_git(root, &["branch", "--list", branch.as_str()]);
         assert!(
             String::from_utf8(output.stdout)
                 .expect("utf8")
@@ -364,11 +430,7 @@ mod tests {
         std::fs::remove_dir_all(&record.path).expect("rmdir");
         prune(root).expect("prune");
         // The branch survives pruning; only metadata reconciles.
-        let output = Command::new("git")
-            .args(["branch", "--list", record.branch.as_str()])
-            .current_dir(root)
-            .output()
-            .expect("git");
+        let output = test_git(root, &["branch", "--list", record.branch.as_str()]);
         assert!(
             !String::from_utf8(output.stdout)
                 .expect("utf8")

@@ -192,24 +192,55 @@ impl AgentManager {
 
     /// Claim the one-time role prefix for the first message of one ACP
     /// conversation. One locked check-and-mark, so a retried turn never
-    /// prefixes twice. Only executing prefixes; scoping goes through
-    /// verbatim. The plan path is absolute into the main checkout, since
-    /// the executor runs with the worktree as its working directory.
+    /// prefixes twice. Executing and merging prefix; scoping goes through
+    /// verbatim. Paths are absolute into the main checkout, since both
+    /// roles run with the worktree as their working directory.
     fn claim_role_prefix(&self, key: &SessionKey, user_text: &str) -> Option<String> {
         let mut state = lock_state(&self.state)?;
         let repo_root = state.repo_root.clone()?;
-        let live = state.sessions.get_mut(key)?;
-        if live.plan.phase != plans::Phase::Executing || live.plan.prefixed {
+        let live = state.sessions.get(key)?;
+        if live.plan.prefixed {
             return None;
         }
-        let plan_dir_abs = live
-            .plan
-            .plan_ref()
-            .path(&repo_root)
-            .to_string_lossy()
-            .to_string();
-        let text = executor_prefix_text(&plan_dir_abs, user_text);
-        live.plan.prefixed = true;
+        let plan = live.plan.clone();
+        let text = match plan.phase {
+            plans::Phase::Executing => {
+                let plan_dir_abs = plan
+                    .plan_ref()
+                    .path(&repo_root)
+                    .to_string_lossy()
+                    .to_string();
+                executor_prefix_text(&plan_dir_abs, user_text)
+            }
+            plans::Phase::Merging => {
+                let (path, branch, main_branch) = match state.worktrees.get(&plan.name) {
+                    Some(record) => (
+                        record.path.clone(),
+                        record.branch.clone(),
+                        record.main_branch.clone(),
+                    ),
+                    None => (
+                        crate::worktrees::worktree_path(&repo_root, &plan.name),
+                        crate::worktrees::branch_name(&plan.name),
+                        state.branch.clone(),
+                    ),
+                };
+                let plan_md_abs = plan
+                    .plan_ref()
+                    .plan_md(&repo_root)
+                    .to_string_lossy()
+                    .to_string();
+                merger_prefix_text(
+                    &branch,
+                    &main_branch,
+                    &path.to_string_lossy(),
+                    &plan_md_abs,
+                    user_text,
+                )
+            }
+            _ => return None,
+        };
+        state.sessions.get_mut(key)?.plan.prefixed = true;
         Some(text)
     }
 }
@@ -339,6 +370,27 @@ fn executor_prefix_text(display: &str, user_text: &str) -> String {
     )
 }
 
+/// Merger role template for the first message of one ACP conversation.
+/// Pure.
+fn merger_prefix_text(
+    worktree_branch: &str,
+    main_branch: &str,
+    worktree_path: &str,
+    plan_md_abs_path: &str,
+    user_text: &str,
+) -> String {
+    format!(
+        "{}\n\n{}",
+        opencode::merger_first_message(
+            worktree_branch,
+            main_branch,
+            worktree_path,
+            plan_md_abs_path
+        ),
+        user_text.trim()
+    )
+}
+
 /// Replace the held list with a fresh todo list and emit when it moved.
 /// Identical lists stay silent.
 fn update_todos(state: &Mutex<State>, app: &AppHandle, key: &SessionKey, fresh: Vec<TodoView>) {
@@ -374,5 +426,18 @@ mod tests {
         let text = executor_prefix_text(display, "  do things  ");
         assert!(text.contains(&opencode::executor_first_message(display)));
         assert!(text.contains("do things"));
+    }
+
+    #[test]
+    fn merging_prefix_combines_role_and_user_text() {
+        let text = merger_prefix_text(
+            "samokod/shiny",
+            "main",
+            "/repo/.samokod/worktrees/plan",
+            "/repo/.samokod/plans/merging/plan/plan.md",
+            "  keep going  ",
+        );
+        assert!(text.contains("samokod/shiny"));
+        assert!(text.contains("keep going"));
     }
 }

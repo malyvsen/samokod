@@ -31,6 +31,7 @@ pub(crate) fn role_phase(role: SessionRole) -> plans::Phase {
     match role {
         SessionRole::Scoping => plans::Phase::Scoping,
         SessionRole::Executing => plans::Phase::Executing,
+        SessionRole::Merging => plans::Phase::Merging,
     }
 }
 
@@ -63,10 +64,19 @@ impl ActivePlan {
         }
     }
 
+    pub(crate) fn merging(name: String) -> Self {
+        ActivePlan {
+            name,
+            phase: plans::Phase::Merging,
+            prefixed: false,
+        }
+    }
+
     pub(crate) fn key(&self) -> Option<SessionKey> {
         let role = match self.phase {
             plans::Phase::Scoping => SessionRole::Scoping,
             plans::Phase::Executing => SessionRole::Executing,
+            plans::Phase::Merging => SessionRole::Merging,
             plans::Phase::Completed | plans::Phase::Cancelled => return None,
         };
         Some(SessionKey {
@@ -76,11 +86,13 @@ impl ActivePlan {
     }
 
     /// Working directory for the session: the plan worktree for executing
-    /// plans, the main root for scoping plans. Plan files always stay in
-    /// the main checkout; only the agent's cwd moves.
+    /// and merging plans, the main root for scoping plans. Plan files
+    /// always stay in the main checkout; only the agent's cwd moves.
     pub(crate) fn cwd(&self, repo_root: &Path) -> PathBuf {
         match self.phase {
-            plans::Phase::Executing => crate::worktrees::worktree_path(repo_root, &self.name),
+            plans::Phase::Executing | plans::Phase::Merging => {
+                crate::worktrees::worktree_path(repo_root, &self.name)
+            }
             plans::Phase::Scoping | plans::Phase::Completed | plans::Phase::Cancelled => {
                 repo_root.to_path_buf()
             }
@@ -390,6 +402,7 @@ impl AgentManager {
         let mut plan = match key.role {
             SessionRole::Scoping => ActivePlan::scoping(key.plan.clone()),
             SessionRole::Executing => ActivePlan::executing(key.plan.clone()),
+            SessionRole::Merging => ActivePlan::merging(key.plan.clone()),
         };
         // A known session keeps its prefix state across transport deaths;
         // anything without an entry starts with the caller's flag.
