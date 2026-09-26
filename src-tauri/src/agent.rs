@@ -115,6 +115,35 @@ pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str) {
     }
 }
 
+/// Prefilled scoping draft for one session. Pure over the locked state
+/// plus disk: returns the rendered template only while the session is
+/// fresh under `is_empty_scoping`, `None` for non-fresh or non-scoping
+/// sessions, and an error when the plan is gone.
+pub(crate) fn scoping_draft_for(
+    state: &State,
+    repo_root: &Path,
+    session: &SessionKey,
+) -> Result<Option<String>, AgentError> {
+    if session.role != SessionRole::Scoping {
+        return Ok(None);
+    }
+    let is_pending = state.pending_scoping.as_deref() == Some(session.plan.as_str());
+    let plan_ref = plans::PlanRef {
+        name: session.plan.clone(),
+        phase: plans::Phase::Scoping,
+    };
+    if !is_pending && !plan_ref.path(repo_root).is_dir() {
+        return Err(AgentError::NoSession {
+            raw: "plan is gone".to_string(),
+        });
+    }
+    if !is_empty_scoping(state, repo_root, &session.plan) {
+        return Ok(None);
+    }
+    let display = opencode::plan_display(&plan_ref);
+    Ok(Some(opencode::scoping_draft(&display)))
+}
+
 /// Reserved timestamp name for a lazy scoping session: collision-proof
 /// against on-disk scoping names plus the current pending name. Pure
 /// except the directory read.
@@ -468,6 +497,28 @@ impl AgentManager {
             }
         }
         Ok(self.plans_update())
+    }
+
+    /// Prefilled scoping draft: the planner template with its plan dir
+    /// filled in, returned only while the session is fresh under the
+    /// `is_empty_scoping` gate (no `plan.md`, no activity, no sent prompt).
+    /// Non-fresh and non-scoping sessions get `None`; missing repos and
+    /// gone plans are errors, never silent fallbacks.
+    pub fn scoping_draft(&self, session: SessionKey) -> Result<Option<String>, AgentError> {
+        if session.role != SessionRole::Scoping {
+            return Ok(None);
+        }
+        let Some(state_guard) = lock_state(&self.state) else {
+            return Err(AgentError::RequestFailed {
+                raw: "agent state unavailable".to_string(),
+            });
+        };
+        let Some(repo_root) = state_guard.repo_root.clone() else {
+            return Err(AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            });
+        };
+        scoping_draft_for(&state_guard, &repo_root, &session)
     }
 
     /// Cancel an executing plan. The selection stays on the cancelled (now
@@ -1016,6 +1067,83 @@ mod tests {
         )
         .expect("write");
         assert!(!is_empty_scoping(&state, root, "2026-09-26.08-41-04"));
+    }
+
+    #[test]
+    fn scoping_starts_prefixed_for_frontend_draft() {
+        assert!(ActivePlan::scoping("n".to_string()).prefixed);
+    }
+
+    #[test]
+    fn draft_returns_template_only_while_fresh() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let key = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Scoping,
+        };
+        let state = State {
+            pending_scoping: Some(name.to_string()),
+            ..Default::default()
+        };
+        let draft = scoping_draft_for(&state, root, &key)
+            .expect("draft")
+            .expect("fresh prefills");
+        assert!(draft.contains(".samokod/plans/scoping/2026-09-26.08-41-03"));
+        assert!(!draft.contains("{{PLAN_DIR}}"));
+
+        let state = State::default();
+        plans::materialize_scoping(root, name).expect("materialize");
+        std::fs::write(
+            root.join(".samokod/plans/scoping/2026-09-26.08-41-03/plan.md"),
+            "# T\n",
+        )
+        .expect("write");
+        assert_eq!(scoping_draft_for(&state, root, &key).expect("gate"), None);
+
+        let mut state = State::default();
+        plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("materialize");
+        let other = SessionKey {
+            plan: "2026-09-26.08-41-04".to_string(),
+            role: SessionRole::Scoping,
+        };
+        state.activity.insert(other.plan.clone(), Instant::now());
+        assert_eq!(scoping_draft_for(&state, root, &other).expect("gate"), None);
+
+        let mut state = State::default();
+        plans::materialize_scoping(root, "2026-09-26.08-41-05").expect("materialize");
+        let sent = SessionKey {
+            plan: "2026-09-26.08-41-05".to_string(),
+            role: SessionRole::Scoping,
+        };
+        state.sessions.insert(
+            sent.clone(),
+            LiveSession::fresh(
+                ActivePlan::scoping(sent.plan.clone()),
+                crate::repo_state::RepoState::default(),
+            ),
+        );
+        state.sessions.get_mut(&sent).expect("live").last_prompt = Some("hi".to_string());
+        assert_eq!(scoping_draft_for(&state, root, &sent).expect("gate"), None);
+
+        let state = State::default();
+        let executing = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Executing,
+        };
+        assert_eq!(
+            scoping_draft_for(&state, root, &executing).expect("gate"),
+            None
+        );
+
+        let state = State::default();
+        let gone = SessionKey {
+            plan: "2026-09-26.08-41-99".to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert!(scoping_draft_for(&state, root, &gone).is_err());
     }
 
     #[test]

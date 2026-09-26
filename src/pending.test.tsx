@@ -23,6 +23,7 @@ const api = vi.hoisted(() => ({
 	answerPermission: vi.fn(),
 	setConfigOption: vi.fn(),
 	warmSession: vi.fn(),
+	scopingDraft: vi.fn(),
 	onAppEvent: vi.fn(() => () => {}),
 }));
 vi.mock("./api", () => api);
@@ -77,6 +78,7 @@ beforeEach(() => {
 	api.getPrefs.mockResolvedValue({ recent: [{ path: "/repo" }] });
 	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "main" });
 	api.warmSession.mockResolvedValue(undefined);
+	api.scopingDraft.mockResolvedValue(null);
 });
 
 describe("pending pickers", () => {

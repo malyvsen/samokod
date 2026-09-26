@@ -104,14 +104,11 @@ pub fn plan_display(plan: &PlanRef) -> String {
     format!(".samokod/plans/{}/{}", plan.phase.dir_name(), plan.name)
 }
 
-/// Planner role plus the user's own first message. Sent once per scoping
-/// chat; later messages go through untouched. Pure.
-pub fn planner_first_message(plan_dir: &str, user_text: &str) -> String {
-    format!(
-        "{}\n\n{}",
-        PLANNER_PROMPT.replace("{{PLAN_DIR}}", plan_dir),
-        user_text.trim()
-    )
+/// Scoping draft: the planner template with its plan dir filled in.
+/// Prefilled into the first message box as ordinary editable user content.
+/// Pure.
+pub fn scoping_draft(plan_dir: &str) -> String {
+    PLANNER_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
 /// Unified executor role and instruction. Sent as the hidden first prompt of
@@ -309,11 +306,10 @@ mod tests {
     }
 
     #[test]
-    fn planner_message_combines_role_and_user_text() {
-        let message = planner_first_message(".samokod/plans/scoping/ts", "  do things  ");
-        assert!(message.contains(".samokod/plans/scoping/ts/plan.md"));
-        assert!(!message.contains("{{PLAN_DIR}}"));
-        assert!(message.ends_with("do things"));
+    fn scoping_draft_names_plan_path() {
+        let draft = scoping_draft(".samokod/plans/scoping/ts");
+        assert!(draft.contains(".samokod/plans/scoping/ts/plan.md"));
+        assert!(!draft.contains("{{PLAN_DIR}}"));
     }
 
     #[test]

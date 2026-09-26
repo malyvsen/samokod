@@ -23,6 +23,7 @@ const api = vi.hoisted(() => ({
 	answerPermission: vi.fn(),
 	setConfigOption: vi.fn(),
 	warmSession: vi.fn(),
+	scopingDraft: vi.fn(),
 	onAppEvent: vi.fn(() => () => {}),
 }));
 vi.mock("./api", () => api);
@@ -50,6 +51,7 @@ beforeEach(() => {
 		config_defaults: testDefaults(),
 	});
 	api.warmSession.mockResolvedValue(undefined);
+	api.scopingDraft.mockResolvedValue(null);
 });
 
 function emit(event: AppEvent) {
@@ -286,7 +288,7 @@ describe("plan", () => {
 		});
 		expect(screen.queryByText("aaa ephemeral")).not.toBeInTheDocument();
 		expect(
-			screen.getByRole("textbox", { name: "Ask for a change…" }),
+			await screen.findByRole("textbox", { name: "Ask for a change…" }),
 		).toBeInTheDocument();
 	});
 
@@ -306,7 +308,7 @@ describe("plan", () => {
 		expect(api.createPlan).toHaveBeenCalledTimes(1);
 		expect(screen.queryByText("old chat")).not.toBeInTheDocument();
 		expect(
-			screen.getByRole("textbox", { name: "Ask for a change…" }),
+			await screen.findByRole("textbox", { name: "Ask for a change…" }),
 		).toBeInTheDocument();
 	});
 

@@ -3,16 +3,32 @@ import { useCallback, useRef } from "react";
 const LABEL = "Ask for a change…";
 
 export function DraftBubble({
+	initialText,
 	onSend,
 	onEdit,
+	onInput,
 }: {
+	initialText?: string | undefined;
 	onSend: (text: string) => void;
 	onEdit: () => void;
+	onInput?: ((text: string) => void) | undefined;
 }) {
 	const ref = useRef<HTMLDivElement | null>(null);
+	const mountText = useRef(initialText ?? "");
 	const attach = useCallback((node: HTMLDivElement | null) => {
 		ref.current = node;
-		node?.focus();
+		if (node === null) return;
+		node.focus();
+		const text = mountText.current;
+		if (text !== "") {
+			node.textContent = text;
+			const range = document.createRange();
+			range.selectNodeContents(node);
+			range.collapse(false);
+			const selection = window.getSelection();
+			selection?.removeAllRanges();
+			selection?.addRange(range);
+		}
 	}, []);
 
 	function send(): void {
@@ -22,6 +38,14 @@ export function DraftBubble({
 		if (text === "") return;
 		node.textContent = "";
 		onSend(text);
+	}
+
+	function handleInput(): void {
+		const node = ref.current;
+		if (node !== null) {
+			onInput?.(extractDraftText(node));
+		}
+		onEdit();
 	}
 
 	return (
@@ -36,7 +60,7 @@ export function DraftBubble({
 				role="textbox"
 				aria-label={LABEL}
 				data-placeholder={LABEL}
-				onInput={onEdit}
+				onInput={handleInput}
 				onKeyDown={(event) => {
 					if (event.key !== "Enter") return;
 					if (event.shiftKey) return;
@@ -47,7 +71,7 @@ export function DraftBubble({
 				onPaste={(event) => {
 					event.preventDefault();
 					insertPlainText(event.clipboardData.getData("text/plain"));
-					onEdit();
+					handleInput();
 				}}
 			/>
 		</div>

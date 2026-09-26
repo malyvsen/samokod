@@ -23,6 +23,7 @@ const api = vi.hoisted(() => ({
 	answerPermission: vi.fn(),
 	setConfigOption: vi.fn(),
 	warmSession: vi.fn(),
+	scopingDraft: vi.fn(),
 	onAppEvent: vi.fn(() => () => {}),
 }));
 vi.mock("./api", () => api);
@@ -88,6 +89,7 @@ beforeEach(() => {
 	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "main" });
 	api.setConfigOption.mockReset();
 	api.warmSession.mockResolvedValue(undefined);
+	api.scopingDraft.mockResolvedValue(null);
 });
 
 async function openChatWith(options: ConfigOptionView[]) {

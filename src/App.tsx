@@ -26,6 +26,7 @@ import { SidePanel } from "./components/SidePanel";
 import { toSelectorModel } from "./components/selectors";
 import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
+import { useSessionDrafts } from "./sessions/drafts";
 import {
 	agentLabelForPhase,
 	agentStatusOf,
@@ -75,6 +76,7 @@ export function App() {
 
 	const selectedId = selectedKey === null ? null : sessionKeyOf(selectedKey);
 	const chat: ChatState = selectedChat(chats, selectedKey);
+	const drafts = useSessionDrafts(selectedKey, chats);
 
 	const status = agentStatusOf(chat);
 	const busy = chat.working || chat.approval;
@@ -229,6 +231,7 @@ export function App() {
 	async function handleSend(text: string) {
 		const key = selectedRef.current;
 		if (text === "" || busy || readOnly || key === null) return;
+		drafts.onDraftSent();
 		updateChat(key, (chat) => ({
 			...chat,
 			transcript: [
@@ -442,8 +445,14 @@ export function App() {
 									onRetry={readOnly ? null : handleRetry}
 									onAnswer={handleAnswer}
 								>
-									{!busy && !readOnly && (
-										<DraftBubble onSend={handleSend} onEdit={notifyEdit} />
+									{!busy && !readOnly && drafts.ready && (
+										<DraftBubble
+											key={selectedId ?? "none"}
+											initialText={drafts.initialText}
+											onSend={handleSend}
+											onEdit={notifyEdit}
+											onInput={drafts.onDraftInput}
+										/>
 									)}
 									{readOnly && (
 										<div className="ro-note">

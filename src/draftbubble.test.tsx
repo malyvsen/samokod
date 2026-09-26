@@ -3,9 +3,22 @@ import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { DraftBubble, extractDraftText } from "./components/DraftBubble";
 
-function bubble(props: { onSend?: (text: string) => void } = {}) {
+function bubble(
+	props: {
+		onSend?: (text: string) => void;
+		initialText?: string;
+		onInput?: (text: string) => void;
+	} = {},
+) {
 	const onSend = props.onSend ?? vi.fn();
-	render(<DraftBubble onSend={onSend} onEdit={vi.fn()} />);
+	render(
+		<DraftBubble
+			initialText={props.initialText}
+			onSend={onSend}
+			onEdit={vi.fn()}
+			onInput={props.onInput}
+		/>,
+	);
 	return { area: screen.getByRole("textbox"), onSend };
 }
 
@@ -77,6 +90,24 @@ describe("draft bubble", () => {
 		await user.click(area);
 		await user.keyboard("line one{Shift>}{Enter}{/Shift}line two{Enter}");
 		expect(onSend).toHaveBeenCalledWith("line one\nline two");
+	});
+
+	test("mounts with initial text and caret at end", async () => {
+		const user = userEvent.setup();
+		const onSend = vi.fn();
+		const { area } = bubble({ initialText: "TEMPLATE", onSend });
+		expect(area.textContent).toBe("TEMPLATE");
+		await user.keyboard("!{Enter}");
+		expect(onSend).toHaveBeenCalledWith("TEMPLATE!");
+		expect(area.textContent).toBe("");
+	});
+
+	test("reports edits through onInput", () => {
+		const onInput = vi.fn();
+		const { area } = bubble({ onInput });
+		typeLines(area, "hello");
+		fireEvent.input(area);
+		expect(onInput).toHaveBeenCalledWith("hello");
 	});
 });
 
