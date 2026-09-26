@@ -153,7 +153,7 @@ describe("draft bubble in chat", () => {
 		expect(api.scopingDraft).toHaveBeenCalledTimes(2);
 	});
 
-	test("eager execute path stays unchanged", async () => {
+	test("execute sends hidden role without a prompt", async () => {
 		const entry = testEntryWith("aaa", "scoping", "First", true, [
 			testStatus("scoping"),
 		]);

@@ -26,7 +26,7 @@ import { SidePanel } from "./components/SidePanel";
 import { toSelectorModel } from "./components/selectors";
 import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
-import { useSessionDrafts } from "./sessions/drafts";
+import { hasUserMessage, useSessionDrafts } from "./sessions/drafts";
 import {
 	agentLabelForPhase,
 	agentStatusOf,
@@ -76,7 +76,7 @@ export function App() {
 
 	const selectedId = selectedKey === null ? null : sessionKeyOf(selectedKey);
 	const chat: ChatState = selectedChat(chats, selectedKey);
-	const drafts = useSessionDrafts(selectedKey, chats);
+	const draft = useSessionDrafts(selectedKey, chats);
 
 	const status = agentStatusOf(chat);
 	const busy = chat.working || chat.approval;
@@ -231,7 +231,7 @@ export function App() {
 	async function handleSend(text: string) {
 		const key = selectedRef.current;
 		if (text === "" || busy || readOnly || key === null) return;
-		drafts.onDraftSent();
+		draft.onDraftSent();
 		updateChat(key, (chat) => ({
 			...chat,
 			transcript: [
@@ -445,13 +445,13 @@ export function App() {
 									onRetry={readOnly ? null : handleRetry}
 									onAnswer={handleAnswer}
 								>
-									{!busy && !readOnly && drafts.ready && (
+									{!busy && !readOnly && selectedId !== null && draft.ready && (
 										<DraftBubble
-											key={selectedId ?? "none"}
-											initialText={drafts.initialText}
+											key={selectedId}
+											initialText={draft.initialText}
 											onSend={handleSend}
 											onEdit={notifyEdit}
-											onInput={drafts.onDraftInput}
+											onInput={draft.onDraftInput}
 										/>
 									)}
 									{readOnly && (
@@ -474,13 +474,6 @@ export function App() {
 				</>
 			)}
 		</div>
-	);
-}
-
-function hasUserMessage(chats: Chats, key: SessionKey): boolean {
-	return (
-		chats[sessionKeyOf(key)]?.transcript.some((item) => item.kind === "user") ??
-		false
 	);
 }
 

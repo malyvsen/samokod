@@ -115,10 +115,10 @@ pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str) {
     }
 }
 
-/// Prefilled scoping draft for one session. Pure over the locked state
-/// plus disk: returns the rendered template only while the session is
-/// fresh under `is_empty_scoping`, `None` for non-fresh or non-scoping
-/// sessions, and an error when the plan is gone.
+/// Prefilled scoping draft for one session. Returns the rendered
+/// template only while the session is fresh under `is_empty_scoping`,
+/// `None` for non-fresh or non-scoping sessions, and an error when the
+/// plan is gone. Reads the locked state plus disk.
 pub(crate) fn scoping_draft_for(
     state: &State,
     repo_root: &Path,
@@ -350,7 +350,9 @@ impl AgentManager {
         plans::mark_executed(&repo_root, &next);
         self.drop_live(&session).await;
         self.move_activity(&from.name, &next.name);
-        let plan = ActivePlan::executing(next.name.clone());
+        let mut plan = ActivePlan::executing(next.name.clone());
+        // The role goes out hidden below, so later turns never prefix again.
+        plan.prefixed = true;
         let agent = opencode::agent_for(plan.phase);
         let (connection, session_id, key) =
             self.spawn_session(&repo_root, &branch, plan, agent).await?;
@@ -505,9 +507,6 @@ impl AgentManager {
     /// Non-fresh and non-scoping sessions get `None`; missing repos and
     /// gone plans are errors, never silent fallbacks.
     pub fn scoping_draft(&self, session: SessionKey) -> Result<Option<String>, AgentError> {
-        if session.role != SessionRole::Scoping {
-            return Ok(None);
-        }
         let Some(state_guard) = lock_state(&self.state) else {
             return Err(AgentError::RequestFailed {
                 raw: "agent state unavailable".to_string(),
@@ -1070,7 +1069,7 @@ mod tests {
     }
 
     #[test]
-    fn scoping_starts_prefixed_for_frontend_draft() {
+    fn scoping_starts_prefixed() {
         assert!(ActivePlan::scoping("n".to_string()).prefixed);
     }
 

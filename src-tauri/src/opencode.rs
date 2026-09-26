@@ -111,8 +111,8 @@ pub fn scoping_draft(plan_dir: &str) -> String {
     PLANNER_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
-/// Unified executor role and instruction. Sent as the hidden first prompt of
-/// every executing chat. Pure.
+/// Executor role and instruction. Sent once per executing conversation:
+/// hidden on approval, prefixed to the first prompt otherwise. Pure.
 pub fn executor_first_message(plan_dir: &str) -> String {
     EXECUTOR_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }

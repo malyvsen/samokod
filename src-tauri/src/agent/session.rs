@@ -39,9 +39,10 @@ pub(crate) fn role_phase(role: SessionRole) -> plans::Phase {
 pub(crate) struct ActivePlan {
     pub(crate) name: String,
     pub(crate) phase: plans::Phase,
-    /// Role already delivered for this ACP conversation. Scoping starts
-    /// prefixed because the frontend draft carries the template; executing
-    /// starts prefixed because the eager auto-send already went out hidden.
+    /// Role already delivered for this ACP conversation. Scoping never
+    /// sends one (the composer holds the template as editable text);
+    /// executing sends once, hidden on approval or prefixed to the first
+    /// prompt otherwise.
     pub(crate) prefixed: bool,
 }
 
@@ -58,7 +59,7 @@ impl ActivePlan {
         ActivePlan {
             name,
             phase: plans::Phase::Executing,
-            prefixed: true,
+            prefixed: false,
         }
     }
 
@@ -222,8 +223,7 @@ impl AgentManager {
                 .map(|session| session.supports_close)
                 .unwrap_or(false);
             // A reopened session keeps its one-time prefix state; a fresh
-            // plan starts with the caller's flag (scoping prefixed, since
-            // the frontend draft carries the template).
+            // plan starts with the caller's flag.
             let prefixed = state
                 .sessions
                 .get(&key)
@@ -269,10 +269,8 @@ impl AgentManager {
 
     /// Live connection for one session, spawning lazily on the first
     /// prompt: same plan directory, mode pin, stored model/effort
-    /// reapplied. A restored executing session starts unprefixed, so the
-    /// executor template prepends to its first message again; scoping
-    /// always stays prefixed because the frontend draft carries the
-    /// template. Single-flights against a
+    /// reapplied. A reopened session keeps its one-time prefix state; a
+    /// fresh plan starts with the caller's flag. Single-flights against a
     /// racing warm: one spawner wins, the other polls for liveness.
     pub(crate) async fn ensure_live(
         &self,
@@ -381,15 +379,10 @@ impl AgentManager {
             SessionRole::Executing => ActivePlan::executing(key.plan.clone()),
         };
         // A known session keeps its prefix state across transport deaths;
-        // anything without an entry starts per role: scoping stays
-        // prefixed because the frontend draft carries the template, while
-        // a restored executing session starts unprefixed so its template
-        // prepends again. Eager executors bypass this path: spawn keeps
-        // their prefixed flag, since their role already went out hidden.
-        plan.prefixed = stored_prefixed.unwrap_or(match key.role {
-            SessionRole::Scoping => true,
-            SessionRole::Executing => false,
-        });
+        // anything without an entry starts with the caller's flag.
+        // Eager executors bypass this path: `execute_plan` marks their
+        // prefixed flag, since their role already went out hidden.
+        plan.prefixed = stored_prefixed.unwrap_or(plan.prefixed);
         let agent = opencode::agent_for(plan.phase);
         let (connection, session_id, _) =
             self.spawn_session(&repo_root, &branch, plan, agent).await?;

@@ -36,10 +36,10 @@ impl AgentManager {
 
     /// Send one plain-text prompt, spawning the session lazily on its
     /// first message. Streams arrive as events; the turn end arrives as
-    /// done or failed. Scoping text goes through verbatim: the frontend
-    /// draft already carries the template. A reserved
+    /// done or failed. Scoping text goes through verbatim: the composer
+    /// prefills the template as editable user content. A reserved
     /// pending scoping session materializes its directory here, before
-    /// the unchanged `ensure_live` path.
+    /// the `ensure_live` path.
     pub async fn send_prompt(&self, session: SessionKey, text: String) -> Result<(), AgentError> {
         if session.role == SessionRole::Scoping {
             let repo_root = self
@@ -192,20 +192,15 @@ impl AgentManager {
 
     /// Claim the one-time role prefix for the first message of one ACP
     /// conversation. One locked check-and-mark, so a retried turn never
-    /// prefixes twice. Only executing prefixes: scoping starts prefixed
-    /// because the frontend draft carries the template, and a restored
-    /// execution session gets the executor template again.
+    /// prefixes twice. Only executing prefixes; scoping goes through
+    /// verbatim.
     fn claim_role_prefix(&self, key: &SessionKey, user_text: &str) -> Option<String> {
         let mut state = lock_state(&self.state)?;
         let live = state.sessions.get_mut(key)?;
-        if live.plan.prefixed {
+        if live.plan.phase != plans::Phase::Executing || live.plan.prefixed {
             return None;
         }
-        let text = role_prefix_text(
-            live.plan.phase,
-            &opencode::plan_display(&live.plan.plan_ref()),
-            user_text,
-        )?;
+        let text = executor_prefix_text(&opencode::plan_display(&live.plan.plan_ref()), user_text);
         live.plan.prefixed = true;
         Some(text)
     }
@@ -326,18 +321,14 @@ fn snoop_todos_from_update(
     }
 }
 
-/// Role template for the first message of one ACP conversation. Pure:
-/// only executing prefixes; scoping goes through verbatim because the
-/// frontend draft carries the template, and finished plans never prefix.
-fn role_prefix_text(phase: plans::Phase, display: &str, user_text: &str) -> Option<String> {
-    match phase {
-        plans::Phase::Executing => Some(format!(
-            "{}\n\n{}",
-            opencode::executor_first_message(display),
-            user_text.trim()
-        )),
-        plans::Phase::Scoping | plans::Phase::Completed | plans::Phase::Cancelled => None,
-    }
+/// Executor role template for the first message of one ACP
+/// conversation. Pure.
+fn executor_prefix_text(display: &str, user_text: &str) -> String {
+    format!(
+        "{}\n\n{}",
+        opencode::executor_first_message(display),
+        user_text.trim()
+    )
 }
 
 /// Replace the held list with a fresh todo list and emit when it moved.
@@ -368,27 +359,12 @@ fn update_todos(state: &Mutex<State>, app: &AppHandle, key: &SessionKey, fresh: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plans::Phase;
-
-    #[test]
-    fn scoping_never_prefixes() {
-        let display = ".samokod/plans/scoping/ts";
-        assert!(role_prefix_text(Phase::Scoping, display, "  do things  ").is_none());
-    }
 
     #[test]
     fn executing_prefix_combines_role_and_user_text() {
         let display = ".samokod/plans/executing/ts.slug";
-        let text = role_prefix_text(Phase::Executing, display, "  do things  ")
-            .expect("executing prefixes");
+        let text = executor_prefix_text(display, "  do things  ");
         assert!(text.contains(&opencode::executor_first_message(display)));
         assert!(text.contains("do things"));
-    }
-
-    #[test]
-    fn finished_phases_never_prefix() {
-        for phase in [Phase::Completed, Phase::Cancelled] {
-            assert!(role_prefix_text(phase, "dir", "hi").is_none());
-        }
     }
 }

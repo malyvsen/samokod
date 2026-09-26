@@ -3,7 +3,7 @@ import { scopingDraft } from "../api";
 import { type SessionKey, sessionKeyOf } from "../types";
 import type { Chats } from "./store";
 
-function hasUserMessage(chats: Chats, key: SessionKey): boolean {
+export function hasUserMessage(chats: Chats, key: SessionKey): boolean {
 	return (
 		chats[sessionKeyOf(key)]?.transcript.some((item) => item.kind === "user") ??
 		false
@@ -26,38 +26,36 @@ export function useSessionDrafts(
 	const [readyId, setReadyId] = useState<string | null>(null);
 
 	useEffect(() => {
-		if (selectedKey === null || selectedId === null) return;
-		const id = selectedId;
-		const key = selectedKey;
-		if (attempted.current.has(id)) {
-			setReadyId(id);
-			return;
-		}
-		if (key.role !== "scoping" || hasUserMessage(chats, key)) {
+		if (selectedKey === null) return;
+		const id = sessionKeyOf(selectedKey);
+		if (
+			!attempted.current.has(id) &&
+			selectedKey.role === "scoping" &&
+			!hasUserMessage(chats, selectedKey)
+		) {
 			attempted.current.add(id);
-			setReadyId(id);
-			return;
+			let cancelled = false;
+			scopingDraft(selectedKey)
+				.then((draft) => {
+					if (cancelled) return;
+					if (draft !== null) {
+						setDrafts((current) =>
+							current[id] === undefined ? { ...current, [id]: draft } : current,
+						);
+					}
+					setReadyId(id);
+				})
+				.catch((error: unknown) => {
+					console.warn("scoping_draft failed", error);
+					if (!cancelled) setReadyId(id);
+				});
+			return () => {
+				cancelled = true;
+			};
 		}
 		attempted.current.add(id);
-		let cancelled = false;
-		scopingDraft(key)
-			.then((draft) => {
-				if (cancelled) return;
-				if (draft !== null) {
-					setDrafts((current) =>
-						current[id] === undefined ? { ...current, [id]: draft } : current,
-					);
-				}
-				setReadyId(id);
-			})
-			.catch((error: unknown) => {
-				console.warn("scoping_draft failed", error);
-				if (!cancelled) setReadyId(id);
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [selectedId, selectedKey, chats]);
+		setReadyId(id);
+	}, [selectedKey, chats]);
 
 	const onDraftInput = useCallback(
 		(text: string) => {
