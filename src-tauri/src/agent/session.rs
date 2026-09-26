@@ -12,11 +12,11 @@ use crate::plans;
 use crate::types::{AgentError, AppEvent, SessionKey, SessionRole};
 
 use super::AgentManager;
+use super::config::{log_roles, option_id_for_role, pin_agent_mode, send_config_option};
+use super::permissions::handle_permission_request;
 use super::plans_list::push_sorted;
-use super::{
-    emit_event, handle_notification, handle_permission_request, lock_state, log_roles,
-    map_startup_error, option_id_for_role, pin_agent_mode, send_config_option, set_failed,
-};
+use super::turns::handle_notification;
+use super::{emit_event, lock_state, map_startup_error, set_failed};
 
 /// User decision for one permission card.
 #[derive(Debug, Clone)]
