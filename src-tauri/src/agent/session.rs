@@ -315,6 +315,7 @@ impl AgentManager {
                 state.sessions.clear();
                 state.current = None;
                 state.awake = None;
+                state.pending_scoping = None;
             }
             Err(error) => {
                 log::warn!("failed to clear sessions: {error}");

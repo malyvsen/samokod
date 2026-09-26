@@ -46,6 +46,10 @@ export function cancelExecution(session: SessionKey): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("cancel_execution", { session });
 }
 
+export function selectPlan(session: SessionKey): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("select_plan", { session });
+}
+
 export function sendPrompt(session: SessionKey, text: string): Promise<void> {
 	return invoke("send_prompt", { session, text });
 }

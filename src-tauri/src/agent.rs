@@ -31,6 +31,10 @@ pub(crate) struct State {
     /// Last user-sent prompt per plan directory name. Drives plan sorting;
     /// migrated across renames so an approved plan keeps its recency.
     activity: HashMap<String, Instant>,
+    /// Reserved scoping timestamp with no directory yet. Listed as a
+    /// normal `Untitled` entry until the first `send_prompt` materializes
+    /// it; vanishing on abandon or select-away leaves no trace.
+    pending_scoping: Option<String>,
 }
 
 impl State {
@@ -50,6 +54,78 @@ impl State {
     }
 }
 
+/// Empty scoping session: no `plan.md` and no sent message, whether or
+/// not the directory exists. Takes `&State` (called under an existing
+/// lock or a snapshot; never locks itself).
+pub(crate) fn is_empty_scoping(state: &State, repo_root: &Path, name: &str) -> bool {
+    let plan = plans::PlanRef {
+        name: name.to_string(),
+        phase: plans::Phase::Scoping,
+    };
+    if plan.has_plan_md(repo_root) {
+        return false;
+    }
+    if state.activity.contains_key(name) {
+        return false;
+    }
+    let key = SessionKey {
+        plan: name.to_string(),
+        role: SessionRole::Scoping,
+    };
+    if state
+        .sessions
+        .get(&key)
+        .and_then(|live| live.last_prompt.clone())
+        .is_some()
+    {
+        return false;
+    }
+    true
+}
+
+/// Discard an empty scoping session without a `cancelled/` trace:
+/// `remove_dir_all` when present (`NotFound` is fine, other errors are
+/// logged per the preserve-evidence rule), plus the `LiveSession` and
+/// `activity` entry. Clears `pending_scoping` on match. Caller owns the
+/// lock.
+pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str) {
+    let plan = plans::PlanRef {
+        name: name.to_string(),
+        phase: plans::Phase::Scoping,
+    };
+    match std::fs::remove_dir_all(plan.path(repo_root)) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => log::warn!(
+            "failed to vanish empty scoping {}: {error}",
+            plan.path(repo_root).display()
+        ),
+    }
+    state.sessions.remove(&SessionKey {
+        plan: name.to_string(),
+        role: SessionRole::Scoping,
+    });
+    state.activity.remove(name);
+    if state.pending_scoping.as_deref() == Some(name) {
+        state.pending_scoping = None;
+    }
+}
+
+/// Reserved timestamp name for a lazy scoping session: collision-proof
+/// against on-disk scoping names plus the current pending name. Pure
+/// except the directory read.
+pub(crate) fn reserve_scoping_name(repo_root: &Path, pending: Option<&str>) -> String {
+    let mut taken: std::collections::HashSet<String> = plans::scan_plans(repo_root)
+        .into_iter()
+        .filter(|plan| plan.phase == plans::Phase::Scoping)
+        .map(|plan| plan.name)
+        .collect();
+    if let Some(pending) = pending {
+        taken.insert(pending.to_string());
+    }
+    plans::unique_name(&plans::timestamp_now(), &taken)
+}
+
 pub struct AgentManager {
     state: Arc<Mutex<State>>,
     app: AppHandle,
@@ -66,7 +142,8 @@ impl AgentManager {
     /// Open a repository: ensure the plan structure, rescan every plan,
     /// and select the most-recent session. Spawns no agents: each session
     /// starts lazily on its first prompt, with transcripts and TODOs kept
-    /// run-local.
+    /// run-local. With zero scoping dirs, reserves a pending session
+    /// without touching disk.
     pub async fn open_repo(&self, repo_root: PathBuf) -> Result<OpenRepoResult, AgentError> {
         plans::ensure_structure(&repo_root)?;
         self.clear_sessions();
@@ -79,27 +156,46 @@ impl AgentManager {
                 .iter()
                 .all(|plan| plan.phase != plans::Phase::Scoping)
             {
-                plans::create_scoping(&repo_root)?;
+                let name = reserve_scoping_name(&repo_root, state.pending_scoping.as_deref());
+                state.pending_scoping = Some(name.clone());
+                state.current = Some(SessionKey {
+                    plan: name,
+                    role: SessionRole::Scoping,
+                });
             }
         }
         self.watch_branch(&repo_root);
         Ok(self.open_result())
     }
 
-    /// Create a fresh scoping plan and select it. Its agent spawns lazily
-    /// on the first prompt, so this never blocks on other sessions.
+    /// Reserve a fresh scoping session without touching disk. Reuses the
+    /// pending session when the selection is still on an empty one.
     pub async fn create_plan(&self) -> Result<PlansUpdate, AgentError> {
         let repo_root = self.current_repo().ok_or_else(|| AgentError::NoSession {
             raw: "open a repository first".to_string(),
         })?;
-        let scoping = plans::create_scoping(&repo_root)?;
-        let selected = SessionKey {
-            plan: scoping.name,
-            role: SessionRole::Scoping,
+        {
+            let state = self.state.lock().expect("state poisoned");
+            if let (Some(current), Some(pending)) =
+                (state.current.clone(), state.pending_scoping.clone())
+                && current.role == SessionRole::Scoping
+                && current.plan == pending
+                && is_empty_scoping(&state, &repo_root, &pending)
+            {
+                return Ok(self.plans_update());
+            }
+        }
+        let name = {
+            let state = self.state.lock().expect("state poisoned");
+            reserve_scoping_name(&repo_root, state.pending_scoping.as_deref())
         };
         match self.state.lock() {
             Ok(mut state) => {
-                state.current = Some(selected);
+                state.pending_scoping = Some(name.clone());
+                state.current = Some(SessionKey {
+                    plan: name,
+                    role: SessionRole::Scoping,
+                });
             }
             Err(error) => {
                 log::warn!("failed to select new plan: {error}");
@@ -240,8 +336,10 @@ impl AgentManager {
         Ok(self.plans_update())
     }
 
-    /// Drop a scoping plan. The selection stays on the cancelled (now
-    /// read-only) scoping session.
+    /// Drop a scoping plan. An empty session vanishes without a
+    /// `cancelled/` trace, falling back to `most_recent_key` (reserving a
+    /// fresh pending session when nothing remains); otherwise the plan
+    /// moves to `cancelled/` as today.
     pub async fn abandon_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
         ensure_idle(&self.state, &session)?;
         let (repo_root, _) = self
@@ -249,6 +347,43 @@ impl AgentManager {
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
+        if session.role == SessionRole::Scoping {
+            let empty = match self.state.lock() {
+                Ok(state) => is_empty_scoping(&state, &repo_root, &session.plan),
+                Err(error) => {
+                    log::warn!("failed to check empty session: {error}");
+                    false
+                }
+            };
+            if empty {
+                match self.state.lock() {
+                    Ok(mut state) => {
+                        vanish_scoping(&mut state, &repo_root, &session.plan);
+                        let plans = plans_list::sorted_entries(
+                            &repo_root,
+                            &state.sessions,
+                            &state.activity,
+                            state.pending_scoping.as_deref(),
+                        );
+                        if let Some(key) = plans_list::most_recent_key(&plans) {
+                            state.current = Some(key);
+                        } else {
+                            let name =
+                                reserve_scoping_name(&repo_root, state.pending_scoping.as_deref());
+                            state.pending_scoping = Some(name.clone());
+                            state.current = Some(SessionKey {
+                                plan: name,
+                                role: SessionRole::Scoping,
+                            });
+                        }
+                    }
+                    Err(error) => {
+                        log::warn!("failed to vanish empty session: {error}");
+                    }
+                }
+                return Ok(self.plans_update());
+            }
+        }
         let from = plans::PlanRef {
             name: session.plan.clone(),
             phase: plans::Phase::Scoping,
@@ -265,6 +400,50 @@ impl AgentManager {
             plan: next.name,
             role: SessionRole::Scoping,
         });
+        Ok(self.plans_update())
+    }
+
+    /// Select one session, discarding a previously-selected empty scoping
+    /// session the same way as abandon. Returns the target selection.
+    /// No `ensure_idle` gate: selection is allowed anytime, and an empty
+    /// previous session is never working.
+    pub async fn select_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
+        let (repo_root, _) = self
+            .reopen_snapshot()
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
+        {
+            let state = self.state.lock().expect("state poisoned");
+            let target_exists = state.pending_scoping.as_deref() == Some(session.plan.as_str())
+                && session.role == SessionRole::Scoping
+                || plans::PlanRef {
+                    name: session.plan.clone(),
+                    phase: session::role_phase(session.role),
+                }
+                .path(&repo_root)
+                .is_dir();
+            if !target_exists {
+                return Err(AgentError::NoSession {
+                    raw: "plan is gone".to_string(),
+                });
+            }
+        }
+        match self.state.lock() {
+            Ok(mut state) => {
+                if let Some(prev) = state.current.clone()
+                    && prev != session
+                    && prev.role == SessionRole::Scoping
+                    && is_empty_scoping(&state, &repo_root, &prev.plan)
+                {
+                    vanish_scoping(&mut state, &repo_root, &prev.plan);
+                }
+                state.current = Some(session);
+            }
+            Err(error) => {
+                log::warn!("failed to select session: {error}");
+            }
+        }
         Ok(self.plans_update())
     }
 
@@ -617,7 +796,7 @@ mod tests {
         write_plan_dir(root, plans::Phase::Completed, "b", Some("B"));
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
         write_plan_dir(root, plans::Phase::Scoping, "s", Some("S"));
-        let entries = sorted_entries(root, &HashMap::new(), &empty_activity());
+        let entries = sorted_entries(root, &HashMap::new(), &empty_activity(), None);
         let phases: Vec<plans::Phase> = entries.iter().map(|entry| entry.phase).collect();
         assert_eq!(
             phases,
@@ -640,7 +819,7 @@ mod tests {
         write_plan_dir(root, plans::Phase::Scoping, "new", Some("New"));
         let mut activity = empty_activity();
         activity.insert("old".to_string(), Instant::now());
-        let entries = sorted_entries(root, &HashMap::new(), &activity);
+        let entries = sorted_entries(root, &HashMap::new(), &activity, None);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "old");
         assert_eq!(entries[1].name, "new");
@@ -653,7 +832,7 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Scoping, "first", Some("First"));
         write_plan_dir(root, plans::Phase::Scoping, "second", Some("Second"));
-        let entries = sorted_entries(root, &HashMap::new(), &empty_activity());
+        let entries = sorted_entries(root, &HashMap::new(), &empty_activity(), None);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "second");
         assert_eq!(entries[1].name, "first");
@@ -665,7 +844,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Scoping, "bare", None);
-        let entries = sorted_entries(root, &HashMap::new(), &empty_activity());
+        let entries = sorted_entries(root, &HashMap::new(), &empty_activity(), None);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "Untitled");
         assert_eq!(entries[0].sessions.len(), 1);
@@ -677,7 +856,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
-        let entries = sorted_entries(root, &HashMap::new(), &empty_activity());
+        let entries = sorted_entries(root, &HashMap::new(), &empty_activity(), None);
         assert_eq!(
             most_recent_key(&entries),
             Some(SessionKey {
@@ -705,7 +884,7 @@ mod tests {
         live.working = true;
         live.approval = true;
         let sessions = HashMap::from([(key, live)]);
-        let entries = sorted_entries(root, &sessions, &empty_activity());
+        let entries = sorted_entries(root, &sessions, &empty_activity(), None);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 2);
         let executing = entries[0]
@@ -731,10 +910,228 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Cancelled, "c", Some("C"));
-        let entries = sorted_entries(root, &HashMap::new(), &empty_activity());
+        let entries = sorted_entries(root, &HashMap::new(), &empty_activity(), None);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 1);
         assert_eq!(entries[0].sessions[0].role, SessionRole::Scoping);
+    }
+
+    #[test]
+    fn pending_lists_as_untitled_without_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        assert!(
+            !plans::PlanRef {
+                name: name.to_string(),
+                phase: plans::Phase::Scoping,
+            }
+            .path(root)
+            .exists()
+        );
+        let entries = sorted_entries(root, &HashMap::new(), &empty_activity(), Some(name));
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, name);
+        assert_eq!(entries[0].title, "Untitled");
+        assert!(!entries[0].has_plan_md);
+        assert_eq!(entries[0].sessions.len(), 1);
+        assert_eq!(entries[0].sessions[0].role, SessionRole::Scoping);
+    }
+
+    #[test]
+    fn reserve_creates_no_dir_and_avoids_taken_names() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        plans::materialize_scoping(root, "2026-09-26.08-41-03").expect("materialize");
+        let reserved = reserve_scoping_name(root, Some("2026-09-26.08-41-04"));
+        assert_ne!(reserved, "2026-09-26.08-41-03");
+        assert_ne!(reserved, "2026-09-26.08-41-04");
+        assert!(
+            !plans::PlanRef {
+                name: reserved,
+                phase: plans::Phase::Scoping,
+            }
+            .path(root)
+            .exists()
+        );
+    }
+
+    #[test]
+    fn empty_scoping_needs_no_plan_md_no_activity_no_prompt() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let mut state = State::default();
+        assert!(is_empty_scoping(&state, root, name));
+        plans::materialize_scoping(root, name).expect("materialize");
+        assert!(is_empty_scoping(&state, root, name));
+        state.activity.insert(name.to_string(), Instant::now());
+        assert!(!is_empty_scoping(&state, root, name));
+        state.activity.remove(name);
+        let key = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Scoping,
+        };
+        state.sessions.insert(
+            key.clone(),
+            LiveSession::fresh(
+                ActivePlan::scoping(name.to_string()),
+                crate::repo_state::RepoState::default(),
+            ),
+        );
+        assert!(is_empty_scoping(&state, root, name));
+        state.sessions.get_mut(&key).expect("live").last_prompt = Some("hi".to_string());
+        assert!(!is_empty_scoping(&state, root, name));
+        let state = State::default();
+        plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("materialize");
+        std::fs::write(
+            root.join(".samokod/plans/scoping/2026-09-26.08-41-04/plan.md"),
+            "# T\n",
+        )
+        .expect("write");
+        assert!(!is_empty_scoping(&state, root, "2026-09-26.08-41-04"));
+    }
+
+    #[test]
+    fn vanish_removes_dir_session_activity_and_pending() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        plans::materialize_scoping(root, name).expect("materialize");
+        let mut state = State {
+            pending_scoping: Some(name.to_string()),
+            ..Default::default()
+        };
+        state.activity.insert(name.to_string(), Instant::now());
+        state.sessions.insert(
+            SessionKey {
+                plan: name.to_string(),
+                role: SessionRole::Scoping,
+            },
+            LiveSession::fresh(
+                ActivePlan::scoping(name.to_string()),
+                crate::repo_state::RepoState::default(),
+            ),
+        );
+        vanish_scoping(&mut state, root, name);
+        assert!(
+            !plans::PlanRef {
+                name: name.to_string(),
+                phase: plans::Phase::Scoping,
+            }
+            .path(root)
+            .exists()
+        );
+        assert!(state.sessions.is_empty());
+        assert!(!state.activity.contains_key(name));
+        assert_eq!(state.pending_scoping, None);
+        vanish_scoping(&mut state, root, "2026-09-26.08-41-99");
+    }
+
+    #[test]
+    fn double_reserve_reuses_empty_pending() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let mut state = State::default();
+        let name = reserve_scoping_name(root, state.pending_scoping.as_deref());
+        state.pending_scoping = Some(name.clone());
+        state.current = Some(SessionKey {
+            plan: name.clone(),
+            role: SessionRole::Scoping,
+        });
+        let reuse = state.current.clone().is_some_and(|current| {
+            state.pending_scoping.as_deref() == Some(current.plan.as_str())
+                && current.role == SessionRole::Scoping
+                && is_empty_scoping(&state, root, &current.plan)
+        });
+        assert!(reuse);
+        assert!(
+            !plans::PlanRef {
+                name,
+                phase: plans::Phase::Scoping,
+            }
+            .path(root)
+            .exists()
+        );
+    }
+
+    #[test]
+    fn send_path_materializes_and_clears_pending() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let mut state = State {
+            pending_scoping: Some("2026-09-26.08-41-03".to_string()),
+            ..Default::default()
+        };
+        let session = SessionKey {
+            plan: "2026-09-26.08-41-03".to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert!(state.pending_scoping.as_deref() == Some(session.plan.as_str()));
+        plans::materialize_scoping(root, &session.plan).expect("materialize");
+        if state.pending_scoping.as_deref() == Some(session.plan.as_str()) {
+            state.pending_scoping = None;
+        }
+        assert!(
+            plans::PlanRef {
+                name: session.plan.clone(),
+                phase: plans::Phase::Scoping,
+            }
+            .path(root)
+            .is_dir()
+        );
+        assert_eq!(state.pending_scoping, None);
+    }
+
+    #[test]
+    fn select_away_discards_only_empty_prev() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("target");
+        let mut state = State {
+            pending_scoping: Some("2026-09-26.08-41-03".to_string()),
+            current: Some(SessionKey {
+                plan: "2026-09-26.08-41-03".to_string(),
+                role: SessionRole::Scoping,
+            }),
+            ..Default::default()
+        };
+        let target = SessionKey {
+            plan: "2026-09-26.08-41-04".to_string(),
+            role: SessionRole::Scoping,
+        };
+        if let Some(prev) = state.current.clone()
+            && prev != target
+            && prev.role == SessionRole::Scoping
+            && is_empty_scoping(&state, root, &prev.plan)
+        {
+            vanish_scoping(&mut state, root, &prev.plan);
+        }
+        state.current = Some(target.clone());
+        assert_eq!(state.pending_scoping, None);
+        assert!(
+            plans::PlanRef {
+                name: target.plan.clone(),
+                phase: plans::Phase::Scoping,
+            }
+            .path(root)
+            .is_dir()
+        );
+        let entries = sorted_entries(
+            root,
+            &state.sessions,
+            &state.activity,
+            state.pending_scoping.as_deref(),
+        );
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, target.plan);
     }
 
     async fn open_test_session(

@@ -10,7 +10,7 @@ use crate::opencode;
 use crate::plans;
 use crate::spend::context_pct;
 use crate::todos::{diff_todos, todos_from_call, todos_from_update};
-use crate::types::{AgentError, AppEvent, SessionKey, TodoView};
+use crate::types::{AgentError, AppEvent, SessionKey, SessionRole, TodoView};
 
 use super::AgentManager;
 use super::State;
@@ -37,8 +37,38 @@ impl AgentManager {
     /// Send one plain-text prompt, spawning the session lazily on its
     /// first message. Streams arrive as events; the turn end arrives as
     /// done or failed. The role template prefixes the first message per
-    /// ACP conversation; the transcript keeps the raw text.
+    /// ACP conversation; the transcript keeps the raw text. A reserved
+    /// pending scoping session materializes its directory here, before
+    /// the unchanged `ensure_live` path.
     pub async fn send_prompt(&self, session: SessionKey, text: String) -> Result<(), AgentError> {
+        if session.role == SessionRole::Scoping {
+            let repo_root = self
+                .reopen_snapshot()
+                .map(|(root, _)| root)
+                .ok_or_else(|| AgentError::NoSession {
+                    raw: "open a repository first".to_string(),
+                })?;
+            let pending_match = match self.state.lock() {
+                Ok(state) => state.pending_scoping.as_deref() == Some(session.plan.as_str()),
+                Err(error) => {
+                    log::warn!("failed to check pending session: {error}");
+                    false
+                }
+            };
+            if pending_match {
+                plans::materialize_scoping(&repo_root, &session.plan)?;
+                match self.state.lock() {
+                    Ok(mut state) => {
+                        if state.pending_scoping.as_deref() == Some(session.plan.as_str()) {
+                            state.pending_scoping = None;
+                        }
+                    }
+                    Err(error) => {
+                        log::warn!("failed to clear pending session: {error}");
+                    }
+                }
+            }
+        }
         let (connection, session_id) = self.ensure_live(&session).await?;
         // A fresh prompt clears the failed flag; the dot goes green while
         // the turn runs.

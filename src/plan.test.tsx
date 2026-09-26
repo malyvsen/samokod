@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
 	markCompleted: vi.fn(),
 	abandonPlan: vi.fn(),
 	cancelExecution: vi.fn(),
+	selectPlan: vi.fn(),
 	sendPrompt: vi.fn(),
 	retryLast: vi.fn(),
 	cancelTurn: vi.fn(),
@@ -132,7 +133,9 @@ describe("plan", () => {
 			],
 			selected: { plan: "2026-09-25.10-54-59.draft-idea", role: "scoping" },
 		});
-		await openChat();
+		api.sendPrompt.mockResolvedValue(undefined);
+		const user = await openChat();
+		await user.keyboard("old question{Enter}");
 		emit({ type: "agent_text", session: testKey(), chunk: "old chat" });
 		emit({ type: "turn_done", session: testKey() });
 		const scoping = screen.getByRole("button", {
@@ -140,11 +143,46 @@ describe("plan", () => {
 		});
 		const row = scoping.closest(".session");
 		if (row === null) throw new Error("scoping row missing");
-		await within(row as HTMLElement)
-			.findByRole("button", { name: "Abandon 2026-09-25.10-54-59" })
-			.then((button) => button.click());
+		const button = await within(row as HTMLElement).findByRole("button", {
+			name: "Abandon 2026-09-25.10-54-59",
+		});
+		await user.click(button);
 		expect(api.abandonPlan).toHaveBeenCalledTimes(1);
+		await screen.findByText("Draft idea");
 		expect(screen.getByText("old chat")).toBeInTheDocument();
+		expect(screen.getByText("old question")).toBeInTheDocument();
+	});
+
+	test("abandoning an empty session drops its chat state", async () => {
+		api.abandonPlan.mockResolvedValue({
+			plans: [testEntry("bbb", "scoping", "Beta", true)],
+			selected: { plan: "bbb", role: "scoping" },
+		});
+		const user = await openChat();
+		emit({ type: "agent_text", session: testKey(), chunk: "ephemeral" });
+		emit({ type: "turn_done", session: testKey() });
+		expect(screen.getByText("ephemeral")).toBeInTheDocument();
+		const scoping = screen.getByRole("button", {
+			name: "Parallel sessions Scoping",
+		});
+		const row = scoping.closest(".session");
+		if (row === null) throw new Error("scoping row missing");
+		const button = await within(row as HTMLElement).findByRole("button", {
+			name: "Abandon 2026-09-25.10-54-59",
+		});
+		await user.click(button);
+		expect(api.abandonPlan).toHaveBeenCalledTimes(1);
+		await vi.waitFor(() =>
+			expect(screen.queryByText("ephemeral")).not.toBeInTheDocument(),
+		);
+	});
+
+	test("first send appends the user bubble", async () => {
+		api.sendPrompt.mockResolvedValue(undefined);
+		const user = await openChat();
+		await user.keyboard("hello plan{Enter}");
+		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello plan");
+		expect(screen.getByText("hello plan")).toBeInTheDocument();
 	});
 
 	test("background sessions update silently", async () => {
@@ -174,9 +212,18 @@ describe("plan", () => {
 			],
 			selected: { plan: "aaa", role: "scoping" },
 		});
+		api.selectPlan.mockImplementation(async (session: unknown) => ({
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb", "scoping", "Beta", true),
+			],
+			selected: session,
+		}));
+		api.sendPrompt.mockResolvedValue(undefined);
 		const user = await openChat();
 		const aaa = { plan: "aaa", role: "scoping" } as const;
 		const bbb = { plan: "bbb", role: "scoping" } as const;
+		await user.keyboard("aaa question{Enter}");
 		emit({ type: "agent_text", session: aaa, chunk: "aaa chat" });
 		emit({ type: "turn_done", session: aaa });
 		emit({ type: "agent_text", session: bbb, chunk: "bbb chat" });
@@ -190,13 +237,47 @@ describe("plan", () => {
 		emit({ type: "spend_tick", session: bbb, cost: 1.5, ctx_pct: 10 });
 		expect(screen.getByText("aaa chat")).toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: "Beta Scoping" }));
-		expect(screen.getByText("bbb chat")).toBeInTheDocument();
+		expect(api.selectPlan).toHaveBeenCalledWith(bbb);
+		await screen.findByText("bbb chat");
 		expect(screen.queryByText("aaa chat")).not.toBeInTheDocument();
 		expect(screen.getByText("Beta todo")).toBeInTheDocument();
 		expect(screen.getByText("$1.50")).toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: "Alpha Scoping" }));
-		expect(screen.getByText("aaa chat")).toBeInTheDocument();
+		await screen.findByText("aaa chat");
 		expect(screen.queryByText("Beta todo")).not.toBeInTheDocument();
+	});
+
+	test("selecting away drops only the empty previous session", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "main",
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb", "scoping", "Beta", true),
+			],
+			selected: { plan: "aaa", role: "scoping" },
+		});
+		api.selectPlan.mockResolvedValue({
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb", "scoping", "Beta", true),
+			],
+			selected: { plan: "bbb", role: "scoping" },
+		});
+		const user = await openChat();
+		const aaa = { plan: "aaa", role: "scoping" } as const;
+		emit({ type: "agent_text", session: aaa, chunk: "aaa ephemeral" });
+		emit({ type: "turn_done", session: aaa });
+		expect(screen.getByText("aaa ephemeral")).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Beta Scoping" }));
+		expect(api.selectPlan).toHaveBeenCalledWith({
+			plan: "bbb",
+			role: "scoping",
+		});
+		expect(screen.queryByText("aaa ephemeral")).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("textbox", { name: "Ask for a change…" }),
+		).toBeInTheDocument();
 	});
 
 	test("new plan selects a fresh empty session", async () => {

@@ -13,6 +13,7 @@ import {
 	openRepo,
 	refreshBranch,
 	retryLast,
+	selectPlan,
 	sendPrompt,
 	setConfigOption,
 	validateRepo,
@@ -46,7 +47,7 @@ import type {
 	RecentRepo,
 	SessionKey,
 } from "./types";
-import { sessionKeyOf } from "./types";
+import { sameSession, sessionKeyOf } from "./types";
 import "./App.css";
 
 type View = { kind: "picker" } | { kind: "chat" };
@@ -241,8 +242,25 @@ export function App() {
 		}
 	}
 
-	function handleSelect(key: SessionKey) {
-		setSelectedKey(key);
+	async function handleSelect(key: SessionKey) {
+		const prev = selectedRef.current;
+		if (sameSession(prev, key)) return;
+		const prevEmpty =
+			prev !== null && prev.role === "scoping" && !hasUserMessage(chats, prev);
+		try {
+			const update = await selectPlan(key);
+			if (prev !== null && prevEmpty) {
+				const prevId = sessionKeyOf(prev);
+				setChats((current) => {
+					const next = { ...current };
+					delete next[prevId];
+					return next;
+				});
+			}
+			applyPlans(update);
+		} catch (error) {
+			console.warn("select_plan failed", error);
+		}
 	}
 
 	async function handleAnswer(toolCallId: string, optionId: string) {
@@ -317,7 +335,24 @@ export function App() {
 	}
 
 	async function handleAbandon(key: SessionKey) {
-		await runPlansAction(key, (session) => abandonPlan(session));
+		const wasEmpty = !hasUserMessage(chats, key);
+		updateChat(key, (chat) => ({ ...chat, working: true }));
+		try {
+			const update = await abandonPlan(key);
+			if (wasEmpty) {
+				setChats((current) => {
+					const next = { ...current };
+					delete next[sessionKeyOf(key)];
+					return next;
+				});
+			} else {
+				setChats((current) => carryChats(current, key, update, false));
+			}
+			applyPlans(update);
+		} catch (error) {
+			updateChat(key, (chat) => ({ ...chat, working: false }));
+			appendError(key, error instanceof Error ? error.message : String(error));
+		}
 	}
 
 	async function handleCancel(key: SessionKey) {
@@ -419,6 +454,13 @@ export function App() {
 				</>
 			)}
 		</div>
+	);
+}
+
+function hasUserMessage(chats: Chats, key: SessionKey): boolean {
+	return (
+		chats[sessionKeyOf(key)]?.transcript.some((item) => item.kind === "user") ??
+		false
 	);
 }
 

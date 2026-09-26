@@ -87,17 +87,13 @@ pub fn ensure_structure(repo_root: &Path) -> Result<(), PlanError> {
     Ok(())
 }
 
-/// Create a fresh timestamped scoping plan. Fails fast on io errors.
-pub fn create_scoping(repo_root: &Path) -> Result<PlanRef, PlanError> {
-    let dir = phase_dir(repo_root, Phase::Scoping);
-    let taken: HashSet<String> = std::fs::read_dir(&dir)?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.file_name().to_string_lossy().to_string())
-        .collect();
-    let name = unique_name(&timestamp_now(), &taken);
-    std::fs::create_dir(dir.join(&name))?;
+/// Materialize a reserved scoping session on first send. Idempotent:
+/// tolerates a race-created dir and returns the scoping `PlanRef`.
+/// Fails loud on real IO errors.
+pub fn materialize_scoping(repo_root: &Path, name: &str) -> Result<PlanRef, PlanError> {
+    std::fs::create_dir_all(phase_dir(repo_root, Phase::Scoping).join(name))?;
     Ok(PlanRef {
-        name,
+        name: name.to_string(),
         phase: Phase::Scoping,
     })
 }
@@ -410,7 +406,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
-        let scoping = create_scoping(root).expect("create");
+        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         std::fs::write(scoping.plan_md(root), "intro\n\n# Real title\n").expect("write");
         assert_eq!(plan_title(root, &scoping), "Real title");
     }
@@ -420,7 +416,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
-        let bare = create_scoping(root).expect("create");
+        let bare = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         assert_eq!(plan_title(root, &bare), "Untitled");
         std::fs::write(bare.plan_md(root), "no heading here\n").expect("write");
         assert_eq!(plan_title(root, &bare), "Untitled");
@@ -436,11 +432,15 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
-        let scoping = create_scoping(root).expect("create");
+        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         std::fs::write(scoping.plan_md(root), "# Titled\n").expect("write");
         let executing = execute(root, &scoping).expect("execute");
         let done = complete(root, &executing).expect("complete");
-        let cancelled = abandon(root, &create_scoping(root).expect("fresh")).expect("abandon");
+        let cancelled = abandon(
+            root,
+            &materialize_scoping(root, "2026-09-26.08-41-04").expect("fresh"),
+        )
+        .expect("abandon");
         let names: HashSet<(String, Phase)> = scan_plans(root)
             .into_iter()
             .map(|plan| (plan.name, plan.phase))
@@ -459,7 +459,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
-        let plain = create_scoping(root).expect("create");
+        let plain = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         assert!(!has_execution(root, &plain));
         std::fs::write(plain.plan_md(root), "# Shiny\n").expect("write");
         let executing = execute(root, &plain).expect("execute");
@@ -467,13 +467,13 @@ mod tests {
         assert!(has_execution(root, &executing));
         let done = complete(root, &executing).expect("complete");
         assert!(has_execution(root, &done));
-        let second = create_scoping(root).expect("second");
+        let second = materialize_scoping(root, "2026-09-26.08-41-04").expect("second");
         std::fs::write(second.plan_md(root), "# Second\n").expect("write");
         let running = execute(root, &second).expect("execute");
         mark_executed(root, &running);
         let cancelled = abandon(root, &running).expect("abandon");
         assert!(has_execution(root, &cancelled));
-        let fresh = create_scoping(root).expect("fresh");
+        let fresh = materialize_scoping(root, "2026-09-26.08-41-05").expect("fresh");
         let dropped = abandon(root, &fresh).expect("abandon");
         assert!(!has_execution(root, &dropped));
     }
@@ -483,9 +483,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
-        let with_md = create_scoping(root).expect("create");
+        let with_md = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         std::fs::write(with_md.plan_md(root), "# T\n").expect("write");
-        let bare = create_scoping(root).expect("create");
+        let bare = materialize_scoping(root, "2026-09-26.08-41-04").expect("create");
         assert!(plan_mtime(root, &with_md).is_some());
         assert!(plan_mtime(root, &bare).is_some());
         let missing = PlanRef {
@@ -515,7 +515,7 @@ mod tests {
         // Idempotent rerun keeps everything.
         ensure_structure(root).expect("re-ensure");
 
-        let scoping = create_scoping(root).expect("create");
+        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         assert_eq!(scoping.phase, Phase::Scoping);
         assert!(scoping.path(root).is_dir());
         assert!(!scoping.has_plan_md(root));
@@ -540,12 +540,12 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
-        let scoping = create_scoping(root).expect("create");
+        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         std::fs::write(scoping.plan_md(root), "# Shiny feature\n\nSteps.\n").expect("write plan");
         let executing = execute(root, &scoping).expect("execute");
         let completed = complete(root, &executing).expect("complete");
         assert!(completed.has_plan_md(root));
-        let fresh = create_scoping(root).expect("fresh scoping");
+        let fresh = materialize_scoping(root, "2026-09-26.08-41-04").expect("fresh scoping");
         assert_eq!(fresh.phase, Phase::Scoping);
         assert!(fresh.path(root).is_dir());
         assert!(!fresh.has_plan_md(root));
@@ -557,7 +557,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
-        let scoping = create_scoping(root).expect("create");
+        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         std::fs::write(scoping.plan_md(root), "no heading here\n").expect("write plan");
         assert!(matches!(execute(root, &scoping), Err(PlanError::Untitled)));
     }
@@ -579,7 +579,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
-        let scoping = create_scoping(root).expect("create");
+        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         std::fs::write(scoping.plan_md(root), "# Draft idea\n").expect("write plan");
         let cancelled = abandon(root, &scoping).expect("abandon");
         assert_eq!(cancelled.phase, Phase::Cancelled);
@@ -591,8 +591,30 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
-        let scoping = create_scoping(root).expect("create");
+        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         let cancelled = abandon(root, &scoping).expect("abandon");
         assert_eq!(cancelled.name, scoping.name);
+    }
+
+    #[test]
+    fn materialize_creates_missing_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let materialized = materialize_scoping(root, "2026-09-26.08-41-03").expect("materialize");
+        assert_eq!(materialized.phase, Phase::Scoping);
+        assert!(materialized.path(root).is_dir());
+        assert!(!materialized.has_plan_md(root));
+    }
+
+    #[test]
+    fn materialize_is_idempotent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        materialize_scoping(root, "2026-09-26.08-41-03").expect("first");
+        let second = materialize_scoping(root, "2026-09-26.08-41-03").expect("second");
+        assert_eq!(second.name, "2026-09-26.08-41-03");
+        assert!(second.path(root).is_dir());
     }
 }

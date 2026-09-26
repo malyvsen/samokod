@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { onAppEvent, setConfigOption } from "./api";
+import { onAppEvent, selectPlan, setConfigOption } from "./api";
 import { testKey } from "./fixtures";
 import type { AppEvent } from "./types";
 
@@ -28,6 +28,14 @@ describe("config options", () => {
 			session: testKey(),
 			configId: "model",
 			value: "openai/gpt-5",
+		});
+	});
+
+	test("select_plan targets the session", async () => {
+		vi.mocked(invoke).mockResolvedValue({ plans: [], selected: testKey() });
+		await selectPlan(testKey());
+		expect(invoke).toHaveBeenCalledWith("select_plan", {
+			session: testKey(),
 		});
 	});
 });

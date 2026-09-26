@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
 	markCompleted: vi.fn(),
 	abandonPlan: vi.fn(),
 	cancelExecution: vi.fn(),
+	selectPlan: vi.fn(),
 	sendPrompt: vi.fn(),
 	retryLast: vi.fn(),
 	cancelTurn: vi.fn(),

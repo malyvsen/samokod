@@ -22,7 +22,12 @@ impl AgentManager {
         let state = self.state.lock().expect("state poisoned");
         let repo_root = state.repo_root.clone().unwrap_or_default();
         let branch = state.branch.clone();
-        let plans = sorted_entries(&repo_root, &state.sessions, &state.activity);
+        let plans = sorted_entries(
+            &repo_root,
+            &state.sessions,
+            &state.activity,
+            state.pending_scoping.as_deref(),
+        );
         let selected = most_recent_key(&plans).unwrap_or_else(|| SessionKey {
             plan: plans
                 .first()
@@ -43,7 +48,12 @@ impl AgentManager {
     pub(crate) fn plans_update(&self) -> PlansUpdate {
         let state = self.state.lock().expect("state poisoned");
         let repo_root = state.repo_root.clone().unwrap_or_default();
-        let plans = sorted_entries(&repo_root, &state.sessions, &state.activity);
+        let plans = sorted_entries(
+            &repo_root,
+            &state.sessions,
+            &state.activity,
+            state.pending_scoping.as_deref(),
+        );
         let selected = state.current.clone().unwrap_or_else(|| {
             most_recent_key(&plans).unwrap_or_else(|| SessionKey {
                 plan: plans
@@ -99,13 +109,26 @@ impl AgentManager {
 
 /// Plans sorted by phase, then most recent user activity first. Before any
 /// activity, `plan.md` modification time newest first, falling back to the
-/// directory name (which starts with a creation timestamp).
+/// directory name (which starts with a creation timestamp). A reserved
+/// pending name appends a synthetic scoping `PlanRef` rendering like an
+/// on-disk bare plan; with no mtime it orders by name, newest first.
 pub(crate) fn sorted_entries(
     repo_root: &Path,
     sessions: &HashMap<SessionKey, LiveSession>,
     activity: &HashMap<String, Instant>,
+    pending: Option<&str>,
 ) -> Vec<PlanEntry> {
     let mut plans = plans::scan_plans(repo_root);
+    if let Some(name) = pending
+        && !plans
+            .iter()
+            .any(|plan| plan.phase == plans::Phase::Scoping && plan.name == name)
+    {
+        plans.push(plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Scoping,
+        });
+    }
     plans.sort_by(|left, right| {
         plans::phase_rank(left.phase)
             .cmp(&plans::phase_rank(right.phase))
@@ -187,7 +210,12 @@ pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
     let (plans, selected) = match state.lock() {
         Ok(guard) => {
             let repo_root = guard.repo_root.clone().unwrap_or_default();
-            let plans = sorted_entries(&repo_root, &guard.sessions, &guard.activity);
+            let plans = sorted_entries(
+                &repo_root,
+                &guard.sessions,
+                &guard.activity,
+                guard.pending_scoping.as_deref(),
+            );
             let selected = guard.current.clone().or_else(|| most_recent_key(&plans));
             (plans, selected)
         }
