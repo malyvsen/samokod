@@ -86,6 +86,10 @@ export function warmSession(session: SessionKey): Promise<void> {
 	return invoke("warm_session", { session });
 }
 
+export function loadHistory(session: SessionKey): Promise<void> {
+	return invoke("load_history", { session });
+}
+
 export function onAppEvent(handler: (event: AppEvent) => void): () => void {
 	let cancelled = false;
 	let unlisten: (() => void) | undefined;

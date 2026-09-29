@@ -15,20 +15,28 @@ export function Transcript({
 	repoLabel,
 	onRetry,
 	onAnswer,
+	historyLoading = false,
+	historyError = null,
+	onHistoryRetry = null,
 	children,
 }: {
 	items: TranscriptItem[];
 	repoLabel: string;
 	onRetry: (() => void) | null;
 	onAnswer: (toolCallId: string, optionId: string) => void;
+	historyLoading?: boolean;
+	historyError?: string | null;
+	onHistoryRetry?: (() => void) | null;
 	children?: ReactNode;
 }) {
 	return (
 		<>
-			{items.length === 0 && (
+			{items.length === 0 && historyError === null && (
 				<div className="empty-hint">
-					<b>{repoLabel} · fresh session</b>
-					no messages yet
+					<b>
+						{repoLabel} · {historyLoading ? "loading history" : "fresh session"}
+					</b>
+					{historyLoading ? "replaying past messages" : "no messages yet"}
 				</div>
 			)}
 			<div className="tcol">
@@ -119,22 +127,48 @@ export function Transcript({
 						);
 					}
 					return (
-						<div className="errbar" key={item.id}>
-							<div className="erow">
-								<span data-full={item.raw}>✕ {item.raw}</span>
-								{item.retryable && onRetry !== null && (
-									<button className="tbtn" type="button" onClick={onRetry}>
-										retry
-									</button>
-								)}
-							</div>
-							<div className="ehint">{item.hint}</div>
-						</div>
+						<ErrorBar
+							key={item.id}
+							raw={item.raw}
+							hint={item.hint}
+							onRetry={item.retryable ? onRetry : null}
+						/>
 					);
 				})}
+				{historyError !== null && (
+					<ErrorBar
+						raw={historyError}
+						hint="history failed to load"
+						onRetry={onHistoryRetry}
+					/>
+				)}
 				{children}
 			</div>
 		</>
+	);
+}
+
+function ErrorBar({
+	raw,
+	hint,
+	onRetry,
+}: {
+	raw: string;
+	hint: string;
+	onRetry: (() => void) | null;
+}) {
+	return (
+		<div className="errbar">
+			<div className="erow">
+				<span data-full={raw}>✕ {raw}</span>
+				{onRetry !== null && (
+					<button className="tbtn" type="button" onClick={onRetry}>
+						retry
+					</button>
+				)}
+			</div>
+			<div className="ehint">{hint}</div>
+		</div>
 	);
 }
 

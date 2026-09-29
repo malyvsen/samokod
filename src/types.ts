@@ -148,6 +148,7 @@ export interface SpendView {
 
 export type AppEvent =
 	| { type: "agent_text"; session: SessionKey; chunk: string }
+	| { type: "user_text"; session: SessionKey; chunk: string }
 	| { type: "tool_line"; session: SessionKey; line: ToolLineView }
 	| { type: "turn_done"; session: SessionKey }
 	| {
@@ -184,6 +185,14 @@ export type AppEvent =
 			ctx_pct: number;
 	  }
 	| { type: "session_reset"; session: SessionKey }
+	| { type: "history_begin"; session: SessionKey }
+	| { type: "history_done"; session: SessionKey }
+	| {
+			type: "history_failed";
+			session: SessionKey;
+			raw: string;
+			retryable: boolean;
+	  }
 	| { type: "branch_changed"; branch: string }
 	| { type: "plans_changed"; plans: PlanEntry[]; selected: SessionKey };
 

@@ -8,6 +8,7 @@ import {
 	createPlan,
 	executePlan,
 	getPrefs,
+	loadHistory,
 	markCompleted,
 	onAppEvent,
 	openRepo,
@@ -27,6 +28,7 @@ import { toSelectorModel } from "./components/selectors";
 import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
 import { hasUserMessage, useSessionDrafts } from "./sessions/drafts";
+import { useSessionHistory } from "./sessions/history";
 import {
 	agentStatusOf,
 	isReadOnly,
@@ -78,7 +80,7 @@ export function App() {
 	const draft = useSessionDrafts(selectedKey, chats);
 
 	const status = agentStatusOf(chat);
-	const busy = chat.working || chat.approval;
+	const busy = chat.working || chat.approval || chat.historyLoading;
 
 	const selectedRef = useRef<SessionKey | null>(null);
 	selectedRef.current = selectedKey;
@@ -99,7 +101,10 @@ export function App() {
 	const entry = selectedEntry(plans, selectedKey);
 	const readOnly = isReadOnly(entry);
 	const isLive = chat.configOptions.length > 0;
-	useWarmSession(selectedKey, isLive, readOnly);
+	// load_history implies warm_session, so empty transcripts skip the warm.
+	const needsHistory = chat.transcript.length === 0;
+	useWarmSession(selectedKey, isLive || needsHistory, readOnly);
+	useSessionHistory(selectedKey, chats);
 	const selectors = readOnly
 		? { kind: "live" as const, options: chat.configOptions }
 		: toSelectorModel(chat.configOptions, configDefaults);
@@ -315,6 +320,16 @@ export function App() {
 		}
 	}
 
+	async function handleHistoryRetry() {
+		const key = selectedRef.current;
+		if (key === null || chat.historyLoading) return;
+		try {
+			await loadHistory(key);
+		} catch (error) {
+			console.warn("load_history retry failed", error);
+		}
+	}
+
 	async function handleNewPlan() {
 		try {
 			const update = await createPlan();
@@ -449,6 +464,9 @@ export function App() {
 									repoLabel={repoLabel}
 									onRetry={readOnly ? null : handleRetry}
 									onAnswer={handleAnswer}
+									historyLoading={chat.historyLoading}
+									historyError={chat.historyError}
+									onHistoryRetry={handleHistoryRetry}
 								>
 									{!busy && !readOnly && selectedId !== null && draft.ready && (
 										<DraftBubble

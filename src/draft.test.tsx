@@ -28,6 +28,7 @@ const api = vi.hoisted(() => ({
 	answerPermission: vi.fn(),
 	setConfigOption: vi.fn(),
 	warmSession: vi.fn(),
+	loadHistory: vi.fn(),
 	scopingDraft: vi.fn(),
 	onAppEvent: vi.fn(() => () => {}),
 }));
@@ -63,6 +64,7 @@ beforeEach(() => {
 		config_defaults: testDefaults(),
 	});
 	api.warmSession.mockResolvedValue(undefined);
+	api.loadHistory.mockResolvedValue(undefined);
 	api.scopingDraft.mockResolvedValue(null);
 	api.sendPrompt.mockResolvedValue(undefined);
 });

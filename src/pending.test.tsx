@@ -22,6 +22,7 @@ const api = vi.hoisted(() => ({
 	answerPermission: vi.fn(),
 	setConfigOption: vi.fn(),
 	warmSession: vi.fn(),
+	loadHistory: vi.fn(),
 	scopingDraft: vi.fn(),
 	onAppEvent: vi.fn(() => () => {}),
 }));
@@ -77,11 +78,12 @@ beforeEach(() => {
 	api.getPrefs.mockResolvedValue({ recent: [{ path: "/repo" }] });
 	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "main" });
 	api.warmSession.mockResolvedValue(undefined);
+	api.loadHistory.mockResolvedValue(undefined);
 	api.scopingDraft.mockResolvedValue(null);
 });
 
 describe("pending pickers", () => {
-	test("createPlan with empty options warms and shows stored labels", async () => {
+	test("createPlan with empty options loads history and shows stored labels", async () => {
 		api.openRepo.mockResolvedValue({
 			repo_root: "/repo",
 			branch: "main",
@@ -103,7 +105,7 @@ describe("pending pickers", () => {
 		await screen.findByRole("button", { name: "+ NEW PLAN" });
 		await user.click(screen.getByRole("button", { name: "+ NEW PLAN" }));
 		await vi.waitFor(() =>
-			expect(api.warmSession).toHaveBeenCalledWith({
+			expect(api.loadHistory).toHaveBeenCalledWith({
 				plan: "2026-09-25.11-00-00",
 				role: "scoping",
 			}),

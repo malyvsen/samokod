@@ -1,0 +1,200 @@
+import { describe, expect, test } from "vitest";
+import { testKey } from "../fixtures";
+import { type AppEvent, sessionKeyOf } from "../types";
+import {
+	applySessionEvent,
+	type ChatState,
+	type Chats,
+	emptyChat,
+	updateEntry,
+} from "./store";
+
+const KEY_ID = sessionKeyOf(testKey());
+
+function withChat(): Chats {
+	return updateEntry({}, testKey(), (chat) => chat);
+}
+
+function eventFor(event: AppEvent): Chats {
+	return applySessionEvent(withChat(), event);
+}
+
+function chatOf(chats: Chats): ChatState {
+	return chats[KEY_ID] ?? emptyChat();
+}
+
+describe("history events", () => {
+	test("begin marks loading and clears a past error", () => {
+		const failed = applySessionEvent(withChat(), {
+			type: "history_failed",
+			session: testKey(),
+			raw: "boom",
+			retryable: true,
+		});
+		const begun = applySessionEvent(failed, {
+			type: "history_begin",
+			session: testKey(),
+		});
+		const chat = chatOf(begun);
+		expect(chat.historyLoading).toBe(true);
+		expect(chat.historyError).toBeNull();
+	});
+
+	test("retry begin clears the partial replay", () => {
+		let chats = eventFor({ type: "history_begin", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "agent_text",
+			session: testKey(),
+			chunk: "partial",
+		});
+		chats = applySessionEvent(chats, {
+			type: "history_failed",
+			session: testKey(),
+			raw: "boom",
+			retryable: true,
+		});
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
+		const chat = chatOf(chats);
+		expect(chat.transcript).toEqual([]);
+	});
+
+	test("begin never clobbers a live transcript", () => {
+		let chats = eventFor({ type: "history_begin", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "history_done",
+			session: testKey(),
+		});
+		chats = applySessionEvent(chats, {
+			type: "user_text",
+			session: testKey(),
+			chunk: "live",
+		});
+		const chat = chatOf(chats);
+		expect(chat.transcript).toHaveLength(1);
+	});
+
+	test("done clears loading and keeps the replay", () => {
+		let chats = eventFor({ type: "history_begin", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "user_text",
+			session: testKey(),
+			chunk: "hello",
+		});
+		chats = applySessionEvent(chats, {
+			type: "history_done",
+			session: testKey(),
+		});
+		const chat = chatOf(chats);
+		expect(chat.historyLoading).toBe(false);
+		expect(chat.transcript).toHaveLength(1);
+	});
+
+	test("failed keeps the partial replay with an error", () => {
+		let chats = eventFor({ type: "history_begin", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "user_text",
+			session: testKey(),
+			chunk: "partial",
+		});
+		chats = applySessionEvent(chats, {
+			type: "history_failed",
+			session: testKey(),
+			raw: "boom",
+			retryable: false,
+		});
+		const chat = chatOf(chats);
+		expect(chat.historyLoading).toBe(false);
+		expect(chat.historyError).toBe("boom");
+		expect(chat.transcript).toHaveLength(1);
+	});
+});
+
+describe("replayed updates", () => {
+	test("user chunks merge without touching working", () => {
+		let chats = eventFor({ type: "history_begin", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "user_text",
+			session: testKey(),
+			chunk: "hel",
+		});
+		chats = applySessionEvent(chats, {
+			type: "user_text",
+			session: testKey(),
+			chunk: "lo",
+		});
+		const chat = chatOf(chats);
+		expect(chat.transcript).toHaveLength(1);
+		expect(chat.transcript[0]).toMatchObject({ kind: "user", text: "hello" });
+		expect(chat.working).toBe(false);
+	});
+
+	test("agent and tool replay leaves working false", () => {
+		let chats = eventFor({ type: "history_begin", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "agent_text",
+			session: testKey(),
+			chunk: "hello",
+		});
+		chats = applySessionEvent(chats, {
+			type: "tool_line",
+			session: testKey(),
+			line: { id: "t1", text: "edit file.md", status: "completed" },
+		});
+		const chat = chatOf(chats);
+		expect(chat.transcript).toHaveLength(2);
+		expect(chat.working).toBe(false);
+		expect(chat.failed).toBe(false);
+	});
+
+	test("replayed approvals resolve without pausing", () => {
+		let chats = eventFor({ type: "history_begin", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "permission_asked",
+			session: testKey(),
+			permission: {
+				tool_call_id: "tc1",
+				title: "run this action?",
+				kind: "bash",
+				options: [{ id: "a", kind: "allow" }],
+				rule_hint: "hint",
+			},
+		});
+		const chat = chatOf(chats);
+		expect(chat.approval).toBe(false);
+		expect(chat.transcript).toHaveLength(1);
+		expect(chat.transcript[0]).toMatchObject({
+			kind: "approval",
+			resolved: true,
+		});
+	});
+
+	test("live turns still mark working and pause", () => {
+		let chats = eventFor({
+			type: "agent_text",
+			session: testKey(),
+			chunk: "hello",
+		});
+		const working = chatOf(chats);
+		expect(working.working).toBe(true);
+		chats = applySessionEvent(chats, {
+			type: "permission_asked",
+			session: testKey(),
+			permission: {
+				tool_call_id: "tc1",
+				title: "run this action?",
+				kind: "bash",
+				options: [{ id: "a", kind: "allow" }],
+				rule_hint: "hint",
+			},
+		});
+		const paused = chatOf(chats);
+		expect(paused.approval).toBe(true);
+		expect(paused.transcript[1]).toMatchObject({
+			kind: "approval",
+			resolved: false,
+		});
+	});
+});

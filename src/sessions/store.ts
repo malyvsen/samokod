@@ -17,6 +17,8 @@ export interface ChatState {
 	working: boolean;
 	approval: boolean;
 	failed: boolean;
+	historyLoading: boolean;
+	historyError: string | null;
 }
 
 export type Chats = Record<string, ChatState>;
@@ -30,6 +32,8 @@ export function emptyChat(): ChatState {
 		working: false,
 		approval: false,
 		failed: false,
+		historyLoading: false,
+		historyError: null,
 	};
 }
 
@@ -50,6 +54,39 @@ export function errorItem(
 	return { kind: "error", id: crypto.randomUUID(), raw, hint, retryable };
 }
 
+function appendText(
+	transcript: TranscriptItem[],
+	kind: "user" | "agent",
+	chunk: string,
+): TranscriptItem[] {
+	const last = transcript[transcript.length - 1];
+	if (last !== undefined && last.kind === kind) {
+		return [...transcript.slice(0, -1), { ...last, text: last.text + chunk }];
+	}
+	if (kind === "user") {
+		return [
+			...transcript,
+			{ kind: "user", id: crypto.randomUUID(), text: chunk },
+		];
+	}
+	return [
+		...transcript,
+		{ kind: "agent", id: crypto.randomUUID(), text: chunk },
+	];
+}
+
+/// Replayed transcript streams while history loads without marking a live
+/// turn, so the status dot stays truthful. Live updates mark working.
+function withTranscript(
+	chat: ChatState,
+	transcript: TranscriptItem[],
+): ChatState {
+	if (chat.historyLoading) {
+		return { ...chat, transcript };
+	}
+	return { ...chat, working: true, failed: false, transcript };
+}
+
 /// Pure per-session event reducer. Session-keyed events route into their own
 /// entry (background sessions update silently); global events leave the map
 /// untouched so the caller handles them separately.
@@ -61,24 +98,17 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 		case "agent_text": {
 			const key = event.session;
 			const chunk = event.chunk;
-			return updateEntry(chats, key, (chat) => {
-				const last = chat.transcript[chat.transcript.length - 1];
-				const transcript: TranscriptItem[] =
-					last !== undefined && last.kind === "agent"
-						? [
-								...chat.transcript.slice(0, -1),
-								{ ...last, text: last.text + chunk },
-							]
-						: [
-								...chat.transcript,
-								{
-									kind: "agent",
-									id: crypto.randomUUID(),
-									text: chunk,
-								},
-							];
-				return { ...chat, working: true, failed: false, transcript };
-			});
+			return updateEntry(chats, key, (chat) =>
+				withTranscript(chat, appendText(chat.transcript, "agent", chunk)),
+			);
+		}
+		case "user_text": {
+			const key = event.session;
+			const chunk = event.chunk;
+			return updateEntry(chats, key, (chat) => ({
+				...chat,
+				transcript: appendText(chat.transcript, "user", chunk),
+			}));
 		}
 		case "tool_line": {
 			const key = event.session;
@@ -87,29 +117,18 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 				const index = chat.transcript.findIndex(
 					(item) => item.kind === "tool" && item.line.id === line.id,
 				);
-				if (index >= 0) {
-					const copy = [...chat.transcript];
-					copy[index] = {
-						kind: "tool",
-						id: copy[index]?.id ?? crypto.randomUUID(),
-						line,
-					};
-					return {
-						...chat,
-						working: true,
-						failed: false,
-						transcript: copy,
-					};
-				}
-				return {
-					...chat,
-					working: true,
-					failed: false,
-					transcript: [
-						...chat.transcript,
-						{ kind: "tool", id: crypto.randomUUID(), line },
-					],
-				};
+				const transcript: TranscriptItem[] =
+					index >= 0
+						? chat.transcript.map((item, current) =>
+								current === index && item.kind === "tool"
+									? { ...item, line }
+									: item,
+							)
+						: [
+								...chat.transcript,
+								{ kind: "tool", id: crypto.randomUUID(), line },
+							];
+				return withTranscript(chat, transcript);
 			});
 		}
 		case "turn_done":
@@ -132,19 +151,24 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 				],
 			}));
 		case "permission_asked":
-			return updateEntry(chats, event.session, (chat) => ({
-				...chat,
-				approval: true,
-				transcript: [
-					...chat.transcript,
-					{
-						kind: "approval",
-						id: crypto.randomUUID(),
-						permission: event.permission,
-						resolved: false,
-					},
-				],
-			}));
+			return updateEntry(chats, event.session, (chat) => {
+				// Replayed approvals arrive already answered, so they render
+				// resolved without pausing for input.
+				const replaying = chat.historyLoading;
+				return {
+					...chat,
+					approval: replaying ? chat.approval : true,
+					transcript: [
+						...chat.transcript,
+						{
+							kind: "approval",
+							id: crypto.randomUUID(),
+							permission: event.permission,
+							resolved: replaying,
+						},
+					],
+				};
+			});
 		case "permission_resolved":
 			return updateEntry(chats, event.session, (chat) => ({
 				...chat,
@@ -186,6 +210,26 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 				...chat,
 				todos: [],
 				spend: null,
+			}));
+		case "history_begin":
+			return updateEntry(chats, event.session, (chat) => ({
+				...chat,
+				historyLoading: true,
+				historyError: null,
+				// Retrying after a failure replays from empty.
+				transcript: chat.historyError !== null ? [] : chat.transcript,
+			}));
+		case "history_done":
+			return updateEntry(chats, event.session, (chat) => ({
+				...chat,
+				historyLoading: false,
+				historyError: null,
+			}));
+		case "history_failed":
+			return updateEntry(chats, event.session, (chat) => ({
+				...chat,
+				historyLoading: false,
+				historyError: event.raw,
 			}));
 	}
 }
