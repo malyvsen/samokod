@@ -22,10 +22,22 @@ const KEY_PARAMS: &[&str] = &[
 /// Extract streamed agent text from an update, if any. Pure.
 pub fn agent_text_of(update: &SessionUpdate) -> Option<String> {
     match update {
-        SessionUpdate::AgentMessageChunk(chunk) => match &chunk.content {
-            ContentBlock::Text(text) => Some(text.text.clone()),
-            _ => None,
-        },
+        SessionUpdate::AgentMessageChunk(chunk) => text_of_block(&chunk.content),
+        _ => None,
+    }
+}
+
+/// Extract user message text from an update, if any. Pure.
+pub fn user_text_of(update: &SessionUpdate) -> Option<String> {
+    match update {
+        SessionUpdate::UserMessageChunk(chunk) => text_of_block(&chunk.content),
+        _ => None,
+    }
+}
+
+fn text_of_block(block: &ContentBlock) -> Option<String> {
+    match block {
+        ContentBlock::Text(text) => Some(text.text.clone()),
         _ => None,
     }
 }
@@ -191,6 +203,16 @@ mod tests {
             TextContent::new("hello"),
         )));
         assert_eq!(agent_text_of(&update), Some("hello".to_string()));
+        assert_eq!(user_text_of(&update), None);
+    }
+
+    #[test]
+    fn user_chunk_extracts_text_only() {
+        let update = SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
+            TextContent::new("do things"),
+        )));
+        assert_eq!(user_text_of(&update), Some("do things".to_string()));
+        assert_eq!(agent_text_of(&update), None);
     }
 
     #[test]

@@ -46,6 +46,14 @@ impl AgentManager {
         if is_finished(&repo_root, &session) {
             return Ok(());
         }
+        // History owns its keys: a past or in-flight replay implies the
+        // warm, so a racing warm never forks a fresh session beside it.
+        let owned_by_history = lock_state(&self.state)
+            .map(|state| state.history_owned(&session))
+            .unwrap_or(false);
+        if owned_by_history {
+            return Ok(());
+        }
         if let Some((connection, _, _, _)) = self.session_snapshot_for(&session)
             && !connection.is_incoming_closed()
         {

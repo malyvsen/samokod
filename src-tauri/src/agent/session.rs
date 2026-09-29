@@ -12,7 +12,9 @@ use crate::plans;
 use crate::types::{AgentError, AppEvent, SessionKey, SessionRole};
 
 use super::AgentManager;
-use super::config::{log_roles, option_id_for_role, pin_agent_mode, send_config_option};
+use super::config::{
+    config_views, log_roles, option_id_for_role, pin_agent_mode, send_config_option,
+};
 use super::permissions::handle_permission_request;
 use super::plans_list::push_sorted;
 use super::turns::handle_notification;
@@ -69,6 +71,15 @@ impl ActivePlan {
             name,
             phase: plans::Phase::Merging,
             prefixed: false,
+        }
+    }
+
+    /// Plan for one session key: the role decides the phase. Pure.
+    pub(crate) fn for_session(session: &SessionKey) -> Self {
+        match session.role {
+            SessionRole::Scoping => ActivePlan::scoping(session.plan.clone()),
+            SessionRole::Executing => ActivePlan::executing(session.plan.clone()),
+            SessionRole::Merging => ActivePlan::merging(session.plan.clone()),
         }
     }
 
@@ -400,11 +411,7 @@ impl AgentManager {
         }
         let stored_prefixed = lock_state(&self.state)
             .and_then(|state| state.sessions.get(key).map(|live| live.plan.prefixed));
-        let mut plan = match key.role {
-            SessionRole::Scoping => ActivePlan::scoping(key.plan.clone()),
-            SessionRole::Executing => ActivePlan::executing(key.plan.clone()),
-            SessionRole::Merging => ActivePlan::merging(key.plan.clone()),
-        };
+        let mut plan = ActivePlan::for_session(key);
         // A known session keeps its prefix state across transport deaths;
         // anything without an entry starts with the caller's flag.
         // Eager executing sessions bypass this path: `execute_plan` marks their
@@ -416,6 +423,157 @@ impl AgentManager {
         Ok((connection, session_id))
     }
 
+    /// Restore a past session's history via `session/load`: the replay
+    /// streams through the same global notification path as live turns, so
+    /// the transcript rebuilds with no extra mapping except user bubbles.
+    /// Single-flights on the history slot; finished plans replay read-only
+    /// history the same way. With no saved ID (a brand-new plan) a live
+    /// session starts instead so the pickers turn live and the transcript
+    /// stays empty.
+    pub async fn load_history(&self, session: SessionKey) -> Result<(), AgentError> {
+        {
+            let state = self.state.lock().expect("state poisoned");
+            if state.history_owned(&session) {
+                return Ok(());
+            }
+        }
+        let (repo_root, _) = self
+            .reopen_snapshot()
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
+        let saved_id = super::session_ids::saved_id(&repo_root, &session);
+        {
+            let mut state = self.state.lock().expect("state poisoned");
+            if !state.claim_history(&session) {
+                return Ok(());
+            }
+        }
+        emit_event(
+            &self.app,
+            AppEvent::HistoryBegin {
+                session: session.clone(),
+            },
+        );
+        emit_event(
+            &self.app,
+            AppEvent::SessionReset {
+                session: session.clone(),
+            },
+        );
+        let Some(session_id) = saved_id else {
+            return self.finish_empty_history(session).await;
+        };
+        let plan = ActivePlan::for_session(&session);
+        let connection = match self
+            .ensure_connection_for(&session, &plan, opencode::agent_env(&plan.plan_ref()))
+            .await
+        {
+            Ok(connection) => connection,
+            Err(error) => {
+                self.fail_history(&session, error.to_string());
+                return Err(error);
+            }
+        };
+        if let Some(mut state) = lock_state(&self.state)
+            && let Some(live) = state.sessions.get_mut(&session)
+        {
+            live.session_id = Some(session_id.clone());
+        }
+        let cwd = plan.cwd(&repo_root);
+        match connection
+            .send_request(acp::build_load_session_request(&session_id, &cwd))
+            .block_task()
+            .await
+        {
+            Ok(response) => {
+                let views = config_views(&response.config_options.unwrap_or_default());
+                let roles = crate::repo_state::roles_from_options(&views);
+                if let Some(mut state) = lock_state(&self.state) {
+                    if let Some(live) = state.sessions.get_mut(&session) {
+                        live.last_roles = roles;
+                    }
+                    state.finish_history(&session);
+                }
+                emit_event(
+                    &self.app,
+                    AppEvent::ConfigOptions {
+                        session: session.clone(),
+                        options: views,
+                    },
+                );
+                emit_event(&self.app, AppEvent::HistoryDone { session });
+                self.push_plans();
+                Ok(())
+            }
+            Err(error) => {
+                let raw = error.to_string();
+                self.fail_history(&session, raw.clone());
+                Err(AgentError::RequestFailed { raw })
+            }
+        }
+    }
+
+    /// Empty-history path for keys with no saved session: a brand-new plan
+    /// gets a live connection and an empty transcript instead of an error
+    /// bar.
+    async fn finish_empty_history(&self, session: SessionKey) -> Result<(), AgentError> {
+        match self.ensure_live(&session).await {
+            Ok(_) => {
+                if let Some(mut state) = lock_state(&self.state) {
+                    state.finish_history(&session);
+                }
+                emit_event(&self.app, AppEvent::HistoryDone { session });
+                Ok(())
+            }
+            Err(error) => {
+                self.fail_history(&session, error.to_string());
+                Err(error)
+            }
+        }
+    }
+
+    /// Fail one history load: release the single-flight and emit a
+    /// retryable error bar. The partial replay stays in the transcript; a
+    /// retry clears it on `HistoryBegin`.
+    fn fail_history(&self, session: &SessionKey, raw: String) {
+        if let Some(mut state) = lock_state(&self.state) {
+            state.abort_history(session);
+        }
+        let retryable = classify_error(&raw).retryable;
+        emit_event(
+            &self.app,
+            AppEvent::HistoryFailed {
+                session: session.clone(),
+                raw,
+                retryable,
+            },
+        );
+    }
+
+    /// Wait for an in-flight history replay to settle. Prompts never
+    /// interleave a live turn with the replay; on timeout the caller
+    /// refuses instead.
+    pub(crate) async fn wait_for_history(&self, key: &SessionKey) -> Result<(), AgentError> {
+        let timeout = std::time::Duration::from_secs(30);
+        let interval = std::time::Duration::from_millis(50);
+        let start = std::time::Instant::now();
+        loop {
+            let loading = lock_state(&self.state)
+                .map(|state| state.is_history_loading(key))
+                .unwrap_or(false);
+            if !loading {
+                return Ok(());
+            }
+            if start.elapsed() >= timeout {
+                return Err(AgentError::RequestFailed {
+                    raw: "history is still loading, try again".to_string(),
+                });
+            }
+            tokio::time::sleep(interval).await;
+        }
+    }
+
     /// Drop every live session entry. Repo opens start from scratch.
     pub(crate) fn clear_sessions(&self) {
         match self.state.lock() {
@@ -425,6 +583,8 @@ impl AgentManager {
                 state.awake = None;
                 state.pending_scoping = None;
                 state.worktrees.clear();
+                state.history_loading.clear();
+                state.history_loaded.clear();
             }
             Err(error) => {
                 log::warn!("failed to clear sessions: {error}");

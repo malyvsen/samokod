@@ -220,6 +220,12 @@ pub enum AppEvent {
         session: SessionKey,
         chunk: String,
     },
+    /// Replayed user message chunk. Only emitted while a session's history
+    /// loads; live turns append the user bubble optimistically instead.
+    UserText {
+        session: SessionKey,
+        chunk: String,
+    },
     ToolLine {
         session: SessionKey,
         line: ToolLineView,
@@ -266,6 +272,22 @@ pub enum AppEvent {
     },
     SessionReset {
         session: SessionKey,
+    },
+    /// History replay started for one session. The transcript streams
+    /// through the normal update events; `working` stays false throughout.
+    HistoryBegin {
+        session: SessionKey,
+    },
+    /// History replay finished. Configuration options arrive separately as
+    /// `ConfigOptions` alongside this event.
+    HistoryDone {
+        session: SessionKey,
+    },
+    /// History replay failed. `retryable` drives the transcript retry bar.
+    HistoryFailed {
+        session: SessionKey,
+        raw: String,
+        retryable: bool,
     },
     PlansChanged {
         plans: Vec<PlanEntry>,

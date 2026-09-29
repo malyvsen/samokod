@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use tauri::AppHandle;
 
 use crate::acp;
-use crate::types::{AgentError, AppEvent, PermissionView, SessionKey};
+use crate::types::{AgentError, AppEvent, PermissionOptionView, PermissionView, SessionKey};
 
 use super::AgentManager;
 use super::State;
@@ -88,65 +88,31 @@ pub(crate) async fn handle_permission_request(
     if let Some(current) = current
         && request.session_id.to_string() != current
     {
-        if responder
-            .respond(acp::RequestPermissionResponse::new(
-                acp::RequestPermissionOutcome::Cancelled,
-            ))
-            .is_err()
-        {
-            log::debug!("permission responder gone for stale session");
-        }
+        answer_cancelled(responder, "for stale session");
         return;
     }
     let options = crate::permissions::to_view(&request.options);
     if options.is_empty() {
-        if responder
-            .respond(acp::RequestPermissionResponse::new(
-                acp::RequestPermissionOutcome::Cancelled,
-            ))
-            .is_err()
-        {
-            log::debug!("permission responder gone for empty options");
-        }
+        answer_cancelled(responder, "for empty options");
         return;
     }
-    let tool_call_id = request.tool_call.tool_call_id.to_string();
-    let title = request
-        .tool_call
-        .fields
-        .title
-        .clone()
-        .unwrap_or_else(|| "run this action?".to_string());
-    let kind = crate::updates::kind_label(request.tool_call.fields.kind);
-    let permission = PermissionView {
-        tool_call_id: tool_call_id.clone(),
-        title,
-        kind,
-        options,
-        rule_hint: crate::permissions::rule_hint(request.tool_call.fields.name.as_deref()),
-    };
+    if lock_state(state)
+        .map(|guard| guard.is_history_loading(key))
+        .unwrap_or(false)
+    {
+        emit_replayed_approval(app, key, &request, options, responder);
+        return;
+    }
+    let permission = permission_view(&request, options);
+    let tool_call_id = permission.tool_call_id.clone();
     let (tx, rx) = tokio::sync::oneshot::channel::<PermissionDecision>();
     {
         let Some(mut guard) = lock_state(state) else {
-            if responder
-                .respond(acp::RequestPermissionResponse::new(
-                    acp::RequestPermissionOutcome::Cancelled,
-                ))
-                .is_err()
-            {
-                log::debug!("permission responder gone while state locked");
-            }
+            answer_cancelled(responder, "while state locked");
             return;
         };
         let Some(session) = guard.sessions.get_mut(key) else {
-            if responder
-                .respond(acp::RequestPermissionResponse::new(
-                    acp::RequestPermissionOutcome::Cancelled,
-                ))
-                .is_err()
-            {
-                log::debug!("permission responder gone for missing session");
-            }
+            answer_cancelled(responder, "for missing session");
             return;
         };
         session.pending.insert(tool_call_id.clone(), tx);
@@ -198,6 +164,71 @@ pub(crate) async fn handle_permission_request(
     }
     set_approval(state, key, false);
     push_sorted(state, app);
+    emit_event(
+        app,
+        AppEvent::PermissionResolved {
+            session: key.clone(),
+            tool_call_id,
+        },
+    );
+}
+
+/// Inline card for one permission request. Pure.
+fn permission_view(
+    request: &acp::RequestPermissionRequest,
+    options: Vec<PermissionOptionView>,
+) -> PermissionView {
+    PermissionView {
+        tool_call_id: request.tool_call.tool_call_id.to_string(),
+        title: request
+            .tool_call
+            .fields
+            .title
+            .clone()
+            .unwrap_or_else(|| "run this action?".to_string()),
+        kind: crate::updates::kind_label(request.tool_call.fields.kind),
+        options,
+        rule_hint: crate::permissions::rule_hint(request.tool_call.fields.name.as_deref()),
+    }
+}
+
+/// Answer one permission request as cancelled. The context names the call
+/// site in the debug log so dropped responders stay traceable.
+fn answer_cancelled(
+    responder: agent_client_protocol::Responder<acp::RequestPermissionResponse>,
+    context: &str,
+) {
+    if responder
+        .respond(acp::RequestPermissionResponse::new(
+            acp::RequestPermissionOutcome::Cancelled,
+        ))
+        .is_err()
+    {
+        log::debug!("permission responder gone {context}");
+    }
+}
+
+/// Render a replayed approval as asked plus immediately resolved. History
+/// never waits on the user, answers cancelled so the replay continues,
+/// and leaves the approval flag alone so the dot stays truthful to the
+/// replay.
+fn emit_replayed_approval(
+    app: &AppHandle,
+    key: &SessionKey,
+    request: &acp::RequestPermissionRequest,
+    options: Vec<PermissionOptionView>,
+    responder: agent_client_protocol::Responder<acp::RequestPermissionResponse>,
+) {
+    let permission = permission_view(request, options);
+    let tool_call_id = permission.tool_call_id.clone();
+    emit_event(
+        app,
+        AppEvent::PermissionAsked {
+            session: key.clone(),
+            permission,
+        },
+    );
+    answer_cancelled(responder, "for replayed approval");
     emit_event(
         app,
         AppEvent::PermissionResolved {

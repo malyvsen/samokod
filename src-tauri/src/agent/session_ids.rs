@@ -50,6 +50,14 @@ pub(crate) fn record(repo_root: &Path, key: &SessionKey, session_id: &str) {
     }
 }
 
+/// Saved ACP session ID for one session key, across all phases. `None`
+/// means a brand-new plan with no past to replay. Pure except the
+/// directory probes and file read.
+pub(crate) fn saved_id(repo_root: &Path, session: &SessionKey) -> Option<String> {
+    let dir = locate(repo_root, &session.plan)?;
+    load(&dir).get(&session.role).cloned()
+}
+
 /// Locate the on-disk directory for a plan name across all phases. Plan
 /// names are unique across phases since transitions rename rather than
 /// copy. Pure except the directory probes.

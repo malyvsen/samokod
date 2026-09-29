@@ -40,6 +40,12 @@ pub(crate) struct State {
     /// Background warms in flight, one per session key. Single-flights
     /// `warm_session` against a racing `send_prompt`.
     warming: HashSet<SessionKey>,
+    /// History replays in flight, one per session key. Single-flights
+    /// `load_history` against a racing `send_prompt`, which waits.
+    history_loading: HashSet<SessionKey>,
+    /// Replayed histories: keys whose replay already streamed. Skips
+    /// re-replay on reselect.
+    history_loaded: HashSet<SessionKey>,
     /// Worktree checkouts per executing plan: path, branch, base commit,
     /// and the main branch at approval. Rebuilt from disk on open.
     worktrees: HashMap<String, crate::worktrees::WorktreeRecord>,
@@ -59,6 +65,39 @@ impl State {
         } else {
             self.awake = None;
         }
+    }
+
+    /// True while a history replay runs for the key. Prompts wait on this;
+    /// replayed notifications and approvals render on this.
+    fn is_history_loading(&self, key: &SessionKey) -> bool {
+        self.history_loading.contains(key)
+    }
+
+    /// True once a history replay started or finished for the key. Warms
+    /// and replays single-flight on this: history owns its keys.
+    fn history_owned(&self, key: &SessionKey) -> bool {
+        self.history_loading.contains(key) || self.history_loaded.contains(key)
+    }
+
+    /// Claim the history slot. False when the replay already streamed or
+    /// another replay is in flight. Pure.
+    fn claim_history(&mut self, key: &SessionKey) -> bool {
+        if self.history_loaded.contains(key) {
+            return false;
+        }
+        self.history_loading.insert(key.clone())
+    }
+
+    /// Settle a finished replay: off the in-flight set, onto the replayed
+    /// set. Pure.
+    fn finish_history(&mut self, key: &SessionKey) {
+        self.history_loading.remove(key);
+        self.history_loaded.insert(key.clone());
+    }
+
+    /// Release a failed replay so a retry can claim it again. Pure.
+    fn abort_history(&mut self, key: &SessionKey) {
+        self.history_loading.remove(key);
     }
 }
 

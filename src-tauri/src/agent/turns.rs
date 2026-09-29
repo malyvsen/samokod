@@ -23,6 +23,7 @@ impl AgentManager {
     /// Resend the last prompt. When the transport is closed, reopen the
     /// session on the held plan first. Returns false when nothing ran.
     pub async fn retry_last(&self, session: SessionKey) -> Result<bool, AgentError> {
+        self.wait_for_history(&session).await?;
         let Some(text) = lock_state(&self.state)
             .and_then(|state| state.sessions.get(&session)?.last_prompt.clone())
         else {
@@ -69,6 +70,9 @@ impl AgentManager {
                 }
             }
         }
+        // A prompt never races a replay: it waits for an in-flight load
+        // rather than interleaving live chunks with history chunks.
+        self.wait_for_history(&session).await?;
         let (connection, session_id) = self.ensure_live(&session).await?;
         // A warmed pending session spawns before its directory exists, so
         // its ID goes unrecorded; persisting here heals it once the first
@@ -271,6 +275,22 @@ pub(crate) fn handle_notification(
         emit_event(
             app,
             AppEvent::AgentText {
+                session: key.clone(),
+                chunk,
+            },
+        );
+    }
+    // Replayed user messages only exist while history replays. Live turns
+    // append the user bubble optimistically, so mapping them outside a
+    // replay would double-add every prompt.
+    if let Some(chunk) = crate::updates::user_text_of(&notification.update)
+        && lock_state(state)
+            .map(|guard| guard.is_history_loading(key))
+            .unwrap_or(false)
+    {
+        emit_event(
+            app,
+            AppEvent::UserText {
                 session: key.clone(),
                 chunk,
             },

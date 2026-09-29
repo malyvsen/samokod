@@ -1,13 +1,13 @@
 // ACP wire boundary. SDK schema types enter the app through this module;
 // nothing past it imports `agent-client-protocol` directly.
 pub use agent_client_protocol::schema::v1::{
-    CancelNotification, CloseSessionRequest, ContentBlock, PermissionOption, PermissionOptionId,
-    PermissionOptionKind, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigId, SessionConfigKind,
-    SessionConfigOption, SessionConfigOptionCategory, SessionConfigOptionValue,
-    SessionConfigSelectOptions, SessionConfigValueId, SessionId, SessionNotification,
-    SessionUpdate, SetSessionConfigOptionRequest, TextContent, ToolCall, ToolCallStatus,
-    ToolCallUpdate, ToolKind,
+    CancelNotification, CloseSessionRequest, ContentBlock, LoadSessionRequest, PermissionOption,
+    PermissionOptionId, PermissionOptionKind, PromptRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    SessionConfigId, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigOptionValue, SessionConfigSelectOptions, SessionConfigValueId, SessionId,
+    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, TextContent, ToolCall,
+    ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 #[cfg(test)]
 pub use agent_client_protocol::schema::v1::{
@@ -51,6 +51,13 @@ pub fn build_initialize_request() -> InitializeRequest {
 /// are passed; OpenCode owns them.
 pub fn build_new_session_request(cwd: &Path) -> NewSessionRequest {
     NewSessionRequest::new(cwd)
+}
+
+/// Build the ACP `session/load` request restoring a past session. Replay
+/// notifications flow through the existing global handler; no separate
+/// session handle is created.
+pub fn build_load_session_request(session_id: &str, cwd: &Path) -> LoadSessionRequest {
+    LoadSessionRequest::new(SessionId::new(session_id), cwd)
 }
 
 /// Build a `session/set_config_option` request from a string config id and value id.
