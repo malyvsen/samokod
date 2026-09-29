@@ -17,6 +17,18 @@ function transcript(text: string) {
 	);
 }
 
+function agentTranscript(text: string) {
+	return (
+		<Transcript
+			items={[{ kind: "agent", id: "a1", text }]}
+			repoLabel="~/repo"
+			agentLabel="AGENT"
+			onRetry={vi.fn()}
+			onAnswer={vi.fn()}
+		/>
+	);
+}
+
 describe("transcript retry", () => {
 	test("retryable errors offer retry when writable", () => {
 		render(
@@ -74,5 +86,37 @@ describe("transcript user messages", () => {
 		const css = readFileSync("src/App.css", "utf8");
 		const rule = /\.msg\.user\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 		expect(rule).toContain("white-space: pre-wrap");
+	});
+});
+
+describe("transcript agent tables", () => {
+	const table = "| File | Status |\n| --- | --- |\n| `a.ts` | ok |";
+
+	test("pipe table renders table, header, and body cells in a scroll wrapper", () => {
+		const { container } = render(agentTranscript(table));
+		const wrap = container.querySelector(".msg.agent .md-table-wrap");
+		expect(wrap).not.toBeNull();
+		expect(wrap?.querySelector("table")).not.toBeNull();
+		expect(screen.getByRole("columnheader", { name: "File" })).toBeInTheDocument();
+		expect(screen.getByRole("cell", { name: "ok" })).toBeInTheDocument();
+		expect(wrap?.querySelector("td code")).not.toBeNull();
+	});
+
+	test("delimiter alignment lands on header cells", () => {
+		render(
+			agentTranscript(
+				"| Left | Center | Right |\n| :--- | :----: | ----: |\n| a | b | c |",
+			),
+		);
+		const headers = screen.getAllByRole("columnheader");
+		expect(headers[0]).toHaveStyle({ textAlign: "left" });
+		expect(headers[1]).toHaveStyle({ textAlign: "center" });
+		expect(headers[2]).toHaveStyle({ textAlign: "right" });
+	});
+
+	test("pipe text without a delimiter row stays a paragraph", () => {
+		const { container } = render(agentTranscript("just a | pipe, no table here"));
+		expect(container.querySelector(".msg.agent table")).toBeNull();
+		expect(screen.getByText(/just a \| pipe/)).toBeInTheDocument();
 	});
 });

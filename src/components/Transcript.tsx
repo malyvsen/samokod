@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
 import { todoMark, todoRowClass } from "../todos";
 import type {
 	PermissionOptionView,
@@ -7,6 +6,7 @@ import type {
 	ToolLineView,
 	TranscriptItem,
 } from "../types";
+import { AgentMarkdown } from "./AgentMarkdown";
 
 export function Transcript({
 	items,
@@ -45,7 +45,7 @@ export function Transcript({
 						return (
 							<div className="msg agent" key={item.id}>
 								<div className="who">{agentLabel}</div>
-								<ReactMarkdown>{item.text}</ReactMarkdown>
+								<AgentMarkdown text={item.text} />
 							</div>
 						);
 					}
