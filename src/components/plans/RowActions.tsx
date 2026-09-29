@@ -1,12 +1,12 @@
 import type { PlanPhase, SessionRole, WorktreeStatus } from "../../types";
 
-export type RowActionKind = "scoping" | "executing" | "merging" | "history";
+export type RowActionKind = "scoping" | "executing" | "merging" | "inactive";
 
 export function actionKind(phase: PlanPhase, role: SessionRole): RowActionKind {
 	if (phase === "scoping" && role === "scoping") return "scoping";
 	if (phase === "executing" && role === "executing") return "executing";
 	if (phase === "merging" && role === "merging") return "merging";
-	return "history";
+	return "inactive";
 }
 
 const DIRTY_TITLE = "Commit or discard worktree changes first";
@@ -37,7 +37,7 @@ export type RowActionsProps =
 			onCancel: () => void;
 			onDone: () => void;
 	  }
-	| { kind: "history"; planName: string };
+	| { kind: "inactive"; planName: string };
 
 export function RowActions(props: RowActionsProps) {
 	switch (props.kind) {
@@ -124,7 +124,7 @@ export function RowActions(props: RowActionsProps) {
 				</>
 			);
 		}
-		case "history":
+		case "inactive":
 			return null;
 		default: {
 			const _exhaustive: never = props;

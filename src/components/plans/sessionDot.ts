@@ -17,7 +17,7 @@ export function dotClass(
 }
 
 export function sessionLabel(role: SessionRole): string {
-	if (role === "executing") return "Execution";
+	if (role === "executing") return "Executing";
 	if (role === "merging") return "Merging";
 	return "Scoping";
 }

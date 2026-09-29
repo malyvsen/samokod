@@ -85,7 +85,7 @@ describe("plans panel", () => {
 	test("an approved plan lists both its sessions", () => {
 		render(<PlansPanel {...panelProps([executingPlan()])} />);
 		expect(screen.getByText("Scoping")).toBeInTheDocument();
-		expect(screen.getByText("Execution")).toBeInTheDocument();
+		expect(screen.getByText("Executing")).toBeInTheDocument();
 	});
 
 	test("dots follow working, approval, and failure flags", () => {
@@ -113,7 +113,7 @@ describe("plans panel", () => {
 		expect(container.querySelector(".dot.input")).not.toBeNull();
 	});
 
-	test("history rows stay gray", () => {
+	test("inactive rows stay gray", () => {
 		const { container } = render(
 			<PlansPanel
 				{...panelProps([
@@ -146,10 +146,10 @@ describe("plans panel", () => {
 		).toBeInTheDocument();
 	});
 
-	test("execution rows offer cancel and done", () => {
+	test("executing rows offer cancel and done", () => {
 		render(<PlansPanel {...panelProps([executingPlan()])} />);
 		const row = screen
-			.getByRole("button", { name: "Shiny Execution" })
+			.getByRole("button", { name: "Shiny Executing" })
 			.closest(".session");
 		if (row === null) throw new Error("row missing");
 		const buttons = within(row as HTMLElement);
@@ -165,7 +165,7 @@ describe("plans panel", () => {
 		).toBeInTheDocument();
 	});
 
-	test("diverged execution rows offer rebase instead of done", () => {
+	test("diverged executing rows offer rebase instead of done", () => {
 		const diverged = testEntryWith(
 			"2026-09-25.10-54-59.slug",
 			"executing",
@@ -187,7 +187,7 @@ describe("plans panel", () => {
 		).toBeNull();
 	});
 
-	test("dirty execution rows disable merging with a tooltip", () => {
+	test("dirty executing rows disable merging with a tooltip", () => {
 		const dirty = testEntryWith(
 			"2026-09-25.10-54-59.slug",
 			"executing",
@@ -209,7 +209,7 @@ describe("plans panel", () => {
 	test("merging plans list three sessions with cancel and finish", () => {
 		render(<PlansPanel {...panelProps([mergingPlan()])} />);
 		expect(screen.getByText("Scoping")).toBeInTheDocument();
-		expect(screen.getByText("Execution")).toBeInTheDocument();
+		expect(screen.getByText("Executing")).toBeInTheDocument();
 		expect(screen.getByText("Merging")).toBeInTheDocument();
 		const row = screen
 			.getByRole("button", { name: "Shiny Merging" })
@@ -226,7 +226,7 @@ describe("plans panel", () => {
 		).toBeInTheDocument();
 	});
 
-	test("history and finished rows have no buttons", () => {
+	test("inactive and finished rows have no buttons", () => {
 		render(
 			<PlansPanel
 				{...panelProps([
@@ -241,16 +241,16 @@ describe("plans panel", () => {
 				])}
 			/>,
 		);
-		const history = screen
+		const inactive = screen
 			.getByRole("button", { name: "Shiny Scoping" })
 			.closest(".session");
 		const done = screen
-			.getByRole("button", { name: "Done Execution" })
+			.getByRole("button", { name: "Done Executing" })
 			.closest(".session");
 		const dropped = screen
 			.getByRole("button", { name: "Drop Scoping" })
 			.closest(".session");
-		for (const row of [history, done, dropped]) {
+		for (const row of [inactive, done, dropped]) {
 			if (row === null) throw new Error("row missing");
 			expect(
 				within(row as HTMLElement).queryByRole("button", {
@@ -344,7 +344,7 @@ describe("plans panel", () => {
 		});
 		const user = userEvent.setup();
 		render(<PlansPanel {...props} />);
-		await user.click(screen.getByRole("button", { name: "Shiny Execution" }));
+		await user.click(screen.getByRole("button", { name: "Shiny Executing" }));
 		expect(props.onSelect).toHaveBeenCalledWith({
 			plan: "2026-09-25.10-54-59.slug",
 			role: "executing",

@@ -11,7 +11,7 @@ describe("actionKind", () => {
 		expect(actionKind("merging", "merging")).toBe("merging");
 	});
 
-	test("finished and history rows map to history", () => {
+	test("finished and inactive rows map to inactive", () => {
 		const finished: Array<[PlanPhase, SessionRole]> = [
 			["completed", "scoping"],
 			["completed", "executing"],
@@ -27,7 +27,7 @@ describe("actionKind", () => {
 			["scoping", "merging"],
 		];
 		for (const [phase, role] of finished) {
-			expect(actionKind(phase, role)).toBe("history");
+			expect(actionKind(phase, role)).toBe("inactive");
 		}
 	});
 });
@@ -150,8 +150,10 @@ describe("row actions", () => {
 		);
 	});
 
-	test("history rows render nothing", () => {
-		const { container } = render(<RowActions kind="history" planName="plan" />);
+	test("inactive rows render nothing", () => {
+		const { container } = render(
+			<RowActions kind="inactive" planName="plan" />,
+		);
 		expect(container).toBeEmptyDOMElement();
 	});
 });

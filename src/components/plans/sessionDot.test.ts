@@ -26,7 +26,7 @@ describe("session dots", () => {
 		);
 	});
 
-	test("history and finished sessions stay gray", () => {
+	test("inactive and finished sessions stay gray", () => {
 		expect(dotClass("executing", "scoping", testStatus("scoping"))).toBe(
 			"done",
 		);
@@ -40,8 +40,9 @@ describe("session dots", () => {
 });
 
 describe("session labels", () => {
-	test("roles read as Scoping and Execution", () => {
+	test("roles read as Scoping, Executing and Merging", () => {
 		expect(sessionLabel("scoping")).toBe("Scoping");
-		expect(sessionLabel("executing")).toBe("Execution");
+		expect(sessionLabel("executing")).toBe("Executing");
+		expect(sessionLabel("merging")).toBe("Merging");
 	});
 });

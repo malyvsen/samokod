@@ -93,7 +93,7 @@ describe("plan", () => {
 		});
 		expect(screen.getByText("Shiny")).toBeInTheDocument();
 		expect(screen.getByText("Scoping")).toBeInTheDocument();
-		expect(screen.getByText("Execution")).toBeInTheDocument();
+		expect(screen.getByText("Executing")).toBeInTheDocument();
 	});
 
 	test("row done button completes and keeps the transcript", async () => {
@@ -121,11 +121,11 @@ describe("plan", () => {
 			type: "turn_done",
 			session: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
 		});
-		const execution = screen.getByRole("button", {
-			name: "Shiny Execution",
+		const executing = screen.getByRole("button", {
+			name: "Shiny Executing",
 		});
-		const row = execution.closest(".session");
-		if (row === null) throw new Error("execution row missing");
+		const row = executing.closest(".session");
+		if (row === null) throw new Error("executing row missing");
 		await within(row as HTMLElement)
 			.findByRole("button", { name: "Merge 2026-09-25.10-54-59.slug to main" })
 			.then((button) => button.click());
