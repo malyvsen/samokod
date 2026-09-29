@@ -35,7 +35,7 @@ impl From<crate::worktrees::WorktreeError> for AgentError {
 }
 
 /// Lifecycle status for one tool line. Ongoing rows append ` …` in text;
-/// finished rows render the bare title.
+/// finished rows render the bare `{label}: {body}` line.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolStatus {
@@ -46,8 +46,8 @@ pub enum ToolStatus {
     Failed,
 }
 
-/// Shared label for a tool kind, used by tool lines (empty-title fallback)
-/// and permission cards.
+/// Shared label for a tool kind, used by tool lines (label when the wire
+/// name is absent) and permission cards.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolKindLabel {
@@ -101,7 +101,7 @@ pub enum TodoStatus {
     Completed,
 }
 
-/// One `▸` tool status line regardless of tool kind.
+/// One `▸` tool status line shaped as `{label}: {body}`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolLineView {
     pub id: String,

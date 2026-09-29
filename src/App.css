@@ -520,6 +520,11 @@ body {
 	color: #8f8c85;
 }
 
+.tool[data-status="failed"],
+.tool[data-status="failed"]::before {
+	color: #ff6b6b;
+}
+
 .tool[data-full]:hover::after,
 .approval h3[data-full]:hover::after,
 .erow span[data-full]:hover::after {

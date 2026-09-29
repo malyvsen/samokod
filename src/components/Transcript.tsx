@@ -156,7 +156,7 @@ function ToolRow({ line }: { line: ToolLineView }) {
 			assertNever(status);
 	}
 	return (
-		<div className="tool" data-full={line.text}>
+		<div className="tool" data-status={line.status} data-full={line.text}>
 			{line.text}
 		</div>
 	);

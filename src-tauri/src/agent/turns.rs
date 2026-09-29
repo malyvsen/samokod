@@ -272,26 +272,38 @@ pub(crate) fn handle_notification(
     }
     match &notification.update {
         acp::SessionUpdate::ToolCall(call) => {
-            let line = crate::updates::format_tool_line(call);
-            emit_event(
-                app,
-                AppEvent::ToolLine {
-                    session: key.clone(),
-                    line,
-                },
-            );
-            snoop_todos_from_call(state, app, key, call);
+            // Todo-carrying calls render as a TODOS block instead of a `▸` line.
+            if let Some(fresh) = todos_from_call(call.raw_input.as_ref()) {
+                log::debug!("todo call {} todos {}", call.tool_call_id, fresh.len());
+                update_todos(state, app, key, fresh);
+            } else {
+                let line = crate::updates::format_tool_line(call);
+                emit_event(
+                    app,
+                    AppEvent::ToolLine {
+                        session: key.clone(),
+                        line,
+                    },
+                );
+            }
         }
         acp::SessionUpdate::ToolCallUpdate(update) => {
-            let line = crate::updates::format_tool_update(update);
-            emit_event(
-                app,
-                AppEvent::ToolLine {
-                    session: key.clone(),
-                    line,
-                },
-            );
-            snoop_todos_from_update(state, app, key, update);
+            if let Some(fresh) = todos_from_update(
+                update.fields.raw_input.as_ref(),
+                update.fields.raw_output.as_ref(),
+            ) {
+                log::debug!("todo update {} todos {}", update.tool_call_id, fresh.len());
+                update_todos(state, app, key, fresh);
+            } else {
+                let line = crate::updates::format_tool_update(update);
+                emit_event(
+                    app,
+                    AppEvent::ToolLine {
+                        session: key.clone(),
+                        line,
+                    },
+                );
+            }
         }
         acp::SessionUpdate::UsageUpdate(update) => {
             emit_event(
@@ -320,43 +332,6 @@ pub(crate) fn handle_notification(
             Some(kind) => log::debug!("unhandled session update: {kind}"),
             None => log::warn!("unknown session update: {update:?}"),
         },
-    }
-}
-
-/// Snoop a todo list off a tool call input, when it carries one.
-fn snoop_todos_from_call(
-    state: &Mutex<State>,
-    app: &AppHandle,
-    key: &SessionKey,
-    call: &acp::ToolCall,
-) {
-    if let Some(fresh) = todos_from_call(call.raw_input.as_ref()) {
-        log::debug!(
-            "todo snoop call {} todos {}",
-            call.tool_call_id,
-            fresh.len()
-        );
-        update_todos(state, app, key, fresh);
-    }
-}
-
-/// Snoop a todo list off a tool update, preferring the output over the input.
-fn snoop_todos_from_update(
-    state: &Mutex<State>,
-    app: &AppHandle,
-    key: &SessionKey,
-    update: &acp::ToolCallUpdate,
-) {
-    if let Some(fresh) = todos_from_update(
-        update.fields.raw_input.as_ref(),
-        update.fields.raw_output.as_ref(),
-    ) {
-        log::debug!(
-            "todo snoop update {} todos {}",
-            update.tool_call_id,
-            fresh.len()
-        );
-        update_todos(state, app, key, fresh);
     }
 }
 

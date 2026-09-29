@@ -1,7 +1,23 @@
 // Pure mappings for ACP session updates and tool calls. Every tool
-// execution becomes one `▸` status line regardless of kind.
+// execution becomes one `▸` status line shaped as `{label}: {body}`.
 use crate::acp::{ContentBlock, SessionUpdate, ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind};
 use crate::types::{ToolKindLabel, ToolLineView, ToolStatus};
+
+/// Skill titles arrive as `Loaded skill: X`; only `X` is shown.
+const SKILL_PREFIX: &str = "Loaded skill: ";
+
+/// Raw input keys shown when a call has no title, in priority order.
+const KEY_PARAMS: &[&str] = &[
+    "path",
+    "file",
+    "pattern",
+    "query",
+    "command",
+    "url",
+    "description",
+    "skill",
+    "name",
+];
 
 /// Extract streamed agent text from an update, if any. Pure.
 pub fn agent_text_of(update: &SessionUpdate) -> Option<String> {
@@ -34,48 +50,97 @@ pub fn update_kind(update: &SessionUpdate) -> Option<&'static str> {
 }
 
 /// Format one tool line. Rows stay single-line ellipsis via CSS; the hover
-/// tooltip reads the same text. The title is agent text and renders verbatim;
-/// ongoing statuses append ` …`, finished ones render the bare title. Pure.
+/// tooltip reads the same text. The agent title renders verbatim after the
+/// label; ongoing statuses append ` …`. Pure.
 pub fn format_tool_line(call: &ToolCall) -> ToolLineView {
     let status = to_tool_status(call.status);
     ToolLineView {
         id: call.tool_call_id.to_string(),
-        text: tool_text(call, status),
+        text: line_text(
+            &call.title,
+            call.name.as_deref(),
+            Some(call.kind),
+            call.raw_input.as_ref(),
+            status,
+        ),
         status,
     }
 }
 
-/// Format a tool update line from the update title when present. Same verbatim
-/// title plus ` …` rule as tool lines; empty titles fall back to name/kind.
-/// Pure.
+/// Format a tool update line. Same `{label}: {body}` plus ` …` rule as tool
+/// lines. Pure.
 pub fn format_tool_update(update: &ToolCallUpdate) -> ToolLineView {
     let status = update.fields.status.map(to_tool_status).unwrap_or_default();
-    let title = update.fields.title.as_deref().map(str::trim).unwrap_or("");
-    let base = if title.is_empty() {
-        fallback_label(update.fields.name.as_deref(), update.fields.kind)
-    } else {
-        title.to_string()
-    };
     ToolLineView {
         id: update.tool_call_id.to_string(),
-        text: with_ongoing_suffix(&base, status),
+        text: line_text(
+            update.fields.title.as_deref().unwrap_or(""),
+            update.fields.name.as_deref(),
+            update.fields.kind,
+            update.fields.raw_input.as_ref(),
+            status,
+        ),
         status,
     }
 }
 
-fn tool_text(call: &ToolCall, status: ToolStatus) -> String {
-    let title = call.title.trim();
-    if title.is_empty() {
-        let base = fallback_label(call.name.as_deref(), Some(call.kind));
-        return with_ongoing_suffix(&base, status);
-    }
-    with_ongoing_suffix(title, status)
+fn line_text(
+    title: &str,
+    name: Option<&str>,
+    kind: Option<ToolKind>,
+    raw_input: Option<&serde_json::Value>,
+    status: ToolStatus,
+) -> String {
+    let label = tool_label(name, kind);
+    let body = tool_body(title, raw_input);
+    let base = if body.is_empty() {
+        label
+    } else {
+        format!("{label}: {body}")
+    };
+    with_ongoing_suffix(&base, status)
 }
 
-fn fallback_label(name: Option<&str>, kind: Option<ToolKind>) -> String {
+/// Wire name when present, else the kind label. Names render as-is.
+fn tool_label(name: Option<&str>, kind: Option<ToolKind>) -> String {
     match name.map(str::trim) {
         Some(name) if !name.is_empty() => name.to_string(),
         _ => kind_label(kind).as_str().to_string(),
+    }
+}
+
+/// Titled calls show the title, except skill titles show only the skill name
+/// and fetch titles show the `url` param (which omits the title's mime
+/// suffix). Untitled calls show the first present key param.
+fn tool_body(title: &str, raw_input: Option<&serde_json::Value>) -> String {
+    let title = title.trim();
+    if !title.is_empty() {
+        if let Some(skill) = title.strip_prefix(SKILL_PREFIX) {
+            return skill.trim().to_string();
+        }
+        if let Some(url) = raw_input.and_then(|input| first_line_param(input, "url")) {
+            return url;
+        }
+        return title.to_string();
+    }
+    fallback_body(raw_input).unwrap_or_default()
+}
+
+fn fallback_body(raw_input: Option<&serde_json::Value>) -> Option<String> {
+    let input = raw_input?;
+    KEY_PARAMS
+        .iter()
+        .find_map(|key| first_line_param(input, key))
+}
+
+/// First line of a string param, trimmed. Non-string and blank values are
+/// absent so callers can tell "no usable value" apart from a value.
+fn first_line_param(input: &serde_json::Value, key: &str) -> Option<String> {
+    let first = input.get(key)?.as_str()?.lines().next()?.trim();
+    if first.is_empty() {
+        None
+    } else {
+        Some(first.to_string())
     }
 }
 
@@ -145,33 +210,81 @@ mod tests {
     }
 
     #[test]
-    fn finished_tool_line_renders_title_verbatim() {
-        for (wire, view) in [
-            (ToolCallStatus::Completed, ToolStatus::Completed),
-            (ToolCallStatus::Failed, ToolStatus::Failed),
+    fn tool_lines_read_as_label_colon_body() {
+        for (wire, view, suffix) in [
+            (ToolCallStatus::Completed, ToolStatus::Completed, ""),
+            (ToolCallStatus::Failed, ToolStatus::Failed, ""),
+            (ToolCallStatus::Pending, ToolStatus::Pending, " …"),
+            (ToolCallStatus::InProgress, ToolStatus::InProgress, " …"),
         ] {
-            let call = ToolCall::new("id-1", "edit file.md")
-                .kind(ToolKind::Edit)
+            let call = ToolCall::new("id-1", "src/types.ts")
+                .name("read")
+                .kind(ToolKind::Read)
                 .status(wire);
             let line = format_tool_line(&call);
-            assert_eq!(line.text, "edit file.md", "{wire:?}");
+            assert_eq!(line.text, format!("read: src/types.ts{suffix}"), "{wire:?}");
             assert_eq!(line.status, view);
         }
+
+        let kind_label = ToolCall::new("id-1", "edit file.md")
+            .kind(ToolKind::Edit)
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&kind_label).text, "edit: edit file.md");
+
+        let named = ToolCall::new("id-1", "Explore plans UI")
+            .name("task")
+            .kind(ToolKind::Other)
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&named).text, "task: Explore plans UI");
     }
 
     #[test]
-    fn ongoing_tool_line_appends_ellipsis() {
-        for (wire, view) in [
-            (ToolCallStatus::Pending, ToolStatus::Pending),
-            (ToolCallStatus::InProgress, ToolStatus::InProgress),
-        ] {
-            let call = ToolCall::new("id-1", "edit file.md")
-                .kind(ToolKind::Edit)
-                .status(wire);
-            let line = format_tool_line(&call);
-            assert_eq!(line.text, "edit file.md …", "{wire:?}");
-            assert_eq!(line.status, view);
-        }
+    fn skill_and_fetch_bodies_normalize() {
+        let skill = ToolCall::new("id-1", "Loaded skill: repo-news")
+            .name("skill")
+            .kind(ToolKind::Other)
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&skill).text, "skill: repo-news");
+
+        let fetch = ToolCall::new("id-1", "https://opencode.ai/docs (text/html)")
+            .kind(ToolKind::Fetch)
+            .raw_input(serde_json::json!({"url": "https://opencode.ai/docs"}))
+            .status(ToolCallStatus::Completed);
+        assert_eq!(
+            format_tool_line(&fetch).text,
+            "fetch: https://opencode.ai/docs"
+        );
+    }
+
+    #[test]
+    fn untitled_calls_show_key_param() {
+        let glob = ToolCall::new("id-1", "")
+            .name("glob")
+            .kind(ToolKind::Other)
+            .raw_input(serde_json::json!({"pattern": "src/components/*.tsx"}))
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&glob).text, "glob: src/components/*.tsx");
+
+        let failed = ToolCall::new("id-1", "  ")
+            .name("write")
+            .kind(ToolKind::Edit)
+            .raw_input(serde_json::json!({"path": "/var/tool-demo.txt"}))
+            .status(ToolCallStatus::Failed);
+        assert_eq!(format_tool_line(&failed).text, "write: /var/tool-demo.txt");
+
+        let ongoing = ToolCall::new("id-1", "")
+            .name("bash")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({"command": "git status"}))
+            .status(ToolCallStatus::Pending);
+        assert_eq!(format_tool_line(&ongoing).text, "bash: git status …");
+
+        let multiline = ToolCall::new("id-1", "")
+            .name("bash")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({"command": "first\nsecond"}))
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&multiline).text, "bash: first");
     }
 
     #[test]
@@ -188,30 +301,50 @@ mod tests {
     }
 
     #[test]
-    fn update_line_follows_title_and_status() {
+    fn updates_match_lines() {
         let finished = ToolCallUpdate::new(
             "id-9",
             ToolCallUpdateFields::new()
                 .title("edit file.md")
+                .name("edit")
                 .status(ToolCallStatus::Completed),
         );
-        assert_eq!(format_tool_update(&finished).text, "edit file.md");
+        assert_eq!(format_tool_update(&finished).text, "edit: edit file.md");
 
         let ongoing = ToolCallUpdate::new(
             "id-9",
             ToolCallUpdateFields::new()
                 .title("edit file.md")
+                .name("edit")
                 .status(ToolCallStatus::InProgress),
         );
-        assert_eq!(format_tool_update(&ongoing).text, "edit file.md …");
+        assert_eq!(format_tool_update(&ongoing).text, "edit: edit file.md …");
 
-        let default_status =
-            ToolCallUpdate::new("id-9", ToolCallUpdateFields::new().title("edit file.md"));
-        assert_eq!(format_tool_update(&default_status).text, "edit file.md …");
+        let skill = ToolCallUpdate::new(
+            "id-9",
+            ToolCallUpdateFields::new()
+                .title("Loaded skill: repo-news")
+                .name("skill")
+                .status(ToolCallStatus::Completed),
+        );
+        assert_eq!(format_tool_update(&skill).text, "skill: repo-news");
+
+        let fetch = ToolCallUpdate::new(
+            "id-9",
+            ToolCallUpdateFields::new()
+                .title("https://opencode.ai/docs (text/html)")
+                .kind(ToolKind::Fetch)
+                .raw_input(serde_json::json!({"url": "https://opencode.ai/docs"}))
+                .status(ToolCallStatus::Completed),
+        );
+        assert_eq!(
+            format_tool_update(&fetch).text,
+            "fetch: https://opencode.ai/docs"
+        );
     }
 
     #[test]
-    fn empty_title_prefers_name_then_kind() {
+    fn bare_label_when_nothing_to_show() {
         let mut call = ToolCall::new("id-1", "  ").kind(ToolKind::Execute);
         call.name = Some("edit".to_string());
         call.status = ToolCallStatus::Completed;
@@ -220,17 +353,6 @@ mod tests {
         call.status = ToolCallStatus::Pending;
         assert_eq!(format_tool_line(&call).text, "edit …");
 
-        let update = ToolCallUpdate::new(
-            "id-9",
-            ToolCallUpdateFields::new()
-                .status(ToolCallStatus::Completed)
-                .name("bash"),
-        );
-        assert_eq!(format_tool_update(&update).text, "bash");
-    }
-
-    #[test]
-    fn every_tool_kind_falls_back_without_ran() {
         for kind in [
             ToolKind::Read,
             ToolKind::Edit,
@@ -247,18 +369,7 @@ mod tests {
             let call = ToolCall::new("id-1", "")
                 .kind(kind)
                 .status(ToolCallStatus::Completed);
-            let line = format_tool_line(&call);
-            assert_eq!(line.text, expected, "{kind:?}");
-            assert!(!line.text.contains("ran"), "{kind:?}");
-
-            let ongoing = ToolCall::new("id-1", "")
-                .kind(kind)
-                .status(ToolCallStatus::Pending);
-            assert_eq!(
-                format_tool_line(&ongoing).text,
-                format!("{expected} …"),
-                "{kind:?}"
-            );
+            assert_eq!(format_tool_line(&call).text, expected, "{kind:?}");
 
             let update = ToolCallUpdate::new(
                 "id-9",
@@ -266,9 +377,7 @@ mod tests {
                     .kind(kind)
                     .status(ToolCallStatus::Completed),
             );
-            let line = format_tool_update(&update);
-            assert_eq!(line.text, expected, "{kind:?}");
-            assert_ne!(line.text, "running tool", "{kind:?}");
+            assert_eq!(format_tool_update(&update).text, expected, "{kind:?}");
         }
     }
 }

@@ -139,14 +139,14 @@ describe("transcript agent tables", () => {
 });
 
 describe("transcript tool lines", () => {
-	test("renders tool title verbatim", () => {
+	test("renders tool line text as-is", () => {
 		render(
 			<Transcript
 				items={[
 					{
 						kind: "tool",
 						id: "t1",
-						line: { id: "t1", text: "edit file.md", status: "completed" },
+						line: { id: "t1", text: "edit: edit file.md", status: "completed" },
 					},
 				]}
 				repoLabel="~/repo"
@@ -155,7 +155,39 @@ describe("transcript tool lines", () => {
 				onAnswer={vi.fn()}
 			/>,
 		);
-		expect(screen.getByText("edit file.md")).toBeInTheDocument();
-		expect(screen.queryByText("ran edit file.md")).not.toBeInTheDocument();
+		expect(screen.getByText("edit: edit file.md")).toBeInTheDocument();
+		expect(screen.queryByText("edit file.md")).not.toBeInTheDocument();
+	});
+
+	test("tool row sets data-status", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{
+						kind: "tool",
+						id: "t1",
+						line: {
+							id: "t1",
+							text: "write: /var/tool-demo.txt",
+							status: "failed",
+						},
+					},
+				]}
+				repoLabel="~/repo"
+				agentLabel="AGENT"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		const row = container.querySelector(".tool");
+		expect(row?.getAttribute("data-status")).toBe("failed");
+		expect(row?.getAttribute("data-full")).toBe("write: /var/tool-demo.txt");
+	});
+
+	test("failed tool rule paints red", () => {
+		const css = readFileSync("src/App.css", "utf8");
+		const rule =
+			/\.tool\[data-status="failed"\][^{]*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(rule).toContain("#ff6b6b");
 	});
 });
