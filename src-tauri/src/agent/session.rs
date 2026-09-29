@@ -427,7 +427,8 @@ impl AgentManager {
     /// streams through the same global notification path as live turns, so
     /// the transcript rebuilds with no extra mapping except user bubbles.
     /// Single-flights on the history slot; finished plans replay read-only
-    /// history the same way. With no saved ID (a brand-new plan) a live
+    /// history the same way. Plans without a persisted ID recover it from
+    /// the CLI on demand; with no past at all (a brand-new plan) a live
     /// session starts instead so the pickers turn live and the transcript
     /// stays empty.
     pub async fn load_history(&self, session: SessionKey) -> Result<(), AgentError> {
@@ -442,7 +443,6 @@ impl AgentManager {
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
-        let saved_id = super::session_ids::saved_id(&repo_root, &session);
         {
             let mut state = self.state.lock().expect("state poisoned");
             if !state.claim_history(&session) {
@@ -461,7 +461,8 @@ impl AgentManager {
                 session: session.clone(),
             },
         );
-        let Some(session_id) = saved_id else {
+        // After HistoryBegin so the spinner covers the slow CLI probes.
+        let Some(session_id) = super::session_ids::resolve(&repo_root, &session) else {
             return self.finish_empty_history(session).await;
         };
         let plan = ActivePlan::for_session(&session);
