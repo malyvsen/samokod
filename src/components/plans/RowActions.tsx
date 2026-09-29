@@ -18,7 +18,7 @@ export type RowActionsProps =
 			hasPlanMd: boolean;
 			running: boolean;
 			onExecute: () => void;
-			onAbandon: () => void;
+			onCancel: () => void;
 	  }
 	| {
 			kind: "executing";
@@ -45,10 +45,10 @@ export function RowActions(props: RowActionsProps) {
 			return (
 				<>
 					<ActionButton
-						className="abandon"
-						label={`Abandon ${props.planName}`}
+						className="cancel"
+						label={`Cancel ${props.planName}`}
 						disabled={props.running}
-						onClick={props.onAbandon}
+						onClick={props.onCancel}
 					>
 						✕
 					</ActionButton>
@@ -69,7 +69,7 @@ export function RowActions(props: RowActionsProps) {
 			return (
 				<>
 					<ActionButton
-						className="abandon"
+						className="cancel"
 						label={`Cancel ${props.planName} and delete branch`}
 						disabled={props.running}
 						onClick={props.onCancel}
@@ -105,7 +105,7 @@ export function RowActions(props: RowActionsProps) {
 			return (
 				<>
 					<ActionButton
-						className="abandon"
+						className="cancel"
 						label="Cancel merge and delete branch"
 						disabled={props.running}
 						onClick={props.onCancel}

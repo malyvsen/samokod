@@ -27,7 +27,7 @@ impl Phase {
         }
     }
 
-    /// Phases with a live chat. Only these auto-abandon on chat switch.
+    /// Phases with a live chat. Only these auto-cancel on chat switch.
     pub fn is_active(self) -> bool {
         matches!(self, Phase::Scoping | Phase::Executing | Phase::Merging)
     }
@@ -154,9 +154,9 @@ pub fn finish_merge(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanErr
     Ok(next)
 }
 
-/// Drop an active plan. Scoping plans gain a slug when they have a heading,
+/// Cancel an active plan. Scoping plans gain a slug when they have a heading,
 /// everything else keeps its name.
-pub fn abandon(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
+pub fn cancel(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
     if !plan.phase.is_active() {
         return Err(PlanError::WrongPhase {
             expected: "an active plan",
@@ -175,7 +175,7 @@ pub fn abandon(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
     Ok(next)
 }
 
-/// Slugged abandon name for a scoping plan with a titled `plan.md`.
+/// Slug suffix for a scoping plan with a titled `plan.md`.
 /// Missing files and untitled plans yield no slug; the caller keeps the
 /// bare name. Pure except the read.
 fn slugged_name(repo_root: &Path, plan: &PlanRef) -> Option<String> {
@@ -503,11 +503,11 @@ mod tests {
         std::fs::write(scoping.plan_md(root), "# Titled\n").expect("write");
         let executing = execute(root, &scoping).expect("execute");
         let done = complete(root, &executing).expect("complete");
-        let cancelled = abandon(
+        let cancelled = cancel(
             root,
             &materialize_scoping(root, "2026-09-26.08-41-04").expect("fresh"),
         )
-        .expect("abandon");
+        .expect("cancel");
         let names: HashSet<(String, Phase)> = scan_plans(root)
             .into_iter()
             .map(|plan| (plan.name, plan.phase))
@@ -555,10 +555,10 @@ mod tests {
         std::fs::write(third.plan_md(root), "# Third\n").expect("write");
         let diverged = execute(root, &third).expect("execute");
         mark_executed(root, &diverged);
-        let dropped = abandon(root, &diverged).expect("abandon");
+        let dropped = cancel(root, &diverged).expect("cancel");
         assert_eq!(roles_for(root, &dropped), both);
         let fresh = materialize_scoping(root, "2026-09-26.08-41-06").expect("fresh");
-        let bare = abandon(root, &fresh).expect("abandon");
+        let bare = cancel(root, &fresh).expect("cancel");
         assert_eq!(roles_for(root, &bare), scoping_only);
     }
 
@@ -690,24 +690,24 @@ mod tests {
     }
 
     #[test]
-    fn abandon_names_scoping_plan_when_possible() {
+    fn cancel_names_scoping_plan_when_possible() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
         let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         std::fs::write(scoping.plan_md(root), "# Draft idea\n").expect("write plan");
-        let cancelled = abandon(root, &scoping).expect("abandon");
+        let cancelled = cancel(root, &scoping).expect("cancel");
         assert_eq!(cancelled.phase, Phase::Cancelled);
         assert!(cancelled.name.ends_with(".draft-idea"));
     }
 
     #[test]
-    fn abandon_keeps_bare_name_without_plan_md() {
+    fn cancel_keeps_bare_name_without_plan_md() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
         let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
-        let cancelled = abandon(root, &scoping).expect("abandon");
+        let cancelled = cancel(root, &scoping).expect("cancel");
         assert_eq!(cancelled.name, scoping.name);
     }
 

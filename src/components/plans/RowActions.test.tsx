@@ -33,7 +33,7 @@ describe("actionKind", () => {
 });
 
 describe("row actions", () => {
-	test("scoping rows offer abandon and execute", () => {
+	test("scoping rows offer cancel and execute", () => {
 		render(
 			<RowActions
 				kind="scoping"
@@ -41,11 +41,11 @@ describe("row actions", () => {
 				hasPlanMd={true}
 				running={false}
 				onExecute={vi.fn()}
-				onAbandon={vi.fn()}
+				onCancel={vi.fn()}
 			/>,
 		);
 		expect(
-			screen.getByRole("button", { name: "Abandon plan" }),
+			screen.getByRole("button", { name: "Cancel plan" }),
 		).toBeInTheDocument();
 		expect(
 			screen.getByRole("button", { name: "Send plan to execution" }),

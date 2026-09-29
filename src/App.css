@@ -1107,12 +1107,12 @@ body {
 	padding: 0;
 }
 
-.sbtn.abandon {
+.sbtn.cancel {
 	color: #ff6b6b;
 	border-color: rgba(255, 107, 107, 0.4);
 }
 
-.sbtn.abandon:hover {
+.sbtn.cancel:hover {
 	background: rgba(255, 107, 107, 0.14);
 }
 

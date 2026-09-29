@@ -19,7 +19,6 @@ function panelProps(
 		onSelect: vi.fn(),
 		onNewPlan: vi.fn(),
 		onExecute: vi.fn(),
-		onAbandon: vi.fn(),
 		onCancel: vi.fn(),
 		onDone: vi.fn(),
 		onBeginMerge: vi.fn(),
@@ -129,7 +128,7 @@ describe("plans panel", () => {
 		expect(doneDots.length).toBeGreaterThanOrEqual(3);
 	});
 
-	test("scoping rows offer abandon and execute", () => {
+	test("scoping rows offer cancel and execute", () => {
 		render(<PlansPanel {...panelProps([scopingPlan()])} />);
 		const row = screen
 			.getByRole("button", { name: "Parallel sessions Scoping" })
@@ -137,7 +136,7 @@ describe("plans panel", () => {
 		if (row === null) throw new Error("row missing");
 		const buttons = within(row as HTMLElement);
 		expect(
-			buttons.getByRole("button", { name: "Abandon 2026-09-25.10-54-59" }),
+			buttons.getByRole("button", { name: "Cancel 2026-09-25.10-54-59" }),
 		).toBeInTheDocument();
 		expect(
 			buttons.getByRole("button", {
@@ -254,7 +253,7 @@ describe("plans panel", () => {
 			if (row === null) throw new Error("row missing");
 			expect(
 				within(row as HTMLElement).queryByRole("button", {
-					name: /Abandon|Cancel|Send|Mark/,
+					name: /Cancel|Send|Mark/,
 				}),
 			).toBeNull();
 		}
@@ -289,9 +288,9 @@ describe("plans panel", () => {
 			role: "scoping",
 		});
 		await user.click(
-			screen.getByRole("button", { name: "Abandon 2026-09-25.10-54-59" }),
+			screen.getByRole("button", { name: "Cancel 2026-09-25.10-54-59" }),
 		);
-		expect(props.onAbandon).toHaveBeenCalledWith({
+		expect(props.onCancel).toHaveBeenCalledWith({
 			plan: "2026-09-25.10-54-59",
 			role: "scoping",
 		});
@@ -310,7 +309,7 @@ describe("plans panel", () => {
 			plan: "2026-09-25.10-54-59.slug",
 			role: "executing",
 		});
-		expect(props.onAbandon).not.toHaveBeenCalled();
+		expect(props.onCancel).not.toHaveBeenCalled();
 	});
 
 	test("rebase actions call back with the executing session", async () => {

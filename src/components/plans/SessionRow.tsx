@@ -18,7 +18,6 @@ export function SessionRow({
 	selected,
 	onSelect,
 	onExecute,
-	onAbandon,
 	onCancel,
 	onDone,
 	onBeginMerge,
@@ -32,7 +31,6 @@ export function SessionRow({
 	selected: SessionKey | null;
 	onSelect: (session: SessionKey) => void;
 	onExecute: (session: SessionKey) => void;
-	onAbandon: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
 	onDone: (session: SessionKey) => void;
 	onBeginMerge: (session: SessionKey) => void;
@@ -59,7 +57,7 @@ export function SessionRow({
 					hasPlanMd={hasPlanMd}
 					running={status.working}
 					onExecute={() => onExecute(key)}
-					onAbandon={() => onAbandon(key)}
+					onCancel={() => onCancel(key)}
 				/>
 			) : kind === "executing" ? (
 				<RowActions

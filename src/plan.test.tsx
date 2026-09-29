@@ -15,8 +15,7 @@ const api = vi.hoisted(() => ({
 	executePlan: vi.fn(),
 	markCompleted: vi.fn(),
 	beginMerge: vi.fn(),
-	abandonPlan: vi.fn(),
-	cancelExecution: vi.fn(),
+	cancelPlan: vi.fn(),
 	selectPlan: vi.fn(),
 	sendPrompt: vi.fn(),
 	retryLast: vi.fn(),
@@ -133,8 +132,8 @@ describe("plan", () => {
 		expect(screen.getByText("executor chat")).toBeInTheDocument();
 	});
 
-	test("row abandon button abandons and keeps the transcript", async () => {
-		api.abandonPlan.mockResolvedValue({
+	test("row cancel button cancels and keeps the transcript", async () => {
+		api.cancelPlan.mockResolvedValue({
 			plans: [
 				testEntry("2026-09-25.10-54-59.draft-idea", "cancelled", "Draft idea"),
 			],
@@ -152,17 +151,17 @@ describe("plan", () => {
 		const row = scoping.closest(".session");
 		if (row === null) throw new Error("scoping row missing");
 		const button = await within(row as HTMLElement).findByRole("button", {
-			name: "Abandon 2026-09-25.10-54-59",
+			name: "Cancel 2026-09-25.10-54-59",
 		});
 		await user.click(button);
-		expect(api.abandonPlan).toHaveBeenCalledTimes(1);
+		expect(api.cancelPlan).toHaveBeenCalledTimes(1);
 		await screen.findByText("Draft idea");
 		expect(screen.getByText("old chat")).toBeInTheDocument();
 		expect(screen.getByText("old question")).toBeInTheDocument();
 	});
 
-	test("abandoning an empty session drops its chat state", async () => {
-		api.abandonPlan.mockResolvedValue({
+	test("cancelling an empty session drops its chat state", async () => {
+		api.cancelPlan.mockResolvedValue({
 			plans: [testEntry("bbb", "scoping", "Beta", true)],
 			selected: { plan: "bbb", role: "scoping" },
 			config_defaults: testDefaults(),
@@ -177,10 +176,10 @@ describe("plan", () => {
 		const row = scoping.closest(".session");
 		if (row === null) throw new Error("scoping row missing");
 		const button = await within(row as HTMLElement).findByRole("button", {
-			name: "Abandon 2026-09-25.10-54-59",
+			name: "Cancel 2026-09-25.10-54-59",
 		});
 		await user.click(button);
-		expect(api.abandonPlan).toHaveBeenCalledTimes(1);
+		expect(api.cancelPlan).toHaveBeenCalledTimes(1);
 		await vi.waitFor(() =>
 			expect(screen.queryByText("ephemeral")).not.toBeInTheDocument(),
 		);

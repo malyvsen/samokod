@@ -42,12 +42,8 @@ export function beginMerge(session: SessionKey): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("begin_merge", { session });
 }
 
-export function abandonPlan(session: SessionKey): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("abandon_plan", { session });
-}
-
-export function cancelExecution(session: SessionKey): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("cancel_execution", { session });
+export function cancelPlan(session: SessionKey): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("cancel_plan", { session });
 }
 
 export function selectPlan(session: SessionKey): Promise<PlansUpdate> {

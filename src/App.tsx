@@ -1,10 +1,9 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-	abandonPlan,
 	answerPermission,
 	beginMerge,
-	cancelExecution,
+	cancelPlan,
 	cancelTurn,
 	createPlan,
 	executePlan,
@@ -359,11 +358,11 @@ export function App() {
 		}
 	}
 
-	async function handleAbandon(key: SessionKey) {
-		const wasEmpty = !hasUserMessage(chats, key);
+	async function handleCancel(key: SessionKey) {
+		const wasEmpty = key.role === "scoping" && !hasUserMessage(chats, key);
 		updateChat(key, (chat) => ({ ...chat, working: true }));
 		try {
-			const update = await abandonPlan(key);
+			const update = await cancelPlan(key);
 			if (wasEmpty) {
 				setChats((current) => {
 					const next = { ...current };
@@ -378,10 +377,6 @@ export function App() {
 			updateChat(key, (chat) => ({ ...chat, working: false }));
 			appendError(key, error instanceof Error ? error.message : String(error));
 		}
-	}
-
-	async function handleCancel(key: SessionKey) {
-		await runPlansAction(key, (session) => cancelExecution(session));
 	}
 
 	async function runPlansAction(
@@ -443,7 +438,6 @@ export function App() {
 							onSelect={handleSelect}
 							onNewPlan={() => void handleNewPlan()}
 							onExecute={(key) => void handleExecute(key)}
-							onAbandon={(key) => void handleAbandon(key)}
 							onCancel={(key) => void handleCancel(key)}
 							onDone={(key) => void handleDone(key)}
 							onBeginMerge={(key) => void handleBeginMerge(key)}

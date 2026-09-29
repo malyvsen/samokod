@@ -34,7 +34,7 @@ pub(crate) struct State {
     activity: HashMap<String, Instant>,
     /// Reserved scoping timestamp with no directory yet. Listed as a
     /// normal `Untitled` entry until the first `send_prompt` materializes
-    /// it; vanishing on abandon or select-away leaves no trace.
+    /// it; vanishing on cancel or select-away leaves no trace.
     pending_scoping: Option<String>,
     /// Background warms in flight, one per session key. Single-flights
     /// `warm_session` against a racing `send_prompt`.
@@ -493,11 +493,11 @@ impl AgentManager {
         Ok(self.plans_update())
     }
 
-    /// Drop a scoping plan. An empty session vanishes without a
-    /// `cancelled/` trace, falling back to `most_recent_key` (reserving a
-    /// fresh pending session when nothing remains); otherwise the plan
-    /// moves to `cancelled/` as today.
-    pub async fn abandon_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
+    /// Cancel an active plan. An empty scoping session vanishes without a
+    /// `cancelled/` trace; otherwise the plan moves to `cancelled/`,
+    /// force-removing the worktree and branch for executing and merging
+    /// plans. The selection stays on the cancelled (now read-only) session.
+    pub async fn cancel_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
         ensure_idle(&self.state, &session)?;
         let (repo_root, _) = self
             .reopen_snapshot()
@@ -543,27 +543,35 @@ impl AgentManager {
                 return Ok(self.plans_update());
             }
         }
+        let phase = session::role_phase(session.role);
         let from = plans::PlanRef {
             name: session.plan.clone(),
-            phase: plans::Phase::Scoping,
+            phase,
         };
-        if session.role != SessionRole::Scoping || !from.path(&repo_root).is_dir() {
+        if !from.path(&repo_root).is_dir() {
             return Err(AgentError::RequestFailed {
-                raw: "no active plan to abandon".to_string(),
+                raw: "no active plan to cancel".to_string(),
             });
         }
-        let next = plans::abandon(&repo_root, &from)?;
-        self.drop_live(&session).await;
+        if matches!(phase, plans::Phase::Executing | plans::Phase::Merging) {
+            self.remove_worktree(&repo_root, &from.name, true)?;
+        }
+        let next = plans::cancel(&repo_root, &from)?;
+        if phase == plans::Phase::Scoping {
+            self.drop_live(&session).await;
+        } else {
+            self.drop_plan_lives(&from.name).await;
+        }
         self.move_activity(&from.name, &next.name);
         self.select_key(SessionKey {
             plan: next.name,
-            role: SessionRole::Scoping,
+            role: session.role,
         });
         Ok(self.plans_update())
     }
 
     /// Select one session, discarding a previously-selected empty scoping
-    /// session the same way as abandon. Returns the target selection.
+    /// session the same way as cancel. Returns the target selection.
     /// No `ensure_idle` gate: selection is allowed anytime, and an empty
     /// previous session is never working.
     pub async fn select_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
@@ -623,45 +631,6 @@ impl AgentManager {
             });
         };
         scoping_draft_for(&state_guard, &repo_root, &session)
-    }
-
-    /// Cancel an executing or merging plan: force-remove its worktree,
-    /// delete its branch, and move the plan to cancelled. The selection
-    /// stays on the cancelled (now read-only) session.
-    pub async fn cancel_execution(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
-        ensure_idle(&self.state, &session)?;
-        let (repo_root, _) = self
-            .reopen_snapshot()
-            .ok_or_else(|| AgentError::NoSession {
-                raw: "open a repository first".to_string(),
-            })?;
-        let phase = match session.role {
-            SessionRole::Executing => plans::Phase::Executing,
-            SessionRole::Merging => plans::Phase::Merging,
-            SessionRole::Scoping => {
-                return Err(AgentError::RequestFailed {
-                    raw: "no active plan to cancel".to_string(),
-                });
-            }
-        };
-        let from = plans::PlanRef {
-            name: session.plan.clone(),
-            phase,
-        };
-        if !from.path(&repo_root).is_dir() {
-            return Err(AgentError::RequestFailed {
-                raw: "no active plan to cancel".to_string(),
-            });
-        }
-        self.remove_worktree(&repo_root, &from.name, true)?;
-        let next = plans::abandon(&repo_root, &from)?;
-        self.drop_plan_lives(&from.name).await;
-        self.move_activity(&from.name, &next.name);
-        self.select_key(SessionKey {
-            plan: next.name,
-            role: session.role,
-        });
-        Ok(self.plans_update())
     }
 
     /// Live worktree coordinates plus merge state for one plan. Map

@@ -7,7 +7,6 @@ export function PlansPanel({
 	onSelect,
 	onNewPlan,
 	onExecute,
-	onAbandon,
 	onCancel,
 	onDone,
 	onBeginMerge,
@@ -17,7 +16,6 @@ export function PlansPanel({
 	onSelect: (session: SessionKey) => void;
 	onNewPlan: () => void;
 	onExecute: (session: SessionKey) => void;
-	onAbandon: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
 	onDone: (session: SessionKey) => void;
 	onBeginMerge: (session: SessionKey) => void;
@@ -45,7 +43,6 @@ export function PlansPanel({
 							selected={selected}
 							onSelect={onSelect}
 							onExecute={onExecute}
-							onAbandon={onAbandon}
 							onCancel={onCancel}
 							onDone={onDone}
 							onBeginMerge={onBeginMerge}
