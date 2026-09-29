@@ -10,6 +10,13 @@ pub const SCOPING_AGENT: &str = "samokod-scoping";
 pub const EXECUTING_AGENT: &str = "samokod-executing";
 pub const MERGING_AGENT: &str = "samokod-merging";
 
+/// Mapping file holding per-plan OpenCode session IDs. Agents read it but
+/// never write it; the backend owns it.
+pub const SESSION_FILE: &str = "session.json";
+
+/// Matches every plan's session file. Each agent's edit rules deny it last.
+const SESSION_DENY_GLOB: &str = ".samokod/plans/**/session.json";
+
 /// Agent id for a phase. Pure.
 pub fn agent_for(phase: Phase) -> &'static str {
     match phase {
@@ -58,17 +65,18 @@ pub fn agent_config(plan: &PlanRef) -> String {
     .to_string()
 }
 
-/// Scoping edits stay inside its relative plan scope; the shell stays fully
-/// allowed for investigation. Rule order is load-bearing: OpenCode grants
-/// the last matching rule, so `*` comes first and the scope after.
+/// Scoping edits stay inside its plan scope, except the session file; the
+/// shell stays fully allowed for investigation.
 fn scoping_permissions(plan: &PlanRef) -> Value {
-    let mut edit = Map::with_capacity(2);
-    edit.insert("*".to_string(), Value::String("deny".to_string()));
-    edit.insert(plan.scope_glob(), Value::String("allow".to_string()));
+    let scope = plan.scope_glob();
     serde_json::json!({
         "read": "allow",
         "external_directory": "allow",
-        "edit": Value::Object(edit),
+        "edit": rules_object(&[
+            ("*", "deny"),
+            (scope.as_str(), "allow"),
+            (SESSION_DENY_GLOB, "deny"),
+        ]),
         "bash": "allow",
         "question": "deny",
         "task": rules_object(&SCOPING_TASK_RULES),
@@ -84,7 +92,7 @@ const SCOPING_TASK_RULES: [(&str, &str); 3] =
 /// ask inside `.samokod` to stop casual rewrites of app state through the
 /// obvious path; `bash` bypass is accepted. The bare `.samokod` key covers
 /// the directory entry itself, since `.samokod/**` only matches paths
-/// starting with `.samokod/`. Order is load-bearing, `*` first.
+/// starting with `.samokod/`, and session files deny.
 fn executing_permissions() -> Value {
     serde_json::json!({
         "read": "allow",
@@ -95,23 +103,29 @@ fn executing_permissions() -> Value {
     })
 }
 
-const EXECUTING_EDIT_RULES: [(&str, &str); 3] =
-    [("*", "allow"), (".samokod", "ask"), (".samokod/**", "ask")];
+const EXECUTING_EDIT_RULES: [(&str, &str); 4] = [
+    ("*", "allow"),
+    (".samokod", "ask"),
+    (".samokod/**", "ask"),
+    (SESSION_DENY_GLOB, "deny"),
+];
 
-/// Merging rebases one plan branch, so every worktree file is editable:
-/// a rebased commit must cover files the main branch added on top. No
-/// permission questions and no subagent research: merging is a focused
-/// rebasing task.
+/// Merging rebases one plan branch, so every worktree file is editable
+/// except the session file: a rebased commit must cover files the main
+/// branch added on top. No permission questions and no subagent research:
+/// merging is a focused rebasing task.
 fn merging_permissions() -> Value {
     serde_json::json!({
         "read": "allow",
         "external_directory": "allow",
-        "edit": "allow",
+        "edit": rules_object(&MERGING_EDIT_RULES),
         "bash": "allow",
         "question": "deny",
         "task": "deny",
     })
 }
+
+const MERGING_EDIT_RULES: [(&str, &str); 2] = [("*", "allow"), (SESSION_DENY_GLOB, "deny")];
 
 /// Ordered permission object from `(pattern, effect)` pairs. Insertion
 /// order is the contract: OpenCode grants the last matching rule.
@@ -310,12 +324,16 @@ mod tests {
     }
 
     #[test]
-    fn granular_rules_serialize_deny_first() {
+    fn granular_rules_serialize_in_order() {
         let config = config(&test_plan());
         let plan = test_plan();
         assert_eq!(
             keys_of(&config, SCOPING_AGENT, "edit"),
-            vec!["*".to_string(), plan.scope_glob()]
+            vec![
+                "*".to_string(),
+                plan.scope_glob(),
+                SESSION_DENY_GLOB.to_string()
+            ]
         );
         assert_eq!(
             keys_of(&config, SCOPING_AGENT, "task"),
@@ -326,8 +344,13 @@ mod tests {
             vec![
                 "*".to_string(),
                 ".samokod".to_string(),
-                ".samokod/**".to_string()
+                ".samokod/**".to_string(),
+                SESSION_DENY_GLOB.to_string()
             ]
+        );
+        assert_eq!(
+            keys_of(&config, MERGING_AGENT, "edit"),
+            vec!["*".to_string(), SESSION_DENY_GLOB.to_string()]
         );
     }
 
@@ -349,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn merging_allows_every_worktree_edit_without_subagents() {
+    fn merging_allows_worktree_edits_without_subagents() {
         let config = config(&test_plan());
         assert_eq!(
             effect_of(&config, MERGING_AGENT, "edit", "src/App.tsx"),
@@ -358,6 +381,15 @@ mod tests {
         assert_eq!(
             effect_of(&config, MERGING_AGENT, "edit", ".samokod/state.json"),
             "allow"
+        );
+        assert_eq!(
+            effect_of(
+                &config,
+                MERGING_AGENT,
+                "edit",
+                &format!(".samokod/plans/merging/x/{SESSION_FILE}")
+            ),
+            "deny"
         );
         assert_eq!(
             effect_of(&config, MERGING_AGENT, "bash", "git rebase -i main"),
@@ -371,6 +403,34 @@ mod tests {
         assert_eq!(agent_for(Phase::Merging), MERGING_AGENT);
         assert_eq!(agent_for(Phase::Executing), EXECUTING_AGENT);
         assert_eq!(agent_for(Phase::Scoping), SCOPING_AGENT);
+    }
+
+    #[test]
+    fn session_file_denies_last_for_every_agent() {
+        let plan = test_plan();
+        let config = config(&plan);
+        let own = format!(".samokod/plans/scoping/{}/{SESSION_FILE}", plan.name);
+        assert_eq!(effect_of(&config, SCOPING_AGENT, "edit", &own), "deny");
+        for resource in [
+            format!(".samokod/plans/scoping/other/{SESSION_FILE}"),
+            format!(".samokod/plans/executing/x/{SESSION_FILE}"),
+        ] {
+            assert_eq!(
+                effect_of(&config, SCOPING_AGENT, "edit", &resource),
+                "deny",
+                "{resource} should deny for scoping"
+            );
+            assert_eq!(
+                effect_of(&config, EXECUTING_AGENT, "edit", &resource),
+                "deny",
+                "{resource} should deny for executing"
+            );
+            assert_eq!(
+                effect_of(&config, MERGING_AGENT, "edit", &resource),
+                "deny",
+                "{resource} should deny for merging"
+            );
+        }
     }
 
     #[test]

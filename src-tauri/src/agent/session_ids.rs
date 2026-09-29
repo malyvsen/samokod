@@ -5,9 +5,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::opencode::SESSION_FILE;
 use crate::types::{SessionKey, SessionRole};
-
-const FILE: &str = "session.json";
 
 /// Read the persisted IDs for one plan directory. Missing files yield an
 /// empty map; corrupt files log and yield an empty map so a broken file
@@ -76,7 +75,7 @@ fn locate(repo_root: &Path, plan_name: &str) -> Option<PathBuf> {
 
 /// Path of the mapping file inside one plan directory. Pure.
 fn file(plan_dir: &Path) -> PathBuf {
-    plan_dir.join(FILE)
+    plan_dir.join(SESSION_FILE)
 }
 
 #[cfg(test)]
