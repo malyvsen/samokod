@@ -4,7 +4,10 @@ import remarkGfm from "remark-gfm";
 
 export function AgentMarkdown({ text }: { text: string }) {
 	return (
-		<ReactMarkdown remarkPlugins={[remarkGfm]} components={{ table: TableWrap }}>
+		<ReactMarkdown
+			remarkPlugins={[remarkGfm]}
+			components={{ table: TableWrap }}
+		>
 			{text}
 		</ReactMarkdown>
 	);

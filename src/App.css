@@ -576,6 +576,38 @@ body {
 	margin-bottom: 4px;
 }
 
+.msg.agent .md-table-wrap {
+	margin: 10px 0;
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	background: rgba(0, 0, 0, 0.35);
+	overflow-x: auto;
+}
+
+.msg.agent table {
+	border-collapse: collapse;
+	width: 100%;
+	font-size: 12.5px;
+}
+
+.msg.agent th,
+.msg.agent td {
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	padding: 6px 8px;
+	vertical-align: top;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+.msg.agent th {
+	background: rgba(255, 255, 255, 0.06);
+	color: #fff;
+	font-weight: 600;
+}
+
+.msg.agent td {
+	color: #e8e6e1;
+}
+
 .approval {
 	position: relative;
 	align-self: flex-start;

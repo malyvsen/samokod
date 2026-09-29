@@ -97,7 +97,9 @@ describe("transcript agent tables", () => {
 		const wrap = container.querySelector(".msg.agent .md-table-wrap");
 		expect(wrap).not.toBeNull();
 		expect(wrap?.querySelector("table")).not.toBeNull();
-		expect(screen.getByRole("columnheader", { name: "File" })).toBeInTheDocument();
+		expect(
+			screen.getByRole("columnheader", { name: "File" }),
+		).toBeInTheDocument();
 		expect(screen.getByRole("cell", { name: "ok" })).toBeInTheDocument();
 		expect(wrap?.querySelector("td code")).not.toBeNull();
 	});
@@ -115,8 +117,23 @@ describe("transcript agent tables", () => {
 	});
 
 	test("pipe text without a delimiter row stays a paragraph", () => {
-		const { container } = render(agentTranscript("just a | pipe, no table here"));
+		const { container } = render(
+			agentTranscript("just a | pipe, no table here"),
+		);
 		expect(container.querySelector(".msg.agent table")).toBeNull();
 		expect(screen.getByText(/just a \| pipe/)).toBeInTheDocument();
+	});
+
+	test("table cells wrap and wide tables scroll inside the bubble", () => {
+		const css = readFileSync("src/App.css", "utf8");
+		const wrapRule =
+			/\.msg\.agent \.md-table-wrap\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(wrapRule).toContain("overflow-x: auto");
+		const cellRule =
+			/\.msg\.agent th,\s*\.msg\.agent td\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(cellRule).toContain("white-space: normal");
+		expect(cellRule).toContain("overflow-wrap: anywhere");
+		expect(cellRule).not.toContain("nowrap");
+		expect(cellRule).not.toContain("text-align");
 	});
 });
