@@ -4,6 +4,7 @@ mod agent;
 mod awake;
 mod branch;
 mod error_hint;
+mod git;
 mod opencode;
 mod permissions;
 mod plans;

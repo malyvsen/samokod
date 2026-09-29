@@ -1,6 +1,5 @@
 // Repository validation with `git rev-parse`.
 use std::path::Path;
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -23,9 +22,8 @@ pub fn validate_repo(path: &Path) -> Result<RepoInfo, String> {
 }
 
 fn run_git(cwd: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
+    let output = crate::git::command(cwd)
         .args(args)
-        .current_dir(cwd)
         .output()
         .map_err(|error| format!("git failed: {error}"))?;
     if !output.status.success() {
@@ -46,9 +44,8 @@ mod tests {
             vec!["config", "user.name", "test"],
             vec!["commit", "--allow-empty", "-m", "init"],
         ] {
-            let status = Command::new("git")
+            let status = crate::git::command(dir.path())
                 .args(&args)
-                .current_dir(dir.path())
                 .output()
                 .expect("git");
             assert!(status.status.success(), "{args:?}");

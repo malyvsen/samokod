@@ -1,7 +1,6 @@
 // Live branch tracking: resolve `.git/HEAD` (following the `gitdir:`
 // pointer for worktrees) and watch it with a debounced `notify` watcher.
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 /// Resolve the HEAD file for a repo root. Follows the `gitdir:` pointer in
@@ -26,9 +25,8 @@ pub fn head_path(repo_root: &Path) -> Option<PathBuf> {
 
 /// Current branch via `git rev-parse`. Detached HEAD keeps `"HEAD"`.
 pub fn current_branch(repo_root: &Path) -> Option<String> {
-    let output = Command::new("git")
+    let output = crate::git::command(repo_root)
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(repo_root)
         .output()
         .ok()?;
     if !output.status.success() {
@@ -80,9 +78,8 @@ mod tests {
             vec!["config", "user.name", "test"],
             vec!["commit", "--allow-empty", "-m", "init"],
         ] {
-            let status = Command::new("git")
+            let status = crate::git::command(dir.path())
                 .args(&args)
-                .current_dir(dir.path())
                 .output()
                 .expect("git");
             assert!(status.status.success(), "{args:?}");

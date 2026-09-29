@@ -1,7 +1,6 @@
 // Worktree operations: one isolated checkout per executing plan.
 // Lifecycle first, pure naming helpers below, git edge at the bottom.
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// One plan checkout: where it lives and which branches it spans.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,7 +66,7 @@ pub fn is_dirty(path: &Path) -> Result<bool, WorktreeError> {
 /// Whether `main_branch` is an ancestor of `branch`: the fast path.
 /// Exit 0 means ancestor, exit 1 means diverged; other failures are loud.
 pub fn is_ffable(repo_root: &Path, main_branch: &str, branch: &str) -> Result<bool, WorktreeError> {
-    let output = git_command(repo_root)
+    let output = crate::git::command(repo_root)
         .args(["merge-base", "--is-ancestor", main_branch, branch])
         .output()
         .map_err(WorktreeError::Io)?;
@@ -201,26 +200,8 @@ pub enum WorktreeError {
     Io(#[from] std::io::Error),
 }
 
-/// Git directed by `cwd` alone. Ambient location vars (inherited from a
-/// git hook's environment, e.g. a relative `GIT_INDEX_FILE`) never
-/// override it: inside a fresh worktree `.git` is a file, so a relative
-/// index path fails with `Not a directory`.
-fn git_command(cwd: &Path) -> Command {
-    let mut command = Command::new("git");
-    command.current_dir(cwd);
-    for var in [
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_INDEX_FILE",
-        "GIT_COMMON_DIR",
-    ] {
-        command.env_remove(var);
-    }
-    command
-}
-
 fn run_git(cwd: &Path, args: &[&str]) -> Result<String, WorktreeError> {
-    let output = git_command(cwd)
+    let output = crate::git::command(cwd)
         .args(args)
         .output()
         .map_err(WorktreeError::Io)?;
@@ -262,19 +243,8 @@ mod tests {
         }
     }
 
-    /// Test git directed by `repo` alone: hook-inherited location vars
-    /// must not leak in, especially inside worktrees where `.git` is a
-    /// file and a relative index path fails.
     fn test_git(repo: &Path, args: &[&str]) -> std::process::Output {
-        Command::new("git")
-            .args(args)
-            .current_dir(repo)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
-            .env_remove("GIT_COMMON_DIR")
-            .output()
-            .expect("git")
+        crate::git::command(repo).args(args).output().expect("git")
     }
 
     #[test]

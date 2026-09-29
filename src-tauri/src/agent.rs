@@ -1680,9 +1680,8 @@ mod tests {
             vec!["config", "user.name", "test"],
             vec!["commit", "--allow-empty", "-m", "init"],
         ] {
-            let output = std::process::Command::new("git")
+            let output = crate::git::command(dir.path())
                 .args(&args)
-                .current_dir(dir.path())
                 .output()
                 .expect("git");
             assert!(output.status.success(), "{args:?}");
