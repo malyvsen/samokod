@@ -114,6 +114,10 @@ const BLOCK_TAGS = new Set([
 	"UL",
 ]);
 
+function isBlock(element: Element): boolean {
+	return BLOCK_TAGS.has(element.tagName);
+}
+
 function collect(node: Node): string {
 	let text = "";
 	for (const child of node.childNodes) {
@@ -122,8 +126,10 @@ function collect(node: Node): string {
 		} else if (child.nodeName === "BR") {
 			text += "\n";
 		} else if (child.nodeType === Node.ELEMENT_NODE) {
+			if (isBlock(child as Element)) {
+				if (text !== "" && !text.endsWith("\n")) text += "\n";
+			}
 			text += collect(child);
-			if (BLOCK_TAGS.has((child as Element).tagName)) text += "\n";
 		}
 	}
 	return text;
