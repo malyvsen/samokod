@@ -16,6 +16,7 @@ mod config;
 mod permissions;
 mod plans_list;
 mod session;
+mod session_ids;
 mod turns;
 mod warm;
 

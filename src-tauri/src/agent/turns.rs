@@ -70,6 +70,12 @@ impl AgentManager {
             }
         }
         let (connection, session_id) = self.ensure_live(&session).await?;
+        // A warmed pending session spawns before its directory exists, so
+        // its ID goes unrecorded; persisting here heals it once the first
+        // prompt materializes the directory, along with any missing file.
+        if let Some((repo_root, _)) = self.reopen_snapshot() {
+            super::session_ids::record(&repo_root, &session, &session_id);
+        }
         // A fresh prompt clears the failed flag; the dot goes green while
         // the turn runs.
         if let Some(mut state) = lock_state(&self.state)

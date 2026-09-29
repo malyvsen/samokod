@@ -276,6 +276,7 @@ impl AgentManager {
             state.branch = branch.to_string();
             state.current = Some(key.clone());
         }
+        super::session_ids::record(repo_root, &key, &session_id);
         emit_event(
             &self.app,
             AppEvent::SessionReset {
