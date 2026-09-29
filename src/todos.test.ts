@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { doneCount, todoMark, todoRowClass } from "./todos";
-import type { TodoView } from "./types";
+import type { TodoStatus, TodoView } from "./types";
 
-function todo(status: string): TodoView {
+function todo(status: TodoStatus): TodoView {
 	return { content: status, status, priority: "high" };
 }
 
@@ -11,7 +11,6 @@ describe("todo views", () => {
 		expect(todoMark("completed")).toBe("x");
 		expect(todoMark("in_progress")).toBe(">");
 		expect(todoMark("pending")).toBe(" ");
-		expect(todoMark("cancelled")).toBe(" ");
 	});
 
 	test("row classes highlight done and active", () => {

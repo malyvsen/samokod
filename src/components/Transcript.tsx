@@ -3,7 +3,9 @@ import { todoMark, todoRowClass } from "../todos";
 import type {
 	PermissionOptionView,
 	PermissionView,
+	ToolKindLabel,
 	ToolLineView,
+	ToolStatus,
 	TranscriptItem,
 } from "../types";
 import { AgentMarkdown } from "./AgentMarkdown";
@@ -73,6 +75,7 @@ export function Transcript({
 					}
 					if (item.kind === "approval") {
 						const permission: PermissionView = item.permission;
+						const kind: ToolKindLabel = permission.kind;
 						const allow = permission.options.find(
 							(option: PermissionOptionView) => option.kind === "allow",
 						);
@@ -83,7 +86,7 @@ export function Transcript({
 							<div className="approval" key={item.id}>
 								<h3 data-full={permission.title}>{permission.title}</h3>
 								<p>
-									{permission.kind} · {permission.rule_hint}
+									{kind} · {permission.rule_hint}
 								</p>
 								<p className="hint">
 									Reject skips just this command - the agent keeps working.
@@ -137,7 +140,21 @@ export function Transcript({
 	);
 }
 
+function assertNever(value: never): never {
+	throw new Error(`unexpected value: ${String(value)}`);
+}
+
 function ToolRow({ line }: { line: ToolLineView }) {
+	const status: ToolStatus = line.status;
+	switch (status) {
+		case "pending":
+		case "in_progress":
+		case "completed":
+		case "failed":
+			break;
+		default:
+			assertNever(status);
+	}
 	return (
 		<div className="tool" data-full={line.text}>
 			{line.text}

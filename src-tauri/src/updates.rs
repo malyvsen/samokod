@@ -1,7 +1,7 @@
 // Pure mappings for ACP session updates and tool calls. Every tool
 // execution becomes one `▸` status line regardless of kind.
 use crate::acp::{ContentBlock, SessionUpdate, ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind};
-use crate::types::ToolLineView;
+use crate::types::{ToolKindLabel, ToolLineView, ToolStatus};
 
 /// Extract streamed agent text from an update, if any. Pure.
 pub fn agent_text_of(update: &SessionUpdate) -> Option<String> {
@@ -37,10 +37,11 @@ pub fn update_kind(update: &SessionUpdate) -> Option<&'static str> {
 /// tooltip reads the same text. The title is agent text and renders verbatim;
 /// ongoing statuses append ` …`, finished ones render the bare title. Pure.
 pub fn format_tool_line(call: &ToolCall) -> ToolLineView {
+    let status = to_tool_status(call.status);
     ToolLineView {
         id: call.tool_call_id.to_string(),
-        text: tool_text(call),
-        status: tool_status_label(call.status),
+        text: tool_text(call, status),
+        status,
     }
 }
 
@@ -48,7 +49,7 @@ pub fn format_tool_line(call: &ToolCall) -> ToolLineView {
 /// title plus ` …` rule as tool lines; empty titles fall back to name/kind.
 /// Pure.
 pub fn format_tool_update(update: &ToolCallUpdate) -> ToolLineView {
-    let status = update.fields.status.unwrap_or_default();
+    let status = update.fields.status.map(to_tool_status).unwrap_or_default();
     let title = update.fields.title.as_deref().map(str::trim).unwrap_or("");
     let base = if title.is_empty() {
         fallback_label(update.fields.name.as_deref(), update.fields.kind)
@@ -57,67 +58,60 @@ pub fn format_tool_update(update: &ToolCallUpdate) -> ToolLineView {
     };
     ToolLineView {
         id: update.tool_call_id.to_string(),
-        text: with_ongoing_suffix(&base, is_ongoing(status)),
-        status: tool_status_label(status),
+        text: with_ongoing_suffix(&base, status),
+        status,
     }
 }
 
-fn tool_text(call: &ToolCall) -> String {
+fn tool_text(call: &ToolCall, status: ToolStatus) -> String {
     let title = call.title.trim();
     if title.is_empty() {
         let base = fallback_label(call.name.as_deref(), Some(call.kind));
-        return with_ongoing_suffix(&base, is_ongoing(call.status));
+        return with_ongoing_suffix(&base, status);
     }
-    with_ongoing_suffix(title, is_ongoing(call.status))
+    with_ongoing_suffix(title, status)
 }
 
 fn fallback_label(name: Option<&str>, kind: Option<ToolKind>) -> String {
     match name.map(str::trim) {
         Some(name) if !name.is_empty() => name.to_string(),
-        _ => kind_label(kind).to_string(),
+        _ => kind_label(kind).as_str().to_string(),
     }
 }
 
-fn with_ongoing_suffix(base: &str, ongoing: bool) -> String {
-    if ongoing {
+fn with_ongoing_suffix(base: &str, status: ToolStatus) -> String {
+    if status.is_ongoing() {
         format!("{base} …")
     } else {
         base.to_string()
     }
 }
 
-fn is_ongoing(status: ToolCallStatus) -> bool {
+fn to_tool_status(status: ToolCallStatus) -> ToolStatus {
     match status {
-        ToolCallStatus::Pending | ToolCallStatus::InProgress => true,
-        ToolCallStatus::Completed | ToolCallStatus::Failed => false,
-        _ => true,
+        ToolCallStatus::Pending => ToolStatus::Pending,
+        ToolCallStatus::InProgress => ToolStatus::InProgress,
+        ToolCallStatus::Completed => ToolStatus::Completed,
+        ToolCallStatus::Failed => ToolStatus::Failed,
+        _ => ToolStatus::Pending,
     }
 }
 
-fn tool_status_label(status: ToolCallStatus) -> String {
-    match status {
-        ToolCallStatus::Pending => "pending",
-        ToolCallStatus::InProgress => "in_progress",
-        ToolCallStatus::Completed => "completed",
-        ToolCallStatus::Failed => "failed",
-        _ => "pending",
-    }
-    .to_string()
-}
-
-/// Human label for a tool kind in permission cards. Pure.
-pub fn kind_label(kind: Option<ToolKind>) -> &'static str {
+/// Human label for a tool kind, shared by tool lines and permission cards.
+/// Pure.
+pub fn kind_label(kind: Option<ToolKind>) -> ToolKindLabel {
     match kind {
-        Some(ToolKind::Read) => "read",
-        Some(ToolKind::Edit) => "edit",
-        Some(ToolKind::Delete) => "delete",
-        Some(ToolKind::Move) => "move",
-        Some(ToolKind::Search) => "search",
-        Some(ToolKind::Execute) => "bash",
-        Some(ToolKind::Think) => "think",
-        Some(ToolKind::Fetch) => "fetch",
-        Some(ToolKind::SwitchMode) => "mode",
-        _ => "tool",
+        Some(ToolKind::Read) => ToolKindLabel::Read,
+        Some(ToolKind::Edit) => ToolKindLabel::Edit,
+        Some(ToolKind::Delete) => ToolKindLabel::Delete,
+        Some(ToolKind::Move) => ToolKindLabel::Move,
+        Some(ToolKind::Search) => ToolKindLabel::Search,
+        Some(ToolKind::Execute) => ToolKindLabel::Execute,
+        Some(ToolKind::Think) => ToolKindLabel::Think,
+        Some(ToolKind::Fetch) => ToolKindLabel::Fetch,
+        Some(ToolKind::SwitchMode) => ToolKindLabel::SwitchMode,
+        Some(ToolKind::Other) | None => ToolKindLabel::Other,
+        _ => ToolKindLabel::Other,
     }
 }
 
@@ -152,31 +146,31 @@ mod tests {
 
     #[test]
     fn finished_tool_line_renders_title_verbatim() {
-        for status in [ToolCallStatus::Completed, ToolCallStatus::Failed] {
+        for (wire, view) in [
+            (ToolCallStatus::Completed, ToolStatus::Completed),
+            (ToolCallStatus::Failed, ToolStatus::Failed),
+        ] {
             let call = ToolCall::new("id-1", "edit file.md")
                 .kind(ToolKind::Edit)
-                .status(status);
+                .status(wire);
             let line = format_tool_line(&call);
-            assert_eq!(line.text, "edit file.md", "{status:?}");
-            assert_eq!(
-                line.status,
-                if status == ToolCallStatus::Completed {
-                    "completed"
-                } else {
-                    "failed"
-                }
-            );
+            assert_eq!(line.text, "edit file.md", "{wire:?}");
+            assert_eq!(line.status, view);
         }
     }
 
     #[test]
     fn ongoing_tool_line_appends_ellipsis() {
-        for status in [ToolCallStatus::Pending, ToolCallStatus::InProgress] {
+        for (wire, view) in [
+            (ToolCallStatus::Pending, ToolStatus::Pending),
+            (ToolCallStatus::InProgress, ToolStatus::InProgress),
+        ] {
             let call = ToolCall::new("id-1", "edit file.md")
                 .kind(ToolKind::Edit)
-                .status(status);
+                .status(wire);
             let line = format_tool_line(&call);
-            assert_eq!(line.text, "edit file.md …", "{status:?}");
+            assert_eq!(line.text, "edit file.md …", "{wire:?}");
+            assert_eq!(line.status, view);
         }
     }
 
@@ -185,7 +179,12 @@ mod tests {
         let call = ToolCall::new("id-1", "edit file.md")
             .kind(ToolKind::Edit)
             .status(ToolCallStatus::InProgress);
-        assert_eq!(format_tool_line(&call).status, "in_progress");
+        let line = format_tool_line(&call);
+        assert_eq!(line.status, ToolStatus::InProgress);
+        assert_eq!(
+            serde_json::to_value(line.status).expect("status serializes"),
+            serde_json::Value::String("in_progress".to_string())
+        );
     }
 
     #[test]
@@ -244,7 +243,7 @@ mod tests {
             ToolKind::SwitchMode,
             ToolKind::Other,
         ] {
-            let expected = kind_label(Some(kind));
+            let expected = kind_label(Some(kind)).as_str();
             let call = ToolCall::new("id-1", "")
                 .kind(kind)
                 .status(ToolCallStatus::Completed);

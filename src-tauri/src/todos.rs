@@ -1,5 +1,5 @@
 // Todo list read off tool payloads by shape.
-use crate::types::{TodoChangeView, TodoView};
+use crate::types::{TodoChangeView, TodoStatus, TodoView};
 
 /// Extract a todo list from a `tool_call` raw input, if it carries one.
 pub fn todos_from_call(raw_input: Option<&serde_json::Value>) -> Option<Vec<TodoView>> {
@@ -21,7 +21,7 @@ pub fn todos_from_update(
 /// call input (`{todos: [...]}`) and the completed output (`{metadata:
 /// {todos: [...]}}`). Returns `None` when no list is present so callers can
 /// tell "not a todo payload" apart from "cleared list". Rows missing a field
-/// are skipped.
+/// or carrying an unknown status are skipped.
 fn parse_todos(payload: &serde_json::Value) -> Option<Vec<TodoView>> {
     let list = payload
         .get("todos")
@@ -32,12 +32,21 @@ fn parse_todos(payload: &serde_json::Value) -> Option<Vec<TodoView>> {
             .filter_map(|item| {
                 Some(TodoView {
                     content: item.get("content")?.as_str()?.to_string(),
-                    status: item.get("status")?.as_str()?.to_string(),
+                    status: parse_status(item.get("status")?.as_str()?)?,
                     priority: item.get("priority")?.as_str()?.to_string(),
                 })
             })
             .collect(),
     )
+}
+
+fn parse_status(raw: &str) -> Option<TodoStatus> {
+    match raw {
+        "pending" => Some(TodoStatus::Pending),
+        "in_progress" => Some(TodoStatus::InProgress),
+        "completed" => Some(TodoStatus::Completed),
+        _ => None,
+    }
 }
 
 /// Diff a fresh list against the previous one: added rows plus rows whose
@@ -51,7 +60,7 @@ pub fn diff_todos(old: &[TodoView], new: &[TodoView]) -> Vec<TodoChangeView> {
         })
         .map(|item| TodoChangeView {
             content: item.content.clone(),
-            status: item.status.clone(),
+            status: item.status,
         })
         .collect()
 }
@@ -61,10 +70,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn todo(content: &str, status: &str) -> TodoView {
+    fn todo(content: &str, status: TodoStatus) -> TodoView {
         TodoView {
             content: content.to_string(),
-            status: status.to_string(),
+            status,
             priority: "high".to_string(),
         }
     }
@@ -84,7 +93,7 @@ mod tests {
         ]});
         let todos = parse_todos(&payload).expect("todos key present");
         assert_eq!(todos.len(), 2);
-        assert_eq!(todos[1].status, "in_progress");
+        assert_eq!(todos[1].status, TodoStatus::InProgress);
     }
 
     #[test]
@@ -93,7 +102,7 @@ mod tests {
             {"content": "a", "status": "completed", "priority": "high"},
         ], "truncated": false}});
         let todos = parse_todos(&payload).expect("metadata.todos present");
-        assert_eq!(todos, vec![todo("a", "completed")]);
+        assert_eq!(todos, vec![todo("a", TodoStatus::Completed)]);
     }
 
     #[test]
@@ -115,6 +124,17 @@ mod tests {
         ]});
         let todos = parse_todos(&payload).expect("todos key present");
         assert_eq!(todos.len(), 1);
+    }
+
+    #[test]
+    fn skips_rows_with_unknown_status() {
+        let payload = json!({"todos": [
+            {"content": "a", "status": "cancelled", "priority": "high"},
+            {"content": "b", "status": "pending", "priority": "low"},
+        ]});
+        let todos = parse_todos(&payload).expect("todos key present");
+        assert_eq!(todos.len(), 1);
+        assert_eq!(todos[0].content, "b");
     }
 
     #[test]
@@ -158,28 +178,28 @@ mod tests {
     #[test]
     fn diff_reports_added_and_status_changed_only() {
         let old = vec![
-            todo("a", "pending"),
-            todo("gone", "pending"),
-            todo("same", "pending"),
+            todo("a", TodoStatus::Pending),
+            todo("gone", TodoStatus::Pending),
+            todo("same", TodoStatus::Pending),
         ];
         let new = vec![
-            todo("a", "completed"),
-            todo("b", "pending"),
-            todo("same", "pending"),
+            todo("a", TodoStatus::Completed),
+            todo("b", TodoStatus::Pending),
+            todo("same", TodoStatus::Pending),
         ];
         let changes = diff_todos(&old, &new);
         assert_eq!(changes.len(), 2);
         assert!(
             changes
                 .iter()
-                .any(|c| c.content == "a" && c.status == "completed")
+                .any(|c| c.content == "a" && c.status == TodoStatus::Completed)
         );
         assert!(changes.iter().any(|c| c.content == "b"));
     }
 
     #[test]
     fn identical_lists_have_no_changes() {
-        let list = vec![todo("a", "pending")];
+        let list = vec![todo("a", TodoStatus::Pending)];
         assert!(diff_todos(&list, &list).is_empty());
     }
 }

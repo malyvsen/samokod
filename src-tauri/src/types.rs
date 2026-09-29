@@ -34,12 +34,79 @@ impl From<crate::worktrees::WorktreeError> for AgentError {
     }
 }
 
+/// Lifecycle status for one tool line. Ongoing rows append ` …` in text;
+/// finished rows render the bare title.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolStatus {
+    #[default]
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+/// Shared label for a tool kind, used by tool lines (empty-title fallback)
+/// and permission cards.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolKindLabel {
+    Read,
+    Edit,
+    Delete,
+    Move,
+    Search,
+    #[serde(rename = "bash")]
+    Execute,
+    Think,
+    Fetch,
+    #[serde(rename = "mode")]
+    SwitchMode,
+    #[serde(rename = "tool")]
+    Other,
+}
+
+impl ToolKindLabel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ToolKindLabel::Read => "read",
+            ToolKindLabel::Edit => "edit",
+            ToolKindLabel::Delete => "delete",
+            ToolKindLabel::Move => "move",
+            ToolKindLabel::Search => "search",
+            ToolKindLabel::Execute => "bash",
+            ToolKindLabel::Think => "think",
+            ToolKindLabel::Fetch => "fetch",
+            ToolKindLabel::SwitchMode => "mode",
+            ToolKindLabel::Other => "tool",
+        }
+    }
+}
+
+impl ToolStatus {
+    pub fn is_ongoing(&self) -> bool {
+        match self {
+            ToolStatus::Pending | ToolStatus::InProgress => true,
+            ToolStatus::Completed | ToolStatus::Failed => false,
+        }
+    }
+}
+
+/// Status for one todo row.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
 /// One `▸` tool status line regardless of tool kind.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolLineView {
     pub id: String,
     pub text: String,
-    pub status: String,
+    pub status: ToolStatus,
 }
 
 /// One one-shot permission option (`allow` or `reject`). `always` variants
@@ -55,7 +122,7 @@ pub struct PermissionOptionView {
 pub struct PermissionView {
     pub tool_call_id: String,
     pub title: String,
-    pub kind: String,
+    pub kind: ToolKindLabel,
     pub options: Vec<PermissionOptionView>,
     /// Effective rule only, never the config file it came from.
     pub rule_hint: String,
@@ -210,7 +277,7 @@ pub enum AppEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TodoView {
     pub content: String,
-    pub status: String,
+    pub status: TodoStatus,
     pub priority: String,
 }
 
@@ -218,7 +285,7 @@ pub struct TodoView {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TodoChangeView {
     pub content: String,
-    pub status: String,
+    pub status: TodoStatus,
 }
 
 /// One value inside a session config option (ACP `ConfigOptionValue`).

@@ -12,10 +12,12 @@ export interface ConfigOptionView {
 	category?: string | null;
 }
 
+export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
+
 export interface ToolLineView {
 	id: string;
 	text: string;
-	status: string;
+	status: ToolStatus;
 }
 
 export type SessionRole = "scoping" | "executing" | "merging";
@@ -104,23 +106,37 @@ export interface PermissionOptionView {
 	kind: "allow" | "reject";
 }
 
+export type ToolKindLabel =
+	| "read"
+	| "edit"
+	| "delete"
+	| "move"
+	| "search"
+	| "bash"
+	| "think"
+	| "fetch"
+	| "mode"
+	| "tool";
+
 export interface PermissionView {
 	tool_call_id: string;
 	title: string;
-	kind: string;
+	kind: ToolKindLabel;
 	options: PermissionOptionView[];
 	rule_hint: string;
 }
 
+export type TodoStatus = "pending" | "in_progress" | "completed";
+
 export interface TodoView {
 	content: string;
-	status: string;
+	status: TodoStatus;
 	priority: string;
 }
 
 interface TodoChangeView {
 	content: string;
-	status: string;
+	status: TodoStatus;
 }
 
 export interface SpendView {

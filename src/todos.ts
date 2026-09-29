@@ -1,12 +1,12 @@
-import type { TodoView } from "./types";
+import type { TodoStatus, TodoView } from "./types";
 
-export function todoMark(status: string): string {
+export function todoMark(status: TodoStatus): string {
 	if (status === "completed") return "x";
 	if (status === "in_progress") return ">";
 	return " ";
 }
 
-export function todoRowClass(status: string): string {
+export function todoRowClass(status: TodoStatus): string {
 	if (status === "completed") return "done";
 	if (status === "in_progress") return "active";
 	return "";

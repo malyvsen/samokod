@@ -117,7 +117,7 @@ pub(crate) async fn handle_permission_request(
         .title
         .clone()
         .unwrap_or_else(|| "run this action?".to_string());
-    let kind = crate::updates::kind_label(request.tool_call.fields.kind).to_string();
+    let kind = crate::updates::kind_label(request.tool_call.fields.kind);
     let permission = PermissionView {
         tool_call_id: tool_call_id.clone(),
         title,
