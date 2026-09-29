@@ -13,14 +13,12 @@ import { AgentMarkdown } from "./AgentMarkdown";
 export function Transcript({
 	items,
 	repoLabel,
-	agentLabel,
 	onRetry,
 	onAnswer,
 	children,
 }: {
 	items: TranscriptItem[];
 	repoLabel: string;
-	agentLabel: string;
 	onRetry: (() => void) | null;
 	onAnswer: (toolCallId: string, optionId: string) => void;
 	children?: ReactNode;
@@ -46,7 +44,7 @@ export function Transcript({
 					if (item.kind === "agent") {
 						return (
 							<div className="msg agent" key={item.id}>
-								<div className="who">{agentLabel}</div>
+								<div className="who">AI</div>
 								<AgentMarkdown text={item.text} />
 							</div>
 						);

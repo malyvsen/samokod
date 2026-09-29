@@ -29,7 +29,6 @@ import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
 import { hasUserMessage, useSessionDrafts } from "./sessions/drafts";
 import {
-	agentLabelForPhase,
 	agentStatusOf,
 	isReadOnly,
 	selectedChat,
@@ -100,7 +99,6 @@ export function App() {
 
 	const entry = selectedEntry(plans, selectedKey);
 	const readOnly = isReadOnly(entry);
-	const agentLabel = agentLabelForPhase(entry?.phase);
 	const isLive = chat.configOptions.length > 0;
 	useWarmSession(selectedKey, isLive, readOnly);
 	const selectors = readOnly
@@ -455,7 +453,6 @@ export function App() {
 								<Transcript
 									items={chat.transcript}
 									repoLabel={repoLabel}
-									agentLabel={agentLabel}
 									onRetry={readOnly ? null : handleRetry}
 									onAnswer={handleAnswer}
 								>

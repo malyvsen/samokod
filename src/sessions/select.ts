@@ -31,18 +31,3 @@ export function selectedEntry(
 export function isReadOnly(entry: PlanEntry | undefined): boolean {
 	return entry?.phase === "completed" || entry?.phase === "cancelled";
 }
-
-export function agentLabelForPhase(
-	phase: PlanEntry["phase"] | undefined,
-): string {
-	switch (phase) {
-		case "scoping":
-			return "PLANNER";
-		case "executing":
-			return "EXECUTOR";
-		case "merging":
-			return "MERGER";
-		default:
-			return "AGENT";
-	}
-}

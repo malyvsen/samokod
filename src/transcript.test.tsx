@@ -10,7 +10,6 @@ function transcript(text: string) {
 		<Transcript
 			items={[{ kind: "user", id: "u1", text }]}
 			repoLabel="~/repo"
-			agentLabel="AGENT"
 			onRetry={vi.fn()}
 			onAnswer={vi.fn()}
 		/>
@@ -22,12 +21,18 @@ function agentTranscript(text: string) {
 		<Transcript
 			items={[{ kind: "agent", id: "a1", text }]}
 			repoLabel="~/repo"
-			agentLabel="AGENT"
 			onRetry={vi.fn()}
 			onAnswer={vi.fn()}
 		/>
 	);
 }
+
+describe("transcript agent header", () => {
+	test("agent messages read AI", () => {
+		render(agentTranscript("hello"));
+		expect(screen.getByText("AI")).toBeInTheDocument();
+	});
+});
 
 describe("transcript retry", () => {
 	test("retryable errors offer retry when writable", () => {
@@ -43,7 +48,6 @@ describe("transcript retry", () => {
 					},
 				]}
 				repoLabel="~/repo"
-				agentLabel="AGENT"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
 			/>,
@@ -64,7 +68,6 @@ describe("transcript retry", () => {
 					},
 				]}
 				repoLabel="~/repo"
-				agentLabel="AGENT"
 				onRetry={null}
 				onAnswer={vi.fn()}
 			/>,
@@ -150,7 +153,6 @@ describe("transcript tool lines", () => {
 					},
 				]}
 				repoLabel="~/repo"
-				agentLabel="AGENT"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
 			/>,
@@ -174,7 +176,6 @@ describe("transcript tool lines", () => {
 					},
 				]}
 				repoLabel="~/repo"
-				agentLabel="AGENT"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
 			/>,
