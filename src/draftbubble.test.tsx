@@ -134,4 +134,22 @@ describe("extractDraftText", () => {
 		expect(extractDraftText(root("<br>"))).toBe("");
 		expect(extractDraftText(root("<div><br></div>"))).toBe("");
 	});
+
+	test("does not glue bare text to blocks (firstsecond bug)", () => {
+		expect(
+			extractDraftText(root("first<div>second</div><div>third</div>")),
+		).toBe("first\nsecond\nthird");
+	});
+
+	test("keeps nested breaks after bare text (firstsecond bug)", () => {
+		expect(extractDraftText(root("first<div>second<br>third</div>"))).toBe(
+			"first\nsecond\nthird",
+		);
+	});
+
+	test("preserves blank lines between blocks (no collapsing)", () => {
+		expect(extractDraftText(root("a<div><br></div><div>b</div>"))).toBe(
+			"a\n\nb",
+		);
+	});
 });
