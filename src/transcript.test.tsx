@@ -137,3 +137,25 @@ describe("transcript agent tables", () => {
 		expect(cellRule).not.toContain("text-align");
 	});
 });
+
+describe("transcript tool lines", () => {
+	test("renders tool title verbatim", () => {
+		render(
+			<Transcript
+				items={[
+					{
+						kind: "tool",
+						id: "t1",
+						line: { id: "t1", text: "edit file.md", status: "completed" },
+					},
+				]}
+				repoLabel="~/repo"
+				agentLabel="AGENT"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		expect(screen.getByText("edit file.md")).toBeInTheDocument();
+		expect(screen.queryByText("ran edit file.md")).not.toBeInTheDocument();
+	});
+});
