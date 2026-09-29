@@ -356,9 +356,9 @@ impl AgentManager {
 
     /// Approve the scoping plan: snapshot the branch and commit, create
     /// the worktree on a fresh branch, move the plan to executing, and
-    /// start the executor inside the worktree with the absolute plan path.
+    /// start the executing agent inside the worktree with the absolute plan path.
     /// The prompt stays hidden: no user bubble, the chat opens working.
-    /// The selection follows the new execution session.
+    /// The selection follows the new executing session.
     pub async fn execute_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
         ensure_idle(&self.state, &session)?;
         let (repo_root, branch) = self
@@ -396,7 +396,7 @@ impl AgentManager {
         let (connection, session_id, key) =
             self.spawn_session(&repo_root, &branch, plan, agent).await?;
         let plan_dir_abs = next.path(&repo_root).to_string_lossy().to_string();
-        let text = opencode::executor_first_message(&plan_dir_abs);
+        let text = opencode::executing_first_message(&plan_dir_abs);
         self.touch_activity(&next.name);
         self.start_turn(connection, session_id, key, text).await?;
         Ok(self.plans_update())
@@ -451,7 +451,7 @@ impl AgentManager {
         Ok(self.plans_update())
     }
 
-    /// Move a clean diverged executing plan to merging and start the merge
+    /// Move a clean diverged executing plan to merging and start the merging
     /// agent in the worktree. Clean fast-forwardable plans finish directly
     /// instead; dirty worktrees refuse without spawning an agent.
     pub async fn begin_merge(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
@@ -482,7 +482,7 @@ impl AgentManager {
         let (connection, session_id, key) =
             self.spawn_session(&repo_root, &branch, plan, agent).await?;
         let plan_md_abs = next.plan_md(&repo_root).to_string_lossy().to_string();
-        let text = opencode::merger_first_message(
+        let text = opencode::merging_first_message(
             &status.branch,
             &status.main_branch,
             &status.path.to_string_lossy(),
@@ -614,7 +614,7 @@ impl AgentManager {
         Ok(self.plans_update())
     }
 
-    /// Prefilled scoping draft: the planner template with its plan dir
+    /// Prefilled scoping draft: the scoping template with its plan dir
     /// filled in, returned only while the session is fresh under the
     /// `is_empty_scoping` gate (no `plan.md`, no activity, no sent prompt).
     /// Non-fresh and non-scoping sessions get `None`; missing repos and
@@ -1156,7 +1156,7 @@ mod tests {
     }
 
     #[test]
-    fn most_recent_prefers_execution_session() {
+    fn most_recent_prefers_executing_session() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");

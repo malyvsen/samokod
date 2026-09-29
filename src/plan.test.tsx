@@ -114,7 +114,7 @@ describe("plan", () => {
 		emit({
 			type: "agent_text",
 			session: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
-			chunk: "executor chat",
+			chunk: "executing chat",
 		});
 		emit({
 			type: "turn_done",
@@ -129,7 +129,7 @@ describe("plan", () => {
 			.findByRole("button", { name: "Merge 2026-09-25.10-54-59.slug to main" })
 			.then((button) => button.click());
 		expect(api.markCompleted).toHaveBeenCalledTimes(1);
-		expect(screen.getByText("executor chat")).toBeInTheDocument();
+		expect(screen.getByText("executing chat")).toBeInTheDocument();
 	});
 
 	test("row cancel button cancels and keeps the transcript", async () => {

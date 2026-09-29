@@ -6,28 +6,28 @@ use serde_json::{Map, Value};
 
 use crate::plans::{Phase, PlanRef};
 
-pub const PLANNER_AGENT: &str = "samokod-planner";
-pub const EXECUTOR_AGENT: &str = "samokod-executor";
-pub const MERGER_AGENT: &str = "samokod-merger";
+pub const SCOPING_AGENT: &str = "samokod-scoping";
+pub const EXECUTING_AGENT: &str = "samokod-executing";
+pub const MERGING_AGENT: &str = "samokod-merging";
 
 /// Agent id for a phase. Pure.
 pub fn agent_for(phase: Phase) -> &'static str {
     match phase {
-        Phase::Scoping => PLANNER_AGENT,
-        Phase::Executing => EXECUTOR_AGENT,
-        Phase::Merging => MERGER_AGENT,
-        Phase::Completed | Phase::Cancelled => EXECUTOR_AGENT,
+        Phase::Scoping => SCOPING_AGENT,
+        Phase::Executing => EXECUTING_AGENT,
+        Phase::Merging => MERGING_AGENT,
+        Phase::Completed | Phase::Cancelled => EXECUTING_AGENT,
     }
 }
 
 /// Env key carrying inline JSON config. Merges over user and project config.
 pub const CONFIG_CONTENT_ENV: &str = "OPENCODE_CONFIG_CONTENT";
 
-const PLANNER_PROMPT: &str = include_str!("prompts/planner.md");
-const EXECUTOR_PROMPT: &str = include_str!("prompts/executor.md");
-const MERGER_PROMPT: &str = include_str!("prompts/merger.md");
+const SCOPING_PROMPT: &str = include_str!("prompts/scoping.md");
+const EXECUTING_PROMPT: &str = include_str!("prompts/executing.md");
+const MERGING_PROMPT: &str = include_str!("prompts/merging.md");
 
-/// Extra spawn env pinning both agents. Pure: JSON only, no process access.
+/// Extra spawn env pinning all agents. Pure: JSON only, no process access.
 pub fn agent_env(plan: &PlanRef) -> HashMap<String, String> {
     HashMap::from([(CONFIG_CONTENT_ENV.to_string(), agent_config(plan))])
 }
@@ -38,30 +38,30 @@ pub fn agent_env(plan: &PlanRef) -> HashMap<String, String> {
 pub fn agent_config(plan: &PlanRef) -> String {
     serde_json::json!({
         "agent": {
-            PLANNER_AGENT: {
+            SCOPING_AGENT: {
                 "mode": "primary",
                 "description": "Plans one task. Writes only inside its plan directory.",
-                "permission": planner_permissions(plan),
+                "permission": scoping_permissions(plan),
             },
-            EXECUTOR_AGENT: {
+            EXECUTING_AGENT: {
                 "mode": "primary",
                 "description": "Executes one approved plan.",
-                "permission": executor_permissions(),
+                "permission": executing_permissions(),
             },
-            MERGER_AGENT: {
+            MERGING_AGENT: {
                 "mode": "primary",
                 "description": "Rebases one plan branch onto the latest main.",
-                "permission": merger_permissions(),
+                "permission": merging_permissions(),
             },
         },
     })
     .to_string()
 }
 
-/// Planner edits stay inside its relative plan scope; the shell stays fully
+/// Scoping edits stay inside its relative plan scope; the shell stays fully
 /// allowed for investigation. Rule order is load-bearing: OpenCode grants
 /// the last matching rule, so `*` comes first and the scope after.
-fn planner_permissions(plan: &PlanRef) -> Value {
+fn scoping_permissions(plan: &PlanRef) -> Value {
     let mut edit = Map::with_capacity(2);
     edit.insert("*".to_string(), Value::String("deny".to_string()));
     edit.insert(plan.scope_glob(), Value::String("allow".to_string()));
@@ -71,38 +71,38 @@ fn planner_permissions(plan: &PlanRef) -> Value {
         "edit": Value::Object(edit),
         "bash": "allow",
         "question": "deny",
-        "task": rules_object(&PLANNER_TASK_RULES),
+        "task": rules_object(&SCOPING_TASK_RULES),
     })
 }
 
-/// Planner may only spawn read-only researchers. Denied types vanish from
+/// Scoping may only spawn read-only researchers. Denied types vanish from
 /// the Task tool description, so the model will not attempt them.
-const PLANNER_TASK_RULES: [(&str, &str); 3] =
+const SCOPING_TASK_RULES: [(&str, &str); 3] =
     [("*", "deny"), ("explore", "allow"), ("scout", "allow")];
 
-/// Executor runs an approved plan, so the shell is fully allowed. Edits
+/// Executing runs an approved plan, so the shell is fully allowed. Edits
 /// ask inside `.samokod` to stop casual rewrites of app state through the
 /// obvious path; `bash` bypass is accepted. The bare `.samokod` key covers
 /// the directory entry itself, since `.samokod/**` only matches paths
 /// starting with `.samokod/`. Order is load-bearing, `*` first.
-fn executor_permissions() -> Value {
+fn executing_permissions() -> Value {
     serde_json::json!({
         "read": "allow",
         "external_directory": "allow",
-        "edit": rules_object(&EXECUTOR_EDIT_RULES),
+        "edit": rules_object(&EXECUTING_EDIT_RULES),
         "bash": "allow",
         "question": "deny",
     })
 }
 
-const EXECUTOR_EDIT_RULES: [(&str, &str); 3] =
+const EXECUTING_EDIT_RULES: [(&str, &str); 3] =
     [("*", "allow"), (".samokod", "ask"), (".samokod/**", "ask")];
 
-/// Merger rebases one plan branch, so every worktree file is editable:
+/// Merging rebases one plan branch, so every worktree file is editable:
 /// a rebased commit must cover files the main branch added on top. No
 /// permission questions and no subagent research: merging is a focused
 /// rebasing task.
-fn merger_permissions() -> Value {
+fn merging_permissions() -> Value {
     serde_json::json!({
         "read": "allow",
         "external_directory": "allow",
@@ -128,28 +128,28 @@ pub fn plan_display(plan: &PlanRef) -> String {
     format!(".samokod/plans/{}/{}", plan.phase.dir_name(), plan.name)
 }
 
-/// Scoping draft: the planner template with its plan dir filled in.
+/// Scoping draft: the scoping template with its plan dir filled in.
 /// Prefilled into the first message box as ordinary editable user content.
 /// Pure.
 pub fn scoping_draft(plan_dir: &str) -> String {
-    PLANNER_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
+    SCOPING_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
-/// Executor role and instruction. Sent once per executing conversation:
+/// Executing role and instruction. Sent once per executing conversation:
 /// hidden on approval, prefixed to the first prompt otherwise. Pure.
-pub fn executor_first_message(plan_dir: &str) -> String {
-    EXECUTOR_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
+pub fn executing_first_message(plan_dir: &str) -> String {
+    EXECUTING_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
-/// Merger role and instruction. Sent hidden when the conflict path starts
-/// the merge agent in the worktree. Pure.
-pub fn merger_first_message(
+/// Merging role and instruction. Sent hidden when the conflict path starts
+/// the merging agent in the worktree. Pure.
+pub fn merging_first_message(
     worktree_branch: &str,
     main_branch: &str,
     worktree_path: &str,
     plan_md_abs_path: &str,
 ) -> String {
-    MERGER_PROMPT
+    MERGING_PROMPT
         .replace("{{WORKTREE_BRANCH}}", worktree_branch)
         .replace("{{MAIN_BRANCH}}", main_branch)
         .replace("{{WORKTREE_PATH}}", worktree_path)
@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn all_agents_are_primary_without_prompt_field() {
         let config = config(&test_plan());
-        for agent in [PLANNER_AGENT, EXECUTOR_AGENT, MERGER_AGENT] {
+        for agent in [SCOPING_AGENT, EXECUTING_AGENT, MERGING_AGENT] {
             let entry = config
                 .pointer(&format!("/agent/{agent}"))
                 .expect("agent present");
@@ -237,39 +237,39 @@ mod tests {
     }
 
     #[test]
-    fn planner_edit_allows_only_plan_dir() {
+    fn scoping_edit_allows_only_plan_dir() {
         let plan = test_plan();
         let config = config(&plan);
         let inside = format!(".samokod/plans/scoping/{}/plan.md", plan.name);
-        assert_eq!(effect_of(&config, PLANNER_AGENT, "edit", &inside), "allow");
+        assert_eq!(effect_of(&config, SCOPING_AGENT, "edit", &inside), "allow");
         assert_eq!(
-            effect_of(&config, PLANNER_AGENT, "edit", "src/App.tsx"),
+            effect_of(&config, SCOPING_AGENT, "edit", "src/App.tsx"),
             "deny"
         );
     }
 
     #[test]
-    fn planner_allows_bash() {
+    fn scoping_allows_bash() {
         let config = config(&test_plan());
         assert_eq!(
-            effect_of(&config, PLANNER_AGENT, "bash", "cargo test"),
+            effect_of(&config, SCOPING_AGENT, "bash", "cargo test"),
             "allow"
         );
     }
 
     #[test]
-    fn planner_task_allows_explore_and_scout() {
+    fn scoping_task_allows_explore_and_scout() {
         let config = config(&test_plan());
         for agent_type in ["explore", "scout"] {
             assert_eq!(
-                effect_of(&config, PLANNER_AGENT, "task", agent_type),
+                effect_of(&config, SCOPING_AGENT, "task", agent_type),
                 "allow",
                 "{agent_type} should be allowed"
             );
         }
         for agent_type in ["general", "unknown-type"] {
             assert_eq!(
-                effect_of(&config, PLANNER_AGENT, "task", agent_type),
+                effect_of(&config, SCOPING_AGENT, "task", agent_type),
                 "deny",
                 "{agent_type} should be denied"
             );
@@ -277,20 +277,20 @@ mod tests {
     }
 
     #[test]
-    fn executor_allows_edits_and_bash() {
+    fn executing_allows_edits_and_bash() {
         let config = config(&test_plan());
         assert_eq!(
-            effect_of(&config, EXECUTOR_AGENT, "edit", "src/App.tsx"),
+            effect_of(&config, EXECUTING_AGENT, "edit", "src/App.tsx"),
             "allow"
         );
         assert_eq!(
-            effect_of(&config, EXECUTOR_AGENT, "bash", "cargo test"),
+            effect_of(&config, EXECUTING_AGENT, "bash", "cargo test"),
             "allow"
         );
     }
 
     #[test]
-    fn executor_asks_inside_samokod() {
+    fn executing_asks_inside_samokod() {
         let config = config(&test_plan());
         for resource in [
             ".samokod",
@@ -298,13 +298,13 @@ mod tests {
             ".samokod/plans/scoping/x/plan.md",
         ] {
             assert_eq!(
-                effect_of(&config, EXECUTOR_AGENT, "edit", resource),
+                effect_of(&config, EXECUTING_AGENT, "edit", resource),
                 "ask",
                 "{resource} should ask"
             );
         }
         assert_eq!(
-            effect_of(&config, EXECUTOR_AGENT, "edit", "src/App.tsx"),
+            effect_of(&config, EXECUTING_AGENT, "edit", "src/App.tsx"),
             "allow"
         );
     }
@@ -314,15 +314,15 @@ mod tests {
         let config = config(&test_plan());
         let plan = test_plan();
         assert_eq!(
-            keys_of(&config, PLANNER_AGENT, "edit"),
+            keys_of(&config, SCOPING_AGENT, "edit"),
             vec!["*".to_string(), plan.scope_glob()]
         );
         assert_eq!(
-            keys_of(&config, PLANNER_AGENT, "task"),
+            keys_of(&config, SCOPING_AGENT, "task"),
             vec!["*".to_string(), "explore".to_string(), "scout".to_string()]
         );
         assert_eq!(
-            keys_of(&config, EXECUTOR_AGENT, "edit"),
+            keys_of(&config, EXECUTING_AGENT, "edit"),
             vec![
                 "*".to_string(),
                 ".samokod".to_string(),
@@ -332,50 +332,50 @@ mod tests {
     }
 
     #[test]
-    fn planner_and_executor_deny_question() {
+    fn scoping_and_executing_deny_question() {
         let config = config(&test_plan());
         assert_eq!(
-            config["agent"][PLANNER_AGENT]["permission"]["question"],
+            config["agent"][SCOPING_AGENT]["permission"]["question"],
             "deny"
         );
         assert_eq!(
-            config["agent"][EXECUTOR_AGENT]["permission"]["question"],
+            config["agent"][EXECUTING_AGENT]["permission"]["question"],
             "deny"
         );
         assert_eq!(
-            config["agent"][MERGER_AGENT]["permission"]["question"],
+            config["agent"][MERGING_AGENT]["permission"]["question"],
             "deny"
         );
     }
 
     #[test]
-    fn merger_allows_every_worktree_edit_without_subagents() {
+    fn merging_allows_every_worktree_edit_without_subagents() {
         let config = config(&test_plan());
         assert_eq!(
-            effect_of(&config, MERGER_AGENT, "edit", "src/App.tsx"),
+            effect_of(&config, MERGING_AGENT, "edit", "src/App.tsx"),
             "allow"
         );
         assert_eq!(
-            effect_of(&config, MERGER_AGENT, "edit", ".samokod/state.json"),
+            effect_of(&config, MERGING_AGENT, "edit", ".samokod/state.json"),
             "allow"
         );
         assert_eq!(
-            effect_of(&config, MERGER_AGENT, "bash", "git rebase -i main"),
+            effect_of(&config, MERGING_AGENT, "bash", "git rebase -i main"),
             "allow"
         );
-        assert_eq!(config["agent"][MERGER_AGENT]["permission"]["task"], "deny");
+        assert_eq!(config["agent"][MERGING_AGENT]["permission"]["task"], "deny");
     }
 
     #[test]
-    fn merging_plans_run_the_merger() {
-        assert_eq!(agent_for(Phase::Merging), MERGER_AGENT);
-        assert_eq!(agent_for(Phase::Executing), EXECUTOR_AGENT);
-        assert_eq!(agent_for(Phase::Scoping), PLANNER_AGENT);
+    fn merging_plans_run_the_merging_agent() {
+        assert_eq!(agent_for(Phase::Merging), MERGING_AGENT);
+        assert_eq!(agent_for(Phase::Executing), EXECUTING_AGENT);
+        assert_eq!(agent_for(Phase::Scoping), SCOPING_AGENT);
     }
 
     #[test]
-    fn merger_message_fills_every_placeholder() {
-        let message = merger_first_message(
+    fn merging_message_fills_every_placeholder() {
+        let message = merging_first_message(
             "samokod/shiny-feature",
             "main",
             "/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature",
@@ -398,8 +398,8 @@ mod tests {
     }
 
     #[test]
-    fn executor_message_names_plan_path() {
-        let message = executor_first_message(".samokod/plans/executing/ts.slug");
+    fn executing_message_names_plan_path() {
+        let message = executing_first_message(".samokod/plans/executing/ts.slug");
         assert!(message.contains(".samokod/plans/executing/ts.slug/plan.md"));
         assert!(!message.contains("{{PLAN_DIR}}"));
     }

@@ -66,7 +66,7 @@ impl AgentManager {
     }
 }
 
-/// Select one agent by mode id. Fails loud: a planner session running as
+/// Select one agent by mode id. Fails loud: a scoping session running as
 /// the wrong agent would silently break write confinement.
 pub(crate) async fn pin_agent_mode(
     connection: &ConnectionTo<Agent>,

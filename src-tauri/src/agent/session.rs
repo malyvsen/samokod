@@ -1,6 +1,6 @@
 // Live sessions: one `opencode acp` child process per session, keyed by
 // plan directory name plus role. Spawning is lazy on the first prompt,
-// except the eager executor start after approval.
+// except the eager executing start after approval.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -41,7 +41,7 @@ pub(crate) struct ActivePlan {
     pub(crate) name: String,
     pub(crate) phase: plans::Phase,
     /// Role already delivered for this ACP conversation. Scoping never
-    /// sends one (the composer holds the template as editable text);
+    /// sends one (the draft bubble holds the template as editable text);
     /// executing sends once, hidden on approval or prefixed to the first
     /// prompt otherwise.
     pub(crate) prefixed: bool,
@@ -191,7 +191,7 @@ impl AgentManager {
     /// Spawn a fresh agent process scoped to one plan and open a session on
     /// it: pin the agent mode, reapply the repo default model then effort
     /// (effort-last, since a model switch can reshape effort options).
-    /// Shared by lazy first prompts and the eager executor start.
+    /// Shared by lazy first prompts and the eager executing start.
     pub(crate) async fn spawn_session(
         &self,
         repo_root: &Path,
@@ -406,7 +406,7 @@ impl AgentManager {
         };
         // A known session keeps its prefix state across transport deaths;
         // anything without an entry starts with the caller's flag.
-        // Eager executors bypass this path: `execute_plan` marks their
+        // Eager executing sessions bypass this path: `execute_plan` marks their
         // prefixed flag, since their role already went out hidden.
         plan.prefixed = stored_prefixed.unwrap_or(plan.prefixed);
         let agent = opencode::agent_for(plan.phase);

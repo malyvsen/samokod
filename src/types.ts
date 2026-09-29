@@ -20,6 +20,7 @@ export interface ToolLineView {
 	status: ToolStatus;
 }
 
+/// Role of one session inside a plan: which chat the user is talking to.
 export type SessionRole = "scoping" | "executing" | "merging";
 
 export interface SessionKey {
@@ -47,6 +48,7 @@ export interface SessionStatusView {
 	live: boolean;
 }
 
+/// Phase of one plan: where its directory lives under `.samokod/plans/`.
 export type PlanPhase =
 	| "scoping"
 	| "executing"

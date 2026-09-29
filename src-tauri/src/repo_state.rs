@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn roles_ignore_mode_and_extras() {
         let options = vec![
-            view("mode", Some("mode"), "planner"),
+            view("mode", Some("mode"), "scoping"),
             view("ctx", Some("model_config"), "big"),
             view("llm", Some("model"), "m1"),
         ];

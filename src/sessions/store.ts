@@ -191,13 +191,13 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 }
 
 /// Move the acted-on transcript to its history row when the plan renamed,
-/// and open the new execution session working. `executorRunning` sets the
-/// executor running for the eager execute path.
+/// and open the new executing session working. `executingRunning` sets the
+/// executing session running for the eager execute path.
 export function carryHistory(
 	chats: Chats,
 	key: SessionKey,
 	update: PlansUpdate,
-	executorRunning: boolean,
+	executingRunning: boolean,
 ): Chats {
 	const historyKey: SessionKey = {
 		plan: update.selected.plan,
@@ -208,7 +208,7 @@ export function carryHistory(
 	delete next[sessionKeyOf(key)];
 	next[sessionKeyOf(historyKey)] = { ...entry, working: false };
 	if (
-		executorRunning &&
+		executingRunning &&
 		sessionKeyOf(update.selected) !== sessionKeyOf(historyKey)
 	) {
 		const id = sessionKeyOf(update.selected);

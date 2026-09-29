@@ -36,7 +36,7 @@ impl AgentManager {
 
     /// Send one plain-text prompt, spawning the session lazily on its
     /// first message. Streams arrive as events; the turn end arrives as
-    /// done or failed. Scoping text goes through verbatim: the composer
+    /// done or failed. Scoping text goes through verbatim: the draft bubble
     /// prefills the template as editable user content. A reserved
     /// pending scoping session materializes its directory here, before
     /// the `ensure_live` path.
@@ -210,7 +210,7 @@ impl AgentManager {
                     .path(&repo_root)
                     .to_string_lossy()
                     .to_string();
-                executor_prefix_text(&plan_dir_abs, user_text)
+                executing_prefix_text(&plan_dir_abs, user_text)
             }
             plans::Phase::Merging => {
                 let (path, branch, main_branch) = match state.worktrees.get(&plan.name) {
@@ -230,7 +230,7 @@ impl AgentManager {
                     .plan_md(&repo_root)
                     .to_string_lossy()
                     .to_string();
-                merger_prefix_text(
+                merging_prefix_text(
                     &branch,
                     &main_branch,
                     &path.to_string_lossy(),
@@ -335,19 +335,19 @@ pub(crate) fn handle_notification(
     }
 }
 
-/// Executor role template for the first message of one ACP
+/// Executing role template for the first message of one ACP
 /// conversation. Pure.
-fn executor_prefix_text(display: &str, user_text: &str) -> String {
+fn executing_prefix_text(display: &str, user_text: &str) -> String {
     format!(
         "{}\n\n{}",
-        opencode::executor_first_message(display),
+        opencode::executing_first_message(display),
         user_text.trim()
     )
 }
 
-/// Merger role template for the first message of one ACP conversation.
+/// Merging role template for the first message of one ACP conversation.
 /// Pure.
-fn merger_prefix_text(
+fn merging_prefix_text(
     worktree_branch: &str,
     main_branch: &str,
     worktree_path: &str,
@@ -356,7 +356,7 @@ fn merger_prefix_text(
 ) -> String {
     format!(
         "{}\n\n{}",
-        opencode::merger_first_message(
+        opencode::merging_first_message(
             worktree_branch,
             main_branch,
             worktree_path,
@@ -398,14 +398,14 @@ mod tests {
     #[test]
     fn executing_prefix_combines_role_and_user_text() {
         let display = ".samokod/plans/executing/ts.slug";
-        let text = executor_prefix_text(display, "  do things  ");
-        assert!(text.contains(&opencode::executor_first_message(display)));
+        let text = executing_prefix_text(display, "  do things  ");
+        assert!(text.contains(&opencode::executing_first_message(display)));
         assert!(text.contains("do things"));
     }
 
     #[test]
     fn merging_prefix_combines_role_and_user_text() {
-        let text = merger_prefix_text(
+        let text = merging_prefix_text(
             "samokod/shiny",
             "main",
             "/repo/.samokod/worktrees/plan",
