@@ -122,11 +122,8 @@ pub enum PlanError {
 }
 
 /// Create the full structure plus the self-ignoring `.gitignore`.
-/// Idempotent: safe to run on every repo open. Migrates a leftover
-/// `merging/` directory into `landing/` first so history rows survive the
-/// rename; a name collision fails loud instead of overwriting.
+/// Idempotent: safe to run on every repo open.
 pub fn ensure_structure(repo_root: &Path) -> Result<(), PlanError> {
-    migrate_merging_dir(repo_root)?;
     for phase in [
         Phase::Scoping,
         Phase::Executing,
@@ -137,93 +134,6 @@ pub fn ensure_structure(repo_root: &Path) -> Result<(), PlanError> {
         std::fs::create_dir_all(phase_dir(repo_root, phase))?;
     }
     std::fs::write(samokod_dir(repo_root).join(".gitignore"), "*\n")?;
-    Ok(())
-}
-
-/// Move a pre-rename `merging/` directory into `landing/`. Fails loud when
-/// both hold the same plan name; safe to re-run once migrated.
-fn migrate_merging_dir(repo_root: &Path) -> Result<(), PlanError> {
-    let root = plans_root(repo_root);
-    let from = root.join("merging");
-    if !from.is_dir() {
-        return Ok(());
-    }
-    let to = root.join("landing");
-    std::fs::create_dir_all(&to)?;
-    let entries = std::fs::read_dir(&from).map_err(|error| {
-        PlanError::Io(std::io::Error::new(
-            error.kind(),
-            format!("cannot list {}: {error}", from.display()),
-        ))
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|error| {
-            PlanError::Io(std::io::Error::new(
-                error.kind(),
-                format!("cannot list {}: {error}", from.display()),
-            ))
-        })?;
-        if !entry.path().is_dir() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().to_string();
-        let dest = to.join(&name);
-        if dest.exists() {
-            return Err(PlanError::Io(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                format!(
-                    "cannot migrate {} to {}: destination exists",
-                    entry.path().display(),
-                    dest.display()
-                ),
-            )));
-        }
-        std::fs::rename(entry.path(), &dest).map_err(|error| {
-            PlanError::Io(std::io::Error::new(
-                error.kind(),
-                format!(
-                    "cannot move {} to {}: {error}",
-                    entry.path().display(),
-                    dest.display()
-                ),
-            ))
-        })?;
-    }
-    std::fs::remove_dir(&from).map_err(|error| {
-        PlanError::Io(std::io::Error::new(
-            error.kind(),
-            format!("cannot remove {}: {error}", from.display()),
-        ))
-    })?;
-    migrate_markers(&to)?;
-    Ok(())
-}
-
-/// Rename pre-rename `.merging` marker files to `.landing` under `dir`.
-/// Best-effort: failures log and the open continues.
-fn migrate_markers(dir: &Path) -> Result<(), PlanError> {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(PlanError::Io(std::io::Error::new(
-                error.kind(),
-                format!("cannot list {}: {error}", dir.display()),
-            )));
-        }
-    };
-    for entry in entries.filter_map(|entry| entry.ok()) {
-        let plan_dir = entry.path();
-        if !plan_dir.is_dir() {
-            continue;
-        }
-        let marker = plan_dir.join(".merging");
-        if marker.is_file()
-            && let Err(error) = std::fs::rename(&marker, plan_dir.join(".landing"))
-        {
-            log::warn!("failed to migrate {}: {error}", marker.display());
-        }
-    }
     Ok(())
 }
 
@@ -1013,69 +923,6 @@ mod tests {
             phase: Phase::Scoping,
         };
         assert_eq!(arrival_ms(root, &missing), None);
-    }
-
-    #[test]
-    fn ensure_migrates_merging_dir_only() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        let legacy = root.join(".samokod/plans/merging/2026-09-26.08-41-03.slug");
-        std::fs::create_dir_all(&legacy).expect("mkdir");
-        std::fs::write(legacy.join("plan.md"), "# Shiny\n").expect("write");
-        ensure_structure(root).expect("ensure");
-        assert!(!root.join(".samokod/plans/merging").exists());
-        let moved = PlanRef {
-            name: "2026-09-26.08-41-03.slug".to_string(),
-            phase: Phase::Landing,
-        };
-        assert!(moved.path(root).is_dir());
-        assert!(moved.has_plan_md(root));
-        // Re-running stays idempotent.
-        ensure_structure(root).expect("re-ensure");
-        assert!(moved.path(root).is_dir());
-    }
-
-    #[test]
-    fn ensure_merges_into_existing_landing_dir() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        ensure_structure(root).expect("ensure");
-        let legacy = root.join(".samokod/plans/merging/2026-09-26.08-41-03.slug");
-        std::fs::create_dir_all(&legacy).expect("mkdir");
-        std::fs::write(legacy.join("plan.md"), "# Shiny\n").expect("write");
-        ensure_structure(root).expect("ensure");
-        assert!(!root.join(".samokod/plans/merging").exists());
-        assert!(
-            PlanRef {
-                name: "2026-09-26.08-41-03.slug".to_string(),
-                phase: Phase::Landing,
-            }
-            .path(root)
-            .is_dir()
-        );
-    }
-
-    #[test]
-    fn ensure_fails_loud_on_migration_collision() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        ensure_structure(root).expect("ensure");
-        std::fs::create_dir_all(root.join(".samokod/plans/merging/clash")).expect("mkdir");
-        std::fs::create_dir_all(root.join(".samokod/plans/landing/clash")).expect("mkdir");
-        assert!(matches!(ensure_structure(root), Err(PlanError::Io(_))));
-    }
-
-    #[test]
-    fn ensure_renames_merging_markers() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        let legacy = root.join(".samokod/plans/merging/2026-09-26.08-41-03.slug");
-        std::fs::create_dir_all(&legacy).expect("mkdir");
-        std::fs::write(legacy.join(".merging"), "").expect("write");
-        ensure_structure(root).expect("ensure");
-        let moved = root.join(".samokod/plans/landing/2026-09-26.08-41-03.slug");
-        assert!(moved.join(".landing").is_file());
-        assert!(!moved.join(".merging").exists());
     }
 
     #[test]
