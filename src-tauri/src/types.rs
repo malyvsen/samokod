@@ -283,10 +283,12 @@ pub enum AppEvent {
     HistoryDone {
         session: SessionKey,
     },
-    /// History replay failed. `retryable` drives the transcript retry bar.
+    /// History replay failed. `hint` renders under the raw reason and
+    /// `retryable` drives the transcript retry bar.
     HistoryFailed {
         session: SessionKey,
         raw: String,
+        hint: String,
         retryable: bool,
     },
     PlansChanged {

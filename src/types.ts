@@ -191,6 +191,7 @@ export type AppEvent =
 			type: "history_failed";
 			session: SessionKey;
 			raw: string;
+			hint: string;
 			retryable: boolean;
 	  }
 	| { type: "branch_changed"; branch: string }

@@ -47,10 +47,36 @@ pub(crate) fn record(repo_root: &Path, key: &SessionKey, session_id: &str) {
     crate::plans::store_state(&plan_dir, &state);
 }
 
+/// True when a plan name exists in any phase. Name-based: transitions
+/// rename rather than copy, so names stay unique across phases. Pure
+/// except the directory probes.
+pub(crate) fn plan_exists(repo_root: &Path, plan_name: &str) -> bool {
+    locate(repo_root, plan_name).is_some()
+}
+
+/// True when a plan name lives in a finished phase. Finished rows stay
+/// read-only and never warm or spawn. Pure except the directory probes.
+pub(crate) fn is_finished(repo_root: &Path, plan_name: &str) -> bool {
+    for phase in [
+        crate::plans::Phase::Completed,
+        crate::plans::Phase::Cancelled,
+    ] {
+        let candidate = crate::plans::PlanRef {
+            name: plan_name.to_string(),
+            phase,
+        }
+        .path(repo_root);
+        if candidate.is_dir() {
+            return true;
+        }
+    }
+    false
+}
+
 /// Locate the on-disk directory for a plan name across all phases. Plan
 /// names are unique across phases since transitions rename rather than
 /// copy. Pure except the directory probes.
-fn locate(repo_root: &Path, plan_name: &str) -> Option<PathBuf> {
+pub(crate) fn locate(repo_root: &Path, plan_name: &str) -> Option<PathBuf> {
     for phase in [
         crate::plans::Phase::Scoping,
         crate::plans::Phase::Executing,
@@ -345,6 +371,41 @@ mod tests {
             assert!(found.ends_with(&name));
         }
         assert_eq!(locate(dir.path(), "missing"), None);
+    }
+
+    #[test]
+    fn plan_exists_covers_all_phases() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::plans::ensure_structure(dir.path()).expect("ensure");
+        for phase in [
+            Phase::Scoping,
+            Phase::Executing,
+            Phase::Merging,
+            Phase::Completed,
+            Phase::Cancelled,
+        ] {
+            let name = format!("plan-{}", phase.dir_name());
+            plan_dir(dir.path(), phase, &name);
+            assert!(plan_exists(dir.path(), &name), "{phase:?} exists");
+        }
+        assert!(!plan_exists(dir.path(), "missing"));
+    }
+
+    #[test]
+    fn is_finished_only_for_completed_and_cancelled() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::plans::ensure_structure(dir.path()).expect("ensure");
+        for phase in [Phase::Scoping, Phase::Executing, Phase::Merging] {
+            let name = format!("active-{}", phase.dir_name());
+            plan_dir(dir.path(), phase, &name);
+            assert!(!is_finished(dir.path(), &name), "{phase:?} active");
+        }
+        for phase in [Phase::Completed, Phase::Cancelled] {
+            let name = format!("done-{}", phase.dir_name());
+            plan_dir(dir.path(), phase, &name);
+            assert!(is_finished(dir.path(), &name), "{phase:?} finished");
+        }
+        assert!(!is_finished(dir.path(), "missing"));
     }
 
     #[test]

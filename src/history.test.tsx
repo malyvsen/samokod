@@ -94,11 +94,32 @@ describe("history", () => {
 			type: "history_failed",
 			session: testKey(),
 			raw: "boom",
+			hint: "history hint",
 			retryable: true,
 		});
-		expect(screen.getByText("history failed to load")).toBeInTheDocument();
+		expect(screen.getByText("history hint")).toBeInTheDocument();
+		expect(screen.getByText(/boom/)).toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: "retry" }));
 		expect(api.loadHistory).toHaveBeenCalledTimes(2);
+	});
+
+	test("non-retryable history hides retry", async () => {
+		await openChat();
+		emit({
+			type: "history_failed",
+			session: testKey(),
+			raw: "no saved session found for this plan - it predates session recording or its session was pruned",
+			hint: "this plan's history is unavailable - it predates session recording or was pruned",
+			retryable: false,
+		});
+		expect(
+			screen.getByText(
+				"this plan's history is unavailable - it predates session recording or was pruned",
+			),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "retry" }),
+		).not.toBeInTheDocument();
 	});
 
 	test("restored history renders in the transcript", async () => {

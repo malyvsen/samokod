@@ -29,6 +29,7 @@ describe("history events", () => {
 			type: "history_failed",
 			session: testKey(),
 			raw: "boom",
+			hint: "retry the turn",
 			retryable: true,
 		});
 		const begun = applySessionEvent(failed, {
@@ -51,6 +52,7 @@ describe("history events", () => {
 			type: "history_failed",
 			session: testKey(),
 			raw: "boom",
+			hint: "retry the turn",
 			retryable: true,
 		});
 		chats = applySessionEvent(chats, {
@@ -103,11 +105,16 @@ describe("history events", () => {
 			type: "history_failed",
 			session: testKey(),
 			raw: "boom",
+			hint: "history hint",
 			retryable: false,
 		});
 		const chat = chatOf(chats);
 		expect(chat.historyLoading).toBe(false);
-		expect(chat.historyError).toBe("boom");
+		expect(chat.historyError).toEqual({
+			raw: "boom",
+			hint: "history hint",
+			retryable: false,
+		});
 		expect(chat.transcript).toHaveLength(1);
 	});
 });

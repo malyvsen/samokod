@@ -9,6 +9,12 @@ import type {
 } from "../types";
 import { sessionKeyOf } from "../types";
 
+export interface HistoryError {
+	raw: string;
+	hint: string;
+	retryable: boolean;
+}
+
 export interface ChatState {
 	transcript: TranscriptItem[];
 	todos: TodoView[];
@@ -18,7 +24,7 @@ export interface ChatState {
 	approval: boolean;
 	failed: boolean;
 	historyLoading: boolean;
-	historyError: string | null;
+	historyError: HistoryError | null;
 }
 
 export type Chats = Record<string, ChatState>;
@@ -229,7 +235,11 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 			return updateEntry(chats, event.session, (chat) => ({
 				...chat,
 				historyLoading: false,
-				historyError: event.raw,
+				historyError: {
+					raw: event.raw,
+					hint: event.hint,
+					retryable: event.retryable,
+				},
 			}));
 	}
 }

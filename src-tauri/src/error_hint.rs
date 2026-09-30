@@ -10,6 +10,7 @@ pub enum ErrorHintKind {
     Auth,
     RateLimit,
     ApprovalStalled,
+    NoSavedSession,
     PlainRetry,
 }
 
@@ -23,6 +24,15 @@ pub struct ErrorHint {
 /// Classify raw agent output into an appended hint. Pure.
 pub fn classify_error(raw: &str) -> ErrorHint {
     let lowered = raw.to_lowercase();
+    if lowered.contains("no saved session") {
+        return ErrorHint {
+            kind: ErrorHintKind::NoSavedSession,
+            text:
+                "this plan's history is unavailable - it predates session recording or was pruned"
+                    .to_string(),
+            retryable: false,
+        };
+    }
     if lowered.contains("opencode binary not found") || lowered.contains("missing binary") {
         return ErrorHint {
             kind: ErrorHintKind::MissingBinary,
@@ -119,6 +129,16 @@ mod tests {
         let hint = classify_error("something odd happened");
         assert_eq!(hint.kind, ErrorHintKind::PlainRetry);
         assert!(hint.retryable);
+    }
+
+    #[test]
+    fn no_saved_session_has_no_retry() {
+        let hint = classify_error(
+            "no saved session found for this plan - it predates session recording or its session was pruned",
+        );
+        assert_eq!(hint.kind, ErrorHintKind::NoSavedSession);
+        assert!(!hint.retryable);
+        assert!(!hint.text.to_lowercase().contains("plan is gone"));
     }
 
     #[test]

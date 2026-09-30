@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { HistoryError } from "../sessions/store";
 import { todoMark, todoRowClass } from "../todos";
 import type {
 	PermissionOptionView,
@@ -25,7 +26,7 @@ export function Transcript({
 	onRetry: (() => void) | null;
 	onAnswer: (toolCallId: string, optionId: string) => void;
 	historyLoading?: boolean;
-	historyError?: string | null;
+	historyError?: HistoryError | null;
 	onHistoryRetry?: (() => void) | null;
 	children?: ReactNode;
 }) {
@@ -137,8 +138,8 @@ export function Transcript({
 				})}
 				{historyError !== null && (
 					<ErrorBar
-						raw={historyError}
-						hint="history failed to load"
+						raw={historyError.raw}
+						hint={historyError.hint}
 						onRetry={onHistoryRetry}
 					/>
 				)}

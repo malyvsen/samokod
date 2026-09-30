@@ -45,7 +45,10 @@ describe("useSessionHistory", () => {
 		renderHook(() => useSessionHistory(testKey(), loading));
 		expect(loadHistory).not.toHaveBeenCalled();
 		const failed: Chats = {
-			[KEY_ID]: { ...emptyChat(), historyError: "boom" },
+			[KEY_ID]: {
+				...emptyChat(),
+				historyError: { raw: "boom", hint: "hint", retryable: true },
+			},
 		};
 		renderHook(() => useSessionHistory(testKey(), failed));
 		expect(loadHistory).not.toHaveBeenCalled();

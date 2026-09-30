@@ -517,8 +517,17 @@ impl AgentManager {
 
     /// Empty-history path for keys with no saved session: a brand-new plan
     /// gets a live connection and an empty transcript instead of an error
-    /// bar.
+    /// bar. Finished plans never say "plan is gone": with no recoverable
+    /// past they fail with an honest non-retryable reason instead.
     async fn finish_empty_history(&self, session: SessionKey) -> Result<(), AgentError> {
+        if let Some((repo_root, _)) = self.reopen_snapshot()
+            && super::session_ids::is_finished(&repo_root, &session.plan)
+        {
+            let raw = "no saved session found for this plan - it predates session recording or its session was pruned"
+                .to_string();
+            self.fail_history(&session, raw.clone());
+            return Err(AgentError::RequestFailed { raw });
+        }
         match self.ensure_live(&session).await {
             Ok(_) => {
                 if let Some(mut state) = lock_state(&self.state) {
@@ -534,20 +543,21 @@ impl AgentManager {
         }
     }
 
-    /// Fail one history load: release the single-flight and emit a
-    /// retryable error bar. The partial replay stays in the transcript; a
-    /// retry clears it on `HistoryBegin`.
+    /// Fail one history load: release the single-flight and emit an error
+    /// bar with the classified hint. The partial replay stays in the
+    /// transcript; a retry clears it on `HistoryBegin`.
     fn fail_history(&self, session: &SessionKey, raw: String) {
         if let Some(mut state) = lock_state(&self.state) {
             state.abort_history(session);
         }
-        let retryable = classify_error(&raw).retryable;
+        let hint = classify_error(&raw);
         emit_event(
             &self.app,
             AppEvent::HistoryFailed {
                 session: session.clone(),
                 raw,
-                retryable,
+                hint: hint.text,
+                retryable: hint.retryable,
             },
         );
     }

@@ -620,14 +620,12 @@ impl AgentManager {
             })?;
         {
             let state = self.state.lock().expect("state poisoned");
-            let target_exists = state.pending_scoping.as_deref() == Some(session.plan.as_str())
-                && session.role == SessionRole::Scoping
-                || plans::PlanRef {
-                    name: session.plan.clone(),
-                    phase: session::role_phase(session.role),
-                }
-                .path(&repo_root)
-                .is_dir();
+            // Name-based across all phases: finished plans live under
+            // `completed/` or `cancelled/` and stay selectable read-only.
+            // Only names missing everywhere report "plan is gone".
+            let target_exists = (state.pending_scoping.as_deref() == Some(session.plan.as_str())
+                && session.role == SessionRole::Scoping)
+                || session_ids::plan_exists(&repo_root, &session.plan);
             if !target_exists {
                 return Err(AgentError::NoSession {
                     raw: "plan is gone".to_string(),

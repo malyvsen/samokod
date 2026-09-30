@@ -466,7 +466,11 @@ export function App() {
 									onAnswer={handleAnswer}
 									historyLoading={chat.historyLoading}
 									historyError={chat.historyError}
-									onHistoryRetry={handleHistoryRetry}
+									onHistoryRetry={
+										chat.historyError?.retryable === true
+											? handleHistoryRetry
+											: null
+									}
 								>
 									{!busy && !readOnly && selectedId !== null && draft.ready && (
 										<DraftBubble
