@@ -1,9 +1,12 @@
 // Plan directory lifecycle under `.samokod/plans/`.
-// Lifecycle transitions first, naming and filesystem helpers below.
+// Lifecycle transitions first, per-plan state plus naming and filesystem
+// helpers below.
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use crate::types::SessionRole;
 
 /// Lifecycle phase. One directory per phase under `.samokod/plans/`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -61,6 +64,50 @@ impl PlanRef {
     }
 }
 
+/// Per-plan state file. It travels with the plan directory through renames
+/// for free and stays machine-local through the existing
+/// `.samokod/.gitignore`.
+pub const STATE_FILE: &str = "state.json";
+
+/// Legacy session-only file. Read for migration, removed on the next write.
+pub(crate) const LEGACY_SESSION_FILE: &str = "session.json";
+
+/// Per-plan state: one OpenCode session ID per role the plan has used,
+/// plus the last phase-entry time in epoch millis. `entered_at` stamps the
+/// last lifecycle transition into this phase; session spawns preserve it
+/// while transitions preserve the IDs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PlanState {
+    #[serde(default)]
+    pub scoping: Option<String>,
+    #[serde(default)]
+    pub executing: Option<String>,
+    #[serde(default)]
+    pub merging: Option<String>,
+    #[serde(default)]
+    pub entered_at: Option<i64>,
+}
+
+impl PlanState {
+    /// Session ID for one role. Pure.
+    pub(crate) fn session(&self, role: SessionRole) -> Option<&str> {
+        match role {
+            SessionRole::Scoping => self.scoping.as_deref(),
+            SessionRole::Executing => self.executing.as_deref(),
+            SessionRole::Merging => self.merging.as_deref(),
+        }
+    }
+
+    /// Record one role's session ID. Pure.
+    pub(crate) fn set_session(&mut self, role: SessionRole, id: String) {
+        match role {
+            SessionRole::Scoping => self.scoping = Some(id),
+            SessionRole::Executing => self.executing = Some(id),
+            SessionRole::Merging => self.merging = Some(id),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PlanError {
     #[error("plan.md has no top heading to name the plan")]
@@ -95,10 +142,12 @@ pub fn ensure_structure(repo_root: &Path) -> Result<(), PlanError> {
 /// Fails loud on real IO errors.
 pub fn materialize_scoping(repo_root: &Path, name: &str) -> Result<PlanRef, PlanError> {
     std::fs::create_dir_all(phase_dir(repo_root, Phase::Scoping).join(name))?;
-    Ok(PlanRef {
+    let plan = PlanRef {
         name: name.to_string(),
         phase: Phase::Scoping,
-    })
+    };
+    stamp_entered_at(&plan.path(repo_root));
+    Ok(plan)
 }
 
 /// Approve a scoping plan: slugify its first heading and move it to
@@ -184,6 +233,113 @@ fn slugged_name(repo_root: &Path, plan: &PlanRef) -> Option<String> {
     Some(format!("{}.{}", plan.name, slugify(&title)))
 }
 
+/// Read the persisted state for one plan directory. Missing files yield a
+/// default; corrupt files log and yield a default so a broken file never
+/// blocks a fresh spawn. Legacy `session.json` files read as state without
+/// a timestamp.
+pub(crate) fn load_state(plan_dir: &Path) -> PlanState {
+    let path = plan_dir.join(STATE_FILE);
+    if let Some(state) = read_state_file(&path) {
+        return state;
+    }
+    let legacy = plan_dir.join(LEGACY_SESSION_FILE);
+    if let Some(state) = read_state_file(&legacy) {
+        return state;
+    }
+    PlanState::default()
+}
+
+/// Persist the state for one plan directory. Best-effort: failures log
+/// and the live session continues. A migrated legacy file is removed once
+/// the new file lands.
+pub(crate) fn store_state(plan_dir: &Path, state: &PlanState) {
+    let text = match serde_json::to_string_pretty(state) {
+        Ok(text) => text,
+        Err(error) => {
+            log::warn!("failed to serialize state {}: {error}", plan_dir.display());
+            return;
+        }
+    };
+    if let Err(error) = std::fs::write(plan_dir.join(STATE_FILE), text) {
+        log::warn!("failed to record state {}: {error}", plan_dir.display());
+        return;
+    }
+    let legacy = plan_dir.join(LEGACY_SESSION_FILE);
+    if legacy.is_file()
+        && let Err(error) = std::fs::remove_file(&legacy)
+    {
+        log::warn!("failed to remove legacy {}: {error}", legacy.display());
+    }
+}
+
+/// Stamp the phase-entry clock for one plan directory, preserving session
+/// IDs. Best-effort like the executed markers: a missing directory skips,
+/// failures log and the transition stands.
+fn stamp_entered_at(plan_dir: &Path) {
+    if !plan_dir.is_dir() {
+        return;
+    }
+    let mut state = load_state(plan_dir);
+    state.entered_at = Some(unix_ms(std::time::SystemTime::now()).unwrap_or(0));
+    store_state(plan_dir, &state);
+}
+
+/// Epoch millis for a timestamp. Pure.
+pub(crate) fn unix_ms(time: std::time::SystemTime) -> Option<i64> {
+    time.duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .ok()
+        .map(|span| span.as_millis() as i64)
+}
+
+/// Arrival time for sorting: the stamped phase entry when present, else
+/// the directory `ctime` (a rename bumps `ctime` but not `mtime`), else
+/// the existing `plan_mtime`, else `None` so the caller falls back to the
+/// name. Pure except the metadata probes.
+#[allow(dead_code)]
+pub(crate) fn arrival_ms(repo_root: &Path, plan: &PlanRef) -> Option<i64> {
+    let dir = plan.path(repo_root);
+    if let Some(stamped) = load_state(&dir).entered_at {
+        return Some(stamped);
+    }
+    if let Some(ctime) = dir_ctime_ms(&dir) {
+        return Some(ctime);
+    }
+    plan_mtime(repo_root, plan).and_then(unix_ms)
+}
+
+/// Directory `ctime` in epoch millis. Only a fallback for plans without
+/// stamped state: later files inside the plan bump it again.
+#[cfg(unix)]
+#[allow(dead_code)]
+fn dir_ctime_ms(path: &Path) -> Option<i64> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(path).ok()?;
+    Some(meta.ctime() * 1000 + meta.ctime_nsec() / 1_000_000)
+}
+
+#[cfg(not(unix))]
+#[allow(dead_code)]
+fn dir_ctime_ms(_path: &Path) -> Option<i64> {
+    None
+}
+
+fn read_state_file(path: &Path) -> Option<PlanState> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            log::warn!("failed to read {}: {error}", path.display());
+            return None;
+        }
+    };
+    match serde_json::from_str(&text) {
+        Ok(state) => Some(state),
+        Err(error) => {
+            log::warn!("failed to parse {}: {error}", path.display());
+            None
+        }
+    }
+}
 /// Sort rank for the plans list: scoping, executing, merging,
 /// completed, cancelled.
 pub fn phase_rank(phase: Phase) -> u8 {
@@ -233,8 +389,7 @@ pub fn mark_merging(repo_root: &Path, plan: &PlanRef) {
 /// their rows as history: completed and cancelled plans show the merging
 /// row only with the merging marker, the executing row with either
 /// marker. Pure except the marker reads.
-pub fn roles_for(repo_root: &Path, plan: &PlanRef) -> Vec<crate::types::SessionRole> {
-    use crate::types::SessionRole;
+pub fn roles_for(repo_root: &Path, plan: &PlanRef) -> Vec<SessionRole> {
     match plan.phase {
         Phase::Scoping => vec![SessionRole::Scoping],
         Phase::Executing => vec![SessionRole::Scoping, SessionRole::Executing],
@@ -388,7 +543,9 @@ fn rename(repo_root: &Path, from: &PlanRef, to: &PlanRef) -> Result<(), PlanErro
                 to.path(repo_root).display()
             ),
         ))
-    })
+    })?;
+    stamp_entered_at(&to.path(repo_root));
+    Ok(())
 }
 
 #[cfg(test)]
@@ -523,7 +680,6 @@ mod tests {
 
     #[test]
     fn execution_roles_survive_cancel() {
-        use crate::types::SessionRole;
         let scoping_only = vec![SessionRole::Scoping];
         let both = vec![SessionRole::Scoping, SessionRole::Executing];
         let all = vec![
@@ -731,5 +887,64 @@ mod tests {
         let second = materialize_scoping(root, "2026-09-26.08-41-03").expect("second");
         assert_eq!(second.name, "2026-09-26.08-41-03");
         assert!(second.path(root).is_dir());
+    }
+
+    #[test]
+    fn transitions_stamp_entered_at_and_keep_ids() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
+        let first = load_state(&scoping.path(root)).entered_at.expect("stamped");
+        let mut seeded = load_state(&scoping.path(root));
+        seeded.set_session(SessionRole::Scoping, "ses_scoping".to_string());
+        store_state(&scoping.path(root), &seeded);
+        std::fs::write(scoping.plan_md(root), "# Shiny\n").expect("write plan");
+        let executing = execute(root, &scoping).expect("execute");
+        let stamped = load_state(&executing.path(root));
+        assert!(stamped.entered_at.unwrap_or(0) >= first);
+        assert_eq!(stamped.session(SessionRole::Scoping), Some("ses_scoping"));
+        let merging = begin_merge(root, &executing).expect("begin");
+        let kept = load_state(&merging.path(root));
+        assert!(kept.entered_at.is_some());
+        assert_eq!(kept.session(SessionRole::Scoping), Some("ses_scoping"));
+        let done = finish_merge(root, &merging).expect("finish");
+        assert!(load_state(&done.path(root)).entered_at.is_some());
+        assert_eq!(
+            load_state(&done.path(root)).session(SessionRole::Scoping),
+            Some("ses_scoping")
+        );
+    }
+
+    #[test]
+    fn later_files_inside_plan_do_not_move_entered_at() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
+        let before = load_state(&scoping.path(root)).entered_at.expect("stamped");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::fs::write(scoping.path(root).join("mockup.html"), "<p>hi</p>").expect("mockup");
+        std::fs::write(scoping.path(root).join(".executed"), "").expect("marker");
+        assert_eq!(load_state(&scoping.path(root)).entered_at, Some(before));
+        assert_eq!(arrival_ms(root, &scoping), Some(before));
+    }
+
+    #[test]
+    fn arrival_falls_back_without_state_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let plan = PlanRef {
+            name: "2026-09-26.08-41-03".to_string(),
+            phase: Phase::Scoping,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        assert!(arrival_ms(root, &plan).is_some());
+        let missing = PlanRef {
+            name: "gone".to_string(),
+            phase: Phase::Scoping,
+        };
+        assert_eq!(arrival_ms(root, &missing), None);
     }
 }
