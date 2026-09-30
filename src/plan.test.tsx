@@ -2,7 +2,14 @@ import { act, render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
-import { testDefaults, testEntry, testKey } from "./fixtures";
+import {
+	testDefaults,
+	testEntry,
+	testEntryWith,
+	testKey,
+	testStatus,
+	testWorktree,
+} from "./fixtures";
 import type { AppEvent } from "./types";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -13,8 +20,8 @@ const api = vi.hoisted(() => ({
 	openRepo: vi.fn(),
 	createPlan: vi.fn(),
 	executePlan: vi.fn(),
-	markCompleted: vi.fn(),
-	beginMerge: vi.fn(),
+	finishLanding: vi.fn(),
+	beginLanding: vi.fn(),
 	cancelPlan: vi.fn(),
 	selectPlan: vi.fn(),
 	sendPrompt: vi.fn(),
@@ -43,10 +50,10 @@ beforeEach(() => {
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo" }],
 	});
-	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "main" });
+	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "feature" });
 	api.openRepo.mockResolvedValue({
 		repo_root: "/repo",
-		branch: "main",
+		branch: "feature",
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
@@ -98,7 +105,7 @@ describe("plan", () => {
 	});
 
 	test("row done button completes and keeps the transcript", async () => {
-		api.markCompleted.mockResolvedValue({
+		api.finishLanding.mockResolvedValue({
 			plans: [
 				testEntry("2026-09-25.10-54-59.slug", "completed", "Shiny feature"),
 			],
@@ -109,7 +116,14 @@ describe("plan", () => {
 		emit({
 			type: "plans_changed",
 			plans: [
-				testEntry("2026-09-25.10-54-59.slug", "executing", "Shiny", true),
+				testEntryWith(
+					"2026-09-25.10-54-59.slug",
+					"executing",
+					"Shiny",
+					true,
+					[testStatus("scoping"), testStatus("executing")],
+					testWorktree(),
+				),
 			],
 			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
 		});
@@ -128,9 +142,11 @@ describe("plan", () => {
 		const row = executing.closest(".session");
 		if (row === null) throw new Error("executing row missing");
 		await within(row as HTMLElement)
-			.findByRole("button", { name: "Merge 2026-09-25.10-54-59.slug to main" })
+			.findByRole("button", {
+				name: "Land 2026-09-25.10-54-59.slug onto feature",
+			})
 			.then((button) => button.click());
-		expect(api.markCompleted).toHaveBeenCalledTimes(1);
+		expect(api.finishLanding).toHaveBeenCalledTimes(1);
 		expect(screen.getByText("executing chat")).toBeInTheDocument();
 	});
 
@@ -215,7 +231,7 @@ describe("plan", () => {
 	test("selecting a row swaps transcript, todos, and cost", async () => {
 		api.openRepo.mockResolvedValue({
 			repo_root: "/repo",
-			branch: "main",
+			branch: "feature",
 			plans: [
 				testEntry("aaa", "scoping", "Alpha", true),
 				testEntry("bbb", "scoping", "Beta", true),
@@ -266,7 +282,7 @@ describe("plan", () => {
 	test("selecting away drops only the empty previous session", async () => {
 		api.openRepo.mockResolvedValue({
 			repo_root: "/repo",
-			branch: "main",
+			branch: "feature",
 			plans: [
 				testEntry("aaa", "scoping", "Alpha", true),
 				testEntry("bbb", "scoping", "Beta", true),

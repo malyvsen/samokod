@@ -21,7 +21,7 @@ export interface ToolLineView {
 }
 
 /// Role of one session inside a plan: which chat the user is talking to.
-export type SessionRole = "scoping" | "executing" | "merging";
+export type SessionRole = "scoping" | "executing" | "landing";
 
 export interface SessionKey {
 	plan: string;
@@ -52,12 +52,13 @@ export interface SessionStatusView {
 export type PlanPhase =
 	| "scoping"
 	| "executing"
-	| "merging"
+	| "landing"
 	| "completed"
 	| "cancelled";
 
 export interface WorktreeStatus {
-	branch: string;
+	worktree_branch: string;
+	target_branch: string;
 	dirty: boolean;
 	ffable: boolean;
 }

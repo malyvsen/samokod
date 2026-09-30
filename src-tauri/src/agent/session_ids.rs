@@ -79,7 +79,7 @@ pub(crate) fn locate(repo_root: &Path, plan_name: &str) -> Option<PathBuf> {
     for phase in [
         crate::plans::Phase::Scoping,
         crate::plans::Phase::Executing,
-        crate::plans::Phase::Merging,
+        crate::plans::Phase::Landing,
         crate::plans::Phase::Completed,
         crate::plans::Phase::Cancelled,
     ] {
@@ -143,7 +143,7 @@ fn recover(
     let claimed: HashSet<String> = [
         SessionRole::Scoping,
         SessionRole::Executing,
-        SessionRole::Merging,
+        SessionRole::Landing,
     ]
     .into_iter()
     .filter_map(|role| state.session(role))
@@ -306,7 +306,7 @@ mod tests {
         let state = plans::load_state(&plan);
         assert_eq!(state.session(SessionRole::Scoping), None);
         assert_eq!(state.session(SessionRole::Executing), None);
-        assert_eq!(state.session(SessionRole::Merging), None);
+        assert_eq!(state.session(SessionRole::Landing), None);
     }
 
     #[test]
@@ -321,7 +321,7 @@ mod tests {
             &key(name, SessionRole::Executing),
             "ses_executing",
         );
-        record(dir.path(), &key(name, SessionRole::Merging), "ses_merging");
+        record(dir.path(), &key(name, SessionRole::Landing), "ses_landing");
         let plan = PlanRef {
             name: name.to_string(),
             phase: Phase::Scoping,
@@ -329,7 +329,7 @@ mod tests {
         let state = plans::load_state(&plan.path(dir.path()));
         assert_eq!(state.session(SessionRole::Scoping), Some("ses_scoping"));
         assert_eq!(state.session(SessionRole::Executing), Some("ses_executing"));
-        assert_eq!(state.session(SessionRole::Merging), Some("ses_merging"));
+        assert_eq!(state.session(SessionRole::Landing), Some("ses_landing"));
     }
 
     #[test]
@@ -379,7 +379,7 @@ mod tests {
         for phase in [
             Phase::Scoping,
             Phase::Executing,
-            Phase::Merging,
+            Phase::Landing,
             Phase::Completed,
             Phase::Cancelled,
         ] {
@@ -394,7 +394,7 @@ mod tests {
     fn is_finished_only_for_completed_and_cancelled() {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");
-        for phase in [Phase::Scoping, Phase::Executing, Phase::Merging] {
+        for phase in [Phase::Scoping, Phase::Executing, Phase::Landing] {
             let name = format!("active-{}", phase.dir_name());
             plan_dir(dir.path(), phase, &name);
             assert!(!is_finished(dir.path(), &name), "{phase:?} active");

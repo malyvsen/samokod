@@ -129,14 +129,14 @@ pub struct PermissionView {
 }
 
 /// Role of one session inside a plan. A plan owns one scoping session,
-/// plus one executing session once approved, plus one merging session on
+/// plus one executing session once approved, plus one landing session on
 /// the conflict path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionRole {
     Scoping,
     Executing,
-    Merging,
+    Landing,
 }
 
 /// Key of one live session: plan directory name plus role.
@@ -167,16 +167,17 @@ pub struct PlanEntry {
     pub title: String,
     pub has_plan_md: bool,
     pub sessions: Vec<SessionStatusView>,
-    /// Live worktree state for executing and merging plans: branch,
+    /// Live worktree state for executing and landing plans: branch,
     /// dirtiness, and fast-forwardability. Recomputed on every list
-    /// update so rows can choose the correct merge button.
+    /// update so rows can choose the correct landing button.
     pub worktree: Option<WorktreeStatusView>,
 }
 
-/// Live worktree state for one executing or merging plan.
+/// Live worktree state for one executing or landing plan.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorktreeStatusView {
-    pub branch: String,
+    pub worktree_branch: String,
+    pub target_branch: String,
     pub dirty: bool,
     pub ffable: bool,
 }

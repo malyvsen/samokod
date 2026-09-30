@@ -2,14 +2,14 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	answerPermission,
-	beginMerge,
+	beginLanding,
 	cancelPlan,
 	cancelTurn,
 	createPlan,
 	executePlan,
+	finishLanding,
 	getPrefs,
 	loadHistory,
-	markCompleted,
 	onAppEvent,
 	openRepo,
 	refreshBranch,
@@ -357,14 +357,14 @@ export function App() {
 		}
 	}
 
-	async function handleDone(key: SessionKey) {
-		await runPlansAction(key, (session) => markCompleted(session));
+	async function handleFinishLanding(key: SessionKey) {
+		await runPlansAction(key, (session) => finishLanding(session));
 	}
 
-	async function handleBeginMerge(key: SessionKey) {
+	async function handleBeginLanding(key: SessionKey) {
 		updateChat(key, (chat) => ({ ...chat, working: true }));
 		try {
-			const update = await beginMerge(key);
+			const update = await beginLanding(key);
 			setChats((current) => carryChats(current, key, update, true));
 			applyPlans(update);
 		} catch (error) {
@@ -454,8 +454,8 @@ export function App() {
 							onNewPlan={() => void handleNewPlan()}
 							onExecute={(key) => void handleExecute(key)}
 							onCancel={(key) => void handleCancel(key)}
-							onDone={(key) => void handleDone(key)}
-							onBeginMerge={(key) => void handleBeginMerge(key)}
+							onFinishLanding={(key) => void handleFinishLanding(key)}
+							onBeginLanding={(key) => void handleBeginLanding(key)}
 						/>
 						<div className="chatcol">
 							<div className="transcript" ref={transcriptRef}>

@@ -14,7 +14,7 @@ use crate::types::SessionRole;
 pub enum Phase {
     Scoping,
     Executing,
-    Merging,
+    Landing,
     Completed,
     Cancelled,
 }
@@ -24,7 +24,7 @@ impl Phase {
         match self {
             Phase::Scoping => "scoping",
             Phase::Executing => "executing",
-            Phase::Merging => "merging",
+            Phase::Landing => "landing",
             Phase::Completed => "completed",
             Phase::Cancelled => "cancelled",
         }
@@ -32,7 +32,7 @@ impl Phase {
 
     /// Phases with a live chat. Only these auto-cancel on chat switch.
     pub fn is_active(self) -> bool {
-        matches!(self, Phase::Scoping | Phase::Executing | Phase::Merging)
+        matches!(self, Phase::Scoping | Phase::Executing | Phase::Landing)
     }
 }
 
@@ -82,8 +82,8 @@ pub struct PlanState {
     pub scoping: Option<String>,
     #[serde(default)]
     pub executing: Option<String>,
-    #[serde(default)]
-    pub merging: Option<String>,
+    #[serde(default, alias = "merging")]
+    pub landing: Option<String>,
     #[serde(default)]
     pub entered_at: Option<i64>,
 }
@@ -94,7 +94,7 @@ impl PlanState {
         match role {
             SessionRole::Scoping => self.scoping.as_deref(),
             SessionRole::Executing => self.executing.as_deref(),
-            SessionRole::Merging => self.merging.as_deref(),
+            SessionRole::Landing => self.landing.as_deref(),
         }
     }
 
@@ -103,7 +103,7 @@ impl PlanState {
         match role {
             SessionRole::Scoping => self.scoping = Some(id),
             SessionRole::Executing => self.executing = Some(id),
-            SessionRole::Merging => self.merging = Some(id),
+            SessionRole::Landing => self.landing = Some(id),
         }
     }
 }
@@ -122,18 +122,108 @@ pub enum PlanError {
 }
 
 /// Create the full structure plus the self-ignoring `.gitignore`.
-/// Idempotent: safe to run on every repo open.
+/// Idempotent: safe to run on every repo open. Migrates a leftover
+/// `merging/` directory into `landing/` first so history rows survive the
+/// rename; a name collision fails loud instead of overwriting.
 pub fn ensure_structure(repo_root: &Path) -> Result<(), PlanError> {
+    migrate_merging_dir(repo_root)?;
     for phase in [
         Phase::Scoping,
         Phase::Executing,
-        Phase::Merging,
+        Phase::Landing,
         Phase::Completed,
         Phase::Cancelled,
     ] {
         std::fs::create_dir_all(phase_dir(repo_root, phase))?;
     }
     std::fs::write(samokod_dir(repo_root).join(".gitignore"), "*\n")?;
+    Ok(())
+}
+
+/// Move a pre-rename `merging/` directory into `landing/`. Fails loud when
+/// both hold the same plan name; safe to re-run once migrated.
+fn migrate_merging_dir(repo_root: &Path) -> Result<(), PlanError> {
+    let root = plans_root(repo_root);
+    let from = root.join("merging");
+    if !from.is_dir() {
+        return Ok(());
+    }
+    let to = root.join("landing");
+    std::fs::create_dir_all(&to)?;
+    let entries = std::fs::read_dir(&from).map_err(|error| {
+        PlanError::Io(std::io::Error::new(
+            error.kind(),
+            format!("cannot list {}: {error}", from.display()),
+        ))
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            PlanError::Io(std::io::Error::new(
+                error.kind(),
+                format!("cannot list {}: {error}", from.display()),
+            ))
+        })?;
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let dest = to.join(&name);
+        if dest.exists() {
+            return Err(PlanError::Io(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!(
+                    "cannot migrate {} to {}: destination exists",
+                    entry.path().display(),
+                    dest.display()
+                ),
+            )));
+        }
+        std::fs::rename(entry.path(), &dest).map_err(|error| {
+            PlanError::Io(std::io::Error::new(
+                error.kind(),
+                format!(
+                    "cannot move {} to {}: {error}",
+                    entry.path().display(),
+                    dest.display()
+                ),
+            ))
+        })?;
+    }
+    std::fs::remove_dir(&from).map_err(|error| {
+        PlanError::Io(std::io::Error::new(
+            error.kind(),
+            format!("cannot remove {}: {error}", from.display()),
+        ))
+    })?;
+    migrate_markers(&to)?;
+    Ok(())
+}
+
+/// Rename pre-rename `.merging` marker files to `.landing` under `dir`.
+/// Best-effort: failures log and the open continues.
+fn migrate_markers(dir: &Path) -> Result<(), PlanError> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(PlanError::Io(std::io::Error::new(
+                error.kind(),
+                format!("cannot list {}: {error}", dir.display()),
+            )));
+        }
+    };
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let plan_dir = entry.path();
+        if !plan_dir.is_dir() {
+            continue;
+        }
+        let marker = plan_dir.join(".merging");
+        if marker.is_file()
+            && let Err(error) = std::fs::rename(&marker, plan_dir.join(".landing"))
+        {
+            log::warn!("failed to migrate {}: {error}", marker.display());
+        }
+    }
     Ok(())
 }
 
@@ -180,21 +270,21 @@ pub fn complete(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> 
     Ok(next)
 }
 
-/// Move a diverged executing plan to merging without renaming. The fast
-/// path never touches `merging/`: it completes straight from executing.
-pub fn begin_merge(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
+/// Move a diverged executing plan to landing without renaming. The fast
+/// path never touches `landing/`: it completes straight from executing.
+pub fn begin_landing(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
     require_phase(plan, Phase::Executing)?;
     let next = PlanRef {
         name: plan.name.clone(),
-        phase: Phase::Merging,
+        phase: Phase::Landing,
     };
     rename(repo_root, plan, &next)?;
     Ok(next)
 }
 
-/// Finish a rebased merging plan. Name travels unchanged.
-pub fn finish_merge(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
-    require_phase(plan, Phase::Merging)?;
+/// Finish a landed landing plan. Name travels unchanged.
+pub fn finish_landing(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
+    require_phase(plan, Phase::Landing)?;
     let next = PlanRef {
         name: plan.name.clone(),
         phase: Phase::Completed,
@@ -337,29 +427,29 @@ fn read_state_file(path: &Path) -> Option<PlanState> {
         }
     }
 }
-/// Sort rank for the plans list: scoping, executing, merging,
+/// Sort rank for the plans list: scoping, executing, landing,
 /// completed, cancelled.
 pub fn phase_rank(phase: Phase) -> u8 {
     match phase {
         Phase::Scoping => 0,
         Phase::Executing => 1,
-        Phase::Merging => 2,
+        Phase::Landing => 2,
         Phase::Completed => 3,
         Phase::Cancelled => 4,
     }
 }
 
 /// Session roles one plan owns: scoping always, executing once approved,
-/// merging on the conflict path. Completed and cancelled plans keep their
+/// landing on the conflict path. Completed and cancelled plans keep their
 /// rows as history from the stored session IDs. Pure except the state read.
 pub fn roles_for(repo_root: &Path, plan: &PlanRef) -> Vec<SessionRole> {
     match plan.phase {
         Phase::Scoping => vec![SessionRole::Scoping],
         Phase::Executing => vec![SessionRole::Scoping, SessionRole::Executing],
-        Phase::Merging => vec![
+        Phase::Landing => vec![
             SessionRole::Scoping,
             SessionRole::Executing,
-            SessionRole::Merging,
+            SessionRole::Landing,
         ],
         Phase::Completed | Phase::Cancelled => {
             let state = load_state(&plan.path(repo_root));
@@ -367,8 +457,8 @@ pub fn roles_for(repo_root: &Path, plan: &PlanRef) -> Vec<SessionRole> {
             if state.session(SessionRole::Executing).is_some() {
                 roles.push(SessionRole::Executing);
             }
-            if state.session(SessionRole::Merging).is_some() {
-                roles.push(SessionRole::Merging);
+            if state.session(SessionRole::Landing).is_some() {
+                roles.push(SessionRole::Landing);
             }
             roles
         }
@@ -389,7 +479,7 @@ pub fn scan_plans(repo_root: &Path) -> Vec<PlanRef> {
     for phase in [
         Phase::Scoping,
         Phase::Executing,
-        Phase::Merging,
+        Phase::Landing,
         Phase::Completed,
         Phase::Cancelled,
     ] {
@@ -525,7 +615,7 @@ mod tests {
         let dirs: HashSet<&str> = [
             Phase::Scoping,
             Phase::Executing,
-            Phase::Merging,
+            Phase::Landing,
             Phase::Completed,
             Phase::Cancelled,
         ]
@@ -539,7 +629,7 @@ mod tests {
     fn only_active_phases_run_chats() {
         assert!(Phase::Scoping.is_active());
         assert!(Phase::Executing.is_active());
-        assert!(Phase::Merging.is_active());
+        assert!(Phase::Landing.is_active());
         assert!(!Phase::Completed.is_active());
         assert!(!Phase::Cancelled.is_active());
     }
@@ -653,7 +743,7 @@ mod tests {
         let all = vec![
             SessionRole::Scoping,
             SessionRole::Executing,
-            SessionRole::Merging,
+            SessionRole::Landing,
         ];
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
@@ -675,11 +765,11 @@ mod tests {
             SessionRole::Executing,
             "ses_second_executing",
         );
-        let merging = begin_merge(root, &running).expect("begin");
-        seed_session(root, &merging, SessionRole::Merging, "ses_second_merging");
-        assert_eq!(roles_for(root, &merging), all);
-        let rebased = finish_merge(root, &merging).expect("finish");
-        assert_eq!(roles_for(root, &rebased), all);
+        let landing = begin_landing(root, &running).expect("begin");
+        seed_session(root, &landing, SessionRole::Landing, "ses_second_landing");
+        assert_eq!(roles_for(root, &landing), all);
+        let landed = finish_landing(root, &landing).expect("finish");
+        assert_eq!(roles_for(root, &landed), all);
         let third = materialize_scoping(root, "2026-09-26.08-41-05").expect("third");
         std::fs::write(third.plan_md(root), "# Third\n").expect("write");
         let diverged = execute(root, &third).expect("execute");
@@ -697,31 +787,31 @@ mod tests {
     }
 
     #[test]
-    fn merge_moves_through_merging_without_renaming() {
+    fn landing_moves_through_landing_without_renaming() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
         let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         std::fs::write(scoping.plan_md(root), "# Shiny\n").expect("write");
         let executing = execute(root, &scoping).expect("execute");
-        let merging = begin_merge(root, &executing).expect("begin");
-        assert_eq!(merging.phase, Phase::Merging);
-        assert_eq!(merging.name, executing.name);
+        let landing = begin_landing(root, &executing).expect("begin");
+        assert_eq!(landing.phase, Phase::Landing);
+        assert_eq!(landing.name, executing.name);
         assert!(!executing.path(root).exists());
-        assert!(merging.path(root).is_dir());
+        assert!(landing.path(root).is_dir());
         assert!(matches!(
-            begin_merge(root, &merging),
+            begin_landing(root, &landing),
             Err(PlanError::WrongPhase { .. })
         ));
-        let done = finish_merge(root, &merging).expect("finish");
+        let done = finish_landing(root, &landing).expect("finish");
         assert_eq!(done.phase, Phase::Completed);
-        assert_eq!(done.name, merging.name);
+        assert_eq!(done.name, landing.name);
         assert!(matches!(
-            finish_merge(root, &done),
+            finish_landing(root, &done),
             Err(PlanError::WrongPhase { .. })
         ));
         assert!(matches!(
-            complete(root, &merging),
+            complete(root, &landing),
             Err(PlanError::WrongPhase { .. })
         ));
     }
@@ -755,7 +845,7 @@ mod tests {
         for phase in [
             Phase::Scoping,
             Phase::Executing,
-            Phase::Merging,
+            Phase::Landing,
             Phase::Completed,
             Phase::Cancelled,
         ] {
@@ -882,11 +972,11 @@ mod tests {
         let stamped = load_state(&executing.path(root));
         assert!(stamped.entered_at.unwrap_or(0) >= first);
         assert_eq!(stamped.session(SessionRole::Scoping), Some("ses_scoping"));
-        let merging = begin_merge(root, &executing).expect("begin");
-        let kept = load_state(&merging.path(root));
+        let landing = begin_landing(root, &executing).expect("begin");
+        let kept = load_state(&landing.path(root));
         assert!(kept.entered_at.is_some());
         assert_eq!(kept.session(SessionRole::Scoping), Some("ses_scoping"));
-        let done = finish_merge(root, &merging).expect("finish");
+        let done = finish_landing(root, &landing).expect("finish");
         assert!(load_state(&done.path(root)).entered_at.is_some());
         assert_eq!(
             load_state(&done.path(root)).session(SessionRole::Scoping),
@@ -923,5 +1013,91 @@ mod tests {
             phase: Phase::Scoping,
         };
         assert_eq!(arrival_ms(root, &missing), None);
+    }
+
+    #[test]
+    fn ensure_migrates_merging_dir_only() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let legacy = root.join(".samokod/plans/merging/2026-09-26.08-41-03.slug");
+        std::fs::create_dir_all(&legacy).expect("mkdir");
+        std::fs::write(legacy.join("plan.md"), "# Shiny\n").expect("write");
+        ensure_structure(root).expect("ensure");
+        assert!(!root.join(".samokod/plans/merging").exists());
+        let moved = PlanRef {
+            name: "2026-09-26.08-41-03.slug".to_string(),
+            phase: Phase::Landing,
+        };
+        assert!(moved.path(root).is_dir());
+        assert!(moved.has_plan_md(root));
+        // Re-running stays idempotent.
+        ensure_structure(root).expect("re-ensure");
+        assert!(moved.path(root).is_dir());
+    }
+
+    #[test]
+    fn ensure_merges_into_existing_landing_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let legacy = root.join(".samokod/plans/merging/2026-09-26.08-41-03.slug");
+        std::fs::create_dir_all(&legacy).expect("mkdir");
+        std::fs::write(legacy.join("plan.md"), "# Shiny\n").expect("write");
+        ensure_structure(root).expect("ensure");
+        assert!(!root.join(".samokod/plans/merging").exists());
+        assert!(
+            PlanRef {
+                name: "2026-09-26.08-41-03.slug".to_string(),
+                phase: Phase::Landing,
+            }
+            .path(root)
+            .is_dir()
+        );
+    }
+
+    #[test]
+    fn ensure_fails_loud_on_migration_collision() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        std::fs::create_dir_all(root.join(".samokod/plans/merging/clash")).expect("mkdir");
+        std::fs::create_dir_all(root.join(".samokod/plans/landing/clash")).expect("mkdir");
+        assert!(matches!(ensure_structure(root), Err(PlanError::Io(_))));
+    }
+
+    #[test]
+    fn ensure_renames_merging_markers() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let legacy = root.join(".samokod/plans/merging/2026-09-26.08-41-03.slug");
+        std::fs::create_dir_all(&legacy).expect("mkdir");
+        std::fs::write(legacy.join(".merging"), "").expect("write");
+        ensure_structure(root).expect("ensure");
+        let moved = root.join(".samokod/plans/landing/2026-09-26.08-41-03.slug");
+        assert!(moved.join(".landing").is_file());
+        assert!(!moved.join(".merging").exists());
+    }
+
+    #[test]
+    fn legacy_merging_state_key_still_reads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let plan = PlanRef {
+            name: "2026-09-26.08-41-03".to_string(),
+            phase: Phase::Scoping,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        std::fs::write(
+            plan.path(root).join(STATE_FILE),
+            r#"{"scoping":"ses_scoping","merging":"ses_landing"}"#,
+        )
+        .expect("write");
+        let state = load_state(&plan.path(root));
+        assert_eq!(state.session(SessionRole::Landing), Some("ses_landing"));
+        store_state(&plan.path(root), &state);
+        let text = std::fs::read_to_string(plan.path(root).join(STATE_FILE)).expect("read");
+        assert!(text.contains("\"landing\""));
+        assert!(!text.contains("\"merging\""));
     }
 }

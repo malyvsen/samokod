@@ -1,11 +1,11 @@
 import type { PlanPhase, SessionRole, WorktreeStatus } from "../../types";
 
-export type RowActionKind = "scoping" | "executing" | "merging" | "inactive";
+export type RowActionKind = "scoping" | "executing" | "landing" | "inactive";
 
 export function actionKind(phase: PlanPhase, role: SessionRole): RowActionKind {
 	if (phase === "scoping" && role === "scoping") return "scoping";
 	if (phase === "executing" && role === "executing") return "executing";
-	if (phase === "merging" && role === "merging") return "merging";
+	if (phase === "landing" && role === "landing") return "landing";
 	return "inactive";
 }
 
@@ -26,16 +26,16 @@ export type RowActionsProps =
 			running: boolean;
 			worktree: WorktreeStatus | null;
 			onCancel: () => void;
-			onDone: () => void;
-			onBeginMerge: () => void;
+			onFinishLanding: () => void;
+			onBeginLanding: () => void;
 	  }
 	| {
-			kind: "merging";
+			kind: "landing";
 			planName: string;
 			running: boolean;
 			dirty: boolean;
 			onCancel: () => void;
-			onDone: () => void;
+			onFinishLanding: () => void;
 	  }
 	| { kind: "inactive"; planName: string };
 
@@ -64,7 +64,8 @@ export function RowActions(props: RowActionsProps) {
 			);
 		case "executing": {
 			const dirty = props.worktree?.dirty ?? false;
-			const needsMerge = props.worktree ? !props.worktree.ffable : false;
+			const target = props.worktree?.target_branch ?? "";
+			const needsLanding = props.worktree ? !props.worktree.ffable : false;
 			const disabled = props.running || dirty;
 			return (
 				<>
@@ -76,23 +77,23 @@ export function RowActions(props: RowActionsProps) {
 					>
 						✕
 					</ActionButton>
-					{needsMerge ? (
+					{needsLanding ? (
 						<ActionButton
 							className="promote"
-							label={`Rebase ${props.planName} onto latest main`}
+							label={`Start landing ${props.planName} onto ${target}`}
 							disabled={disabled}
 							title={dirty ? DIRTY_TITLE : undefined}
-							onClick={props.onBeginMerge}
+							onClick={props.onBeginLanding}
 						>
 							&gt;
 						</ActionButton>
 					) : (
 						<ActionButton
 							className="promote"
-							label={`Merge ${props.planName} to main`}
+							label={`Land ${props.planName} onto ${target}`}
 							disabled={disabled}
 							title={dirty ? DIRTY_TITLE : undefined}
-							onClick={props.onDone}
+							onClick={props.onFinishLanding}
 						>
 							✓
 						</ActionButton>
@@ -100,13 +101,13 @@ export function RowActions(props: RowActionsProps) {
 				</>
 			);
 		}
-		case "merging": {
+		case "landing": {
 			const disabled = props.running || props.dirty;
 			return (
 				<>
 					<ActionButton
 						className="cancel"
-						label="Cancel merge and delete branch"
+						label="Cancel landing and delete branch"
 						disabled={props.running}
 						onClick={props.onCancel}
 					>
@@ -114,10 +115,10 @@ export function RowActions(props: RowActionsProps) {
 					</ActionButton>
 					<ActionButton
 						className="promote"
-						label={`Finish ${props.planName} merge`}
+						label={`Finish landing ${props.planName}`}
 						disabled={disabled}
 						title={props.dirty ? DIRTY_TITLE : undefined}
-						onClick={props.onDone}
+						onClick={props.onFinishLanding}
 					>
 						✓
 					</ActionButton>

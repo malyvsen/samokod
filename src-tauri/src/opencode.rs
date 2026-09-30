@@ -8,7 +8,7 @@ use crate::plans::{Phase, PlanRef};
 
 pub const SCOPING_AGENT: &str = "samokod-scoping";
 pub const EXECUTING_AGENT: &str = "samokod-executing";
-pub const MERGING_AGENT: &str = "samokod-merging";
+pub const LANDING_AGENT: &str = "samokod-landing";
 
 /// Matches every plan's state file. Each agent's edit rules deny it last.
 const STATE_DENY_GLOB: &str = ".samokod/plans/**/state.json";
@@ -18,7 +18,7 @@ pub fn agent_for(phase: Phase) -> &'static str {
     match phase {
         Phase::Scoping => SCOPING_AGENT,
         Phase::Executing => EXECUTING_AGENT,
-        Phase::Merging => MERGING_AGENT,
+        Phase::Landing => LANDING_AGENT,
         Phase::Completed | Phase::Cancelled => EXECUTING_AGENT,
     }
 }
@@ -28,7 +28,7 @@ pub const CONFIG_CONTENT_ENV: &str = "OPENCODE_CONFIG_CONTENT";
 
 const SCOPING_PROMPT: &str = include_str!("prompts/scoping.md");
 const EXECUTING_PROMPT: &str = include_str!("prompts/executing.md");
-const MERGING_PROMPT: &str = include_str!("prompts/merging.md");
+const LANDING_PROMPT: &str = include_str!("prompts/landing.md");
 
 /// Extra spawn env pinning all agents. Pure: JSON only, no process access.
 pub fn agent_env(plan: &PlanRef) -> HashMap<String, String> {
@@ -51,10 +51,10 @@ pub fn agent_config(plan: &PlanRef) -> String {
                 "description": "Executes one approved plan.",
                 "permission": executing_permissions(),
             },
-            MERGING_AGENT: {
+            LANDING_AGENT: {
                 "mode": "primary",
-                "description": "Rebases one plan branch onto the latest main.",
-                "permission": merging_permissions(),
+                "description": "Lands one plan branch onto its target branch.",
+                "permission": landing_permissions(),
             },
         },
     })
@@ -106,22 +106,22 @@ const EXECUTING_EDIT_RULES: [(&str, &str); 4] = [
     (STATE_DENY_GLOB, "deny"),
 ];
 
-/// Merging rebases one plan branch, so every worktree file is editable
-/// except the state file: a rebased commit must cover files the main
-/// branch added on top. No permission questions and no subagent research:
-/// merging is a focused rebasing task.
-fn merging_permissions() -> Value {
+/// Landing resolves one plan branch onto its target, so every worktree
+/// file is editable except the state file: a landed commit must cover
+/// files the target branch added on top. No permission questions and no
+/// subagent research: landing is a focused conflict-resolution task.
+fn landing_permissions() -> Value {
     serde_json::json!({
         "read": "allow",
         "external_directory": "allow",
-        "edit": rules_object(&MERGING_EDIT_RULES),
+        "edit": rules_object(&LANDING_EDIT_RULES),
         "bash": "allow",
         "question": "deny",
         "task": "deny",
     })
 }
 
-const MERGING_EDIT_RULES: [(&str, &str); 2] = [("*", "allow"), (STATE_DENY_GLOB, "deny")];
+const LANDING_EDIT_RULES: [(&str, &str); 2] = [("*", "allow"), (STATE_DENY_GLOB, "deny")];
 
 /// Ordered permission object from `(pattern, effect)` pairs. Insertion
 /// order is the contract: OpenCode grants the last matching rule.
@@ -151,17 +151,17 @@ pub fn executing_first_message(plan_dir: &str) -> String {
     EXECUTING_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
-/// Merging role and instruction. Sent hidden when the conflict path starts
-/// the merging agent in the worktree. Pure.
-pub fn merging_first_message(
+/// Landing role and instruction. Sent hidden when the conflict path starts
+/// the landing agent in the worktree. Pure.
+pub fn landing_first_message(
     worktree_branch: &str,
-    main_branch: &str,
+    target_branch: &str,
     worktree_path: &str,
     plan_md_abs_path: &str,
 ) -> String {
-    MERGING_PROMPT
+    LANDING_PROMPT
         .replace("{{WORKTREE_BRANCH}}", worktree_branch)
-        .replace("{{MAIN_BRANCH}}", main_branch)
+        .replace("{{TARGET_BRANCH}}", target_branch)
         .replace("{{WORKTREE_PATH}}", worktree_path)
         .replace("{{PLAN_MD_ABS_PATH}}", plan_md_abs_path)
 }
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn all_agents_are_primary_without_prompt_field() {
         let config = config(&test_plan());
-        for agent in [SCOPING_AGENT, EXECUTING_AGENT, MERGING_AGENT] {
+        for agent in [SCOPING_AGENT, EXECUTING_AGENT, LANDING_AGENT] {
             let entry = config
                 .pointer(&format!("/agent/{agent}"))
                 .expect("agent present");
@@ -346,7 +346,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            keys_of(&config, MERGING_AGENT, "edit"),
+            keys_of(&config, LANDING_AGENT, "edit"),
             vec!["*".to_string(), STATE_DENY_GLOB.to_string()]
         );
     }
@@ -363,41 +363,41 @@ mod tests {
             "deny"
         );
         assert_eq!(
-            config["agent"][MERGING_AGENT]["permission"]["question"],
+            config["agent"][LANDING_AGENT]["permission"]["question"],
             "deny"
         );
     }
 
     #[test]
-    fn merging_allows_worktree_edits_without_subagents() {
+    fn landing_allows_worktree_edits_without_subagents() {
         let config = config(&test_plan());
         assert_eq!(
-            effect_of(&config, MERGING_AGENT, "edit", "src/App.tsx"),
+            effect_of(&config, LANDING_AGENT, "edit", "src/App.tsx"),
             "allow"
         );
         assert_eq!(
-            effect_of(&config, MERGING_AGENT, "edit", ".samokod/state.json"),
+            effect_of(&config, LANDING_AGENT, "edit", ".samokod/state.json"),
             "allow"
         );
         assert_eq!(
             effect_of(
                 &config,
-                MERGING_AGENT,
+                LANDING_AGENT,
                 "edit",
-                &format!(".samokod/plans/merging/x/{STATE_FILE}")
+                &format!(".samokod/plans/landing/x/{STATE_FILE}")
             ),
             "deny"
         );
         assert_eq!(
-            effect_of(&config, MERGING_AGENT, "bash", "git rebase -i main"),
+            effect_of(&config, LANDING_AGENT, "bash", "git rebase -i feature"),
             "allow"
         );
-        assert_eq!(config["agent"][MERGING_AGENT]["permission"]["task"], "deny");
+        assert_eq!(config["agent"][LANDING_AGENT]["permission"]["task"], "deny");
     }
 
     #[test]
-    fn merging_plans_run_the_merging_agent() {
-        assert_eq!(agent_for(Phase::Merging), MERGING_AGENT);
+    fn landing_plans_run_the_landing_agent() {
+        assert_eq!(agent_for(Phase::Landing), LANDING_AGENT);
         assert_eq!(agent_for(Phase::Executing), EXECUTING_AGENT);
         assert_eq!(agent_for(Phase::Scoping), SCOPING_AGENT);
     }
@@ -423,26 +423,26 @@ mod tests {
                 "{resource} should deny for executing"
             );
             assert_eq!(
-                effect_of(&config, MERGING_AGENT, "edit", &resource),
+                effect_of(&config, LANDING_AGENT, "edit", &resource),
                 "deny",
-                "{resource} should deny for merging"
+                "{resource} should deny for landing"
             );
         }
     }
 
     #[test]
-    fn merging_message_fills_every_placeholder() {
-        let message = merging_first_message(
+    fn landing_message_fills_every_placeholder() {
+        let message = landing_first_message(
             "samokod/shiny-feature",
-            "main",
+            "feature",
             "/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature",
-            "/repo/.samokod/plans/merging/2026-09-26.14-53-26.shiny-feature/plan.md",
+            "/repo/.samokod/plans/landing/2026-09-26.14-53-26.shiny-feature/plan.md",
         );
         assert!(message.contains("samokod/shiny-feature"));
-        assert!(message.contains("`main`"));
+        assert!(message.contains("`feature`"));
         assert!(message.contains("/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature"));
         assert!(!message.contains("{{WORKTREE_BRANCH}}"));
-        assert!(!message.contains("{{MAIN_BRANCH}}"));
+        assert!(!message.contains("{{TARGET_BRANCH}}"));
         assert!(!message.contains("{{WORKTREE_PATH}}"));
         assert!(!message.contains("{{PLAN_MD_ABS_PATH}}"));
     }

@@ -34,12 +34,12 @@ export function executePlan(session: SessionKey): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("execute_plan", { session });
 }
 
-export function markCompleted(session: SessionKey): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("mark_completed", { session });
+export function finishLanding(session: SessionKey): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("finish_landing", { session });
 }
 
-export function beginMerge(session: SessionKey): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("begin_merge", { session });
+export function beginLanding(session: SessionKey): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("begin_landing", { session });
 }
 
 export function cancelPlan(session: SessionKey): Promise<PlansUpdate> {

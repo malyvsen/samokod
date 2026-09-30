@@ -16,8 +16,8 @@ export function PlansPanel({
 	onNewPlan,
 	onExecute,
 	onCancel,
-	onDone,
-	onBeginMerge,
+	onFinishLanding,
+	onBeginLanding,
 }: {
 	plans: PlanEntry[];
 	selected: SessionKey | null;
@@ -25,8 +25,8 @@ export function PlansPanel({
 	onNewPlan: () => void;
 	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
-	onDone: (session: SessionKey) => void;
-	onBeginMerge: (session: SessionKey) => void;
+	onFinishLanding: (session: SessionKey) => void;
+	onBeginLanding: (session: SessionKey) => void;
 }) {
 	const byPhase = groupByPhase(plans);
 	return (
@@ -47,8 +47,8 @@ export function PlansPanel({
 							onSelect={onSelect}
 							onExecute={onExecute}
 							onCancel={onCancel}
-							onDone={onDone}
-							onBeginMerge={onBeginMerge}
+							onFinishLanding={onFinishLanding}
+							onBeginLanding={onBeginLanding}
 						/>
 					))}
 				</Fragment>
@@ -65,8 +65,8 @@ function PlanGroup({
 	onSelect,
 	onExecute,
 	onCancel,
-	onDone,
-	onBeginMerge,
+	onFinishLanding,
+	onBeginLanding,
 }: {
 	plan: PlanEntry;
 	phase: PlanPhase;
@@ -75,8 +75,8 @@ function PlanGroup({
 	onSelect: (session: SessionKey) => void;
 	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
-	onDone: (session: SessionKey) => void;
-	onBeginMerge: (session: SessionKey) => void;
+	onFinishLanding: (session: SessionKey) => void;
+	onBeginLanding: (session: SessionKey) => void;
 }) {
 	const target = headerKey(plan);
 	const attention = attentionFor(plan);
@@ -112,8 +112,8 @@ function PlanGroup({
 							onSelect={onSelect}
 							onExecute={onExecute}
 							onCancel={onCancel}
-							onDone={onDone}
-							onBeginMerge={onBeginMerge}
+							onFinishLanding={onFinishLanding}
+							onBeginLanding={onBeginLanding}
 						/>
 					))
 				: null}

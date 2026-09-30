@@ -202,7 +202,7 @@ impl AgentManager {
 
     /// Claim the one-time role prefix for the first message of one ACP
     /// conversation. One locked check-and-mark, so a retried turn never
-    /// prefixes twice. Executing and merging prefix; scoping goes through
+    /// prefixes twice. Executing and landing prefix; scoping goes through
     /// verbatim. Paths are absolute into the main checkout, since both
     /// roles run with the worktree as their working directory.
     fn claim_role_prefix(&self, key: &SessionKey, user_text: &str) -> Option<String> {
@@ -222,27 +222,21 @@ impl AgentManager {
                     .to_string();
                 executing_prefix_text(&plan_dir_abs, user_text)
             }
-            plans::Phase::Merging => {
-                let (path, branch, main_branch) = match state.worktrees.get(&plan.name) {
-                    Some(record) => (
-                        record.path.clone(),
-                        record.branch.clone(),
-                        record.main_branch.clone(),
-                    ),
-                    None => (
-                        crate::worktrees::worktree_path(&repo_root, &plan.name),
-                        crate::worktrees::branch_name(&plan.name),
-                        state.branch.clone(),
-                    ),
+            plans::Phase::Landing => {
+                let path = match state.worktrees.get(&plan.name) {
+                    Some(record) => record.path.clone(),
+                    None => crate::worktrees::worktree_path(&repo_root, &plan.name),
                 };
+                let worktree_branch = crate::worktrees::branch_name(&plan.name);
+                let target_branch = state.checkout_branch.clone();
                 let plan_md_abs = plan
                     .plan_ref()
                     .plan_md(&repo_root)
                     .to_string_lossy()
                     .to_string();
-                merging_prefix_text(
-                    &branch,
-                    &main_branch,
+                landing_prefix_text(
+                    &worktree_branch,
+                    &target_branch,
                     &path.to_string_lossy(),
                     &plan_md_abs,
                     user_text,
@@ -371,20 +365,20 @@ fn executing_prefix_text(display: &str, user_text: &str) -> String {
     )
 }
 
-/// Merging role template for the first message of one ACP conversation.
+/// Landing role template for the first message of one ACP conversation.
 /// Pure.
-fn merging_prefix_text(
+fn landing_prefix_text(
     worktree_branch: &str,
-    main_branch: &str,
+    target_branch: &str,
     worktree_path: &str,
     plan_md_abs_path: &str,
     user_text: &str,
 ) -> String {
     format!(
         "{}\n\n{}",
-        opencode::merging_first_message(
+        opencode::landing_first_message(
             worktree_branch,
-            main_branch,
+            target_branch,
             worktree_path,
             plan_md_abs_path
         ),
@@ -430,12 +424,12 @@ mod tests {
     }
 
     #[test]
-    fn merging_prefix_combines_role_and_user_text() {
-        let text = merging_prefix_text(
+    fn landing_prefix_combines_role_and_user_text() {
+        let text = landing_prefix_text(
             "samokod/shiny",
-            "main",
+            "feature",
             "/repo/.samokod/worktrees/plan",
-            "/repo/.samokod/plans/merging/plan/plan.md",
+            "/repo/.samokod/plans/landing/plan/plan.md",
             "  keep going  ",
         );
         assert!(text.contains("samokod/shiny"));

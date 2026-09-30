@@ -8,23 +8,23 @@ describe("actionKind", () => {
 	test("live rows map to their own kind", () => {
 		expect(actionKind("scoping", "scoping")).toBe("scoping");
 		expect(actionKind("executing", "executing")).toBe("executing");
-		expect(actionKind("merging", "merging")).toBe("merging");
+		expect(actionKind("landing", "landing")).toBe("landing");
 	});
 
 	test("finished and inactive rows map to inactive", () => {
 		const finished: Array<[PlanPhase, SessionRole]> = [
 			["completed", "scoping"],
 			["completed", "executing"],
-			["completed", "merging"],
+			["completed", "landing"],
 			["cancelled", "scoping"],
 			["cancelled", "executing"],
-			["cancelled", "merging"],
+			["cancelled", "landing"],
 			["executing", "scoping"],
-			["executing", "merging"],
-			["merging", "scoping"],
-			["merging", "executing"],
+			["executing", "landing"],
+			["landing", "scoping"],
+			["landing", "executing"],
 			["scoping", "executing"],
-			["scoping", "merging"],
+			["scoping", "landing"],
 		];
 		for (const [phase, role] of finished) {
 			expect(actionKind(phase, role)).toBe("inactive");
@@ -60,19 +60,19 @@ describe("row actions", () => {
 				running={false}
 				worktree={testWorktree()}
 				onCancel={vi.fn()}
-				onDone={vi.fn()}
-				onBeginMerge={vi.fn()}
+				onFinishLanding={vi.fn()}
+				onBeginLanding={vi.fn()}
 			/>,
 		);
 		expect(
 			screen.getByRole("button", { name: "Cancel plan and delete branch" }),
 		).toBeInTheDocument();
 		expect(
-			screen.getByRole("button", { name: "Merge plan to main" }),
+			screen.getByRole("button", { name: "Land plan onto feature" }),
 		).toBeInTheDocument();
 	});
 
-	test("diverged executing rows offer rebase instead of done", () => {
+	test("diverged executing rows offer landing instead of done", () => {
 		render(
 			<RowActions
 				kind="executing"
@@ -80,21 +80,21 @@ describe("row actions", () => {
 				running={false}
 				worktree={testWorktree({ ffable: false })}
 				onCancel={vi.fn()}
-				onDone={vi.fn()}
-				onBeginMerge={vi.fn()}
+				onFinishLanding={vi.fn()}
+				onBeginLanding={vi.fn()}
 			/>,
 		);
 		expect(
 			screen.getByRole("button", {
-				name: "Rebase plan onto latest main",
+				name: "Start landing plan onto feature",
 			}),
 		).toBeInTheDocument();
 		expect(
-			screen.queryByRole("button", { name: "Merge plan to main" }),
+			screen.queryByRole("button", { name: "Land plan onto feature" }),
 		).toBeNull();
 	});
 
-	test("dirty worktrees disable the merge button with a tooltip", () => {
+	test("dirty worktrees disable the landing button with a tooltip", () => {
 		render(
 			<RowActions
 				kind="executing"
@@ -102,48 +102,48 @@ describe("row actions", () => {
 				running={false}
 				worktree={testWorktree({ dirty: true })}
 				onCancel={vi.fn()}
-				onDone={vi.fn()}
-				onBeginMerge={vi.fn()}
+				onFinishLanding={vi.fn()}
+				onBeginLanding={vi.fn()}
 			/>,
 		);
-		const merge = screen.getByRole("button", { name: "Merge plan to main" });
-		expect(merge).toBeDisabled();
-		expect(merge.getAttribute("title")).toBe(
+		const land = screen.getByRole("button", { name: "Land plan onto feature" });
+		expect(land).toBeDisabled();
+		expect(land.getAttribute("title")).toBe(
 			"Commit or discard worktree changes first",
 		);
 	});
 
-	test("merging rows offer cancel and finish", () => {
+	test("landing rows offer cancel and finish", () => {
 		render(
 			<RowActions
-				kind="merging"
+				kind="landing"
 				planName="plan"
 				running={false}
 				dirty={false}
 				onCancel={vi.fn()}
-				onDone={vi.fn()}
+				onFinishLanding={vi.fn()}
 			/>,
 		);
 		expect(
-			screen.getByRole("button", { name: "Cancel merge and delete branch" }),
+			screen.getByRole("button", { name: "Cancel landing and delete branch" }),
 		).toBeInTheDocument();
 		expect(
-			screen.getByRole("button", { name: "Finish plan merge" }),
+			screen.getByRole("button", { name: "Finish landing plan" }),
 		).toBeInTheDocument();
 	});
 
-	test("dirty merging rows disable finish with a tooltip", () => {
+	test("dirty landing rows disable finish with a tooltip", () => {
 		render(
 			<RowActions
-				kind="merging"
+				kind="landing"
 				planName="plan"
 				running={false}
 				dirty={true}
 				onCancel={vi.fn()}
-				onDone={vi.fn()}
+				onFinishLanding={vi.fn()}
 			/>,
 		);
-		const finish = screen.getByRole("button", { name: "Finish plan merge" });
+		const finish = screen.getByRole("button", { name: "Finish landing plan" });
 		expect(finish).toBeDisabled();
 		expect(finish.getAttribute("title")).toBe(
 			"Commit or discard worktree changes first",

@@ -13,8 +13,8 @@ const api = vi.hoisted(() => ({
 	openRepo: vi.fn(),
 	createPlan: vi.fn(),
 	executePlan: vi.fn(),
-	markCompleted: vi.fn(),
-	beginMerge: vi.fn(),
+	finishLanding: vi.fn(),
+	beginLanding: vi.fn(),
 	abandonPlan: vi.fn(),
 	cancelExecution: vi.fn(),
 	selectPlan: vi.fn(),
@@ -44,10 +44,10 @@ beforeEach(() => {
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo" }],
 	});
-	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "main" });
+	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "feature" });
 	api.openRepo.mockResolvedValue({
 		repo_root: "/repo",
-		branch: "main",
+		branch: "feature",
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),

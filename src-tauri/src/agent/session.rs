@@ -33,7 +33,7 @@ pub(crate) fn role_phase(role: SessionRole) -> plans::Phase {
     match role {
         SessionRole::Scoping => plans::Phase::Scoping,
         SessionRole::Executing => plans::Phase::Executing,
-        SessionRole::Merging => plans::Phase::Merging,
+        SessionRole::Landing => plans::Phase::Landing,
     }
 }
 
@@ -66,10 +66,10 @@ impl ActivePlan {
         }
     }
 
-    pub(crate) fn merging(name: String) -> Self {
+    pub(crate) fn landing(name: String) -> Self {
         ActivePlan {
             name,
-            phase: plans::Phase::Merging,
+            phase: plans::Phase::Landing,
             prefixed: false,
         }
     }
@@ -79,7 +79,7 @@ impl ActivePlan {
         match session.role {
             SessionRole::Scoping => ActivePlan::scoping(session.plan.clone()),
             SessionRole::Executing => ActivePlan::executing(session.plan.clone()),
-            SessionRole::Merging => ActivePlan::merging(session.plan.clone()),
+            SessionRole::Landing => ActivePlan::landing(session.plan.clone()),
         }
     }
 
@@ -87,7 +87,7 @@ impl ActivePlan {
         let role = match self.phase {
             plans::Phase::Scoping => SessionRole::Scoping,
             plans::Phase::Executing => SessionRole::Executing,
-            plans::Phase::Merging => SessionRole::Merging,
+            plans::Phase::Landing => SessionRole::Landing,
             plans::Phase::Completed | plans::Phase::Cancelled => return None,
         };
         Some(SessionKey {
@@ -97,11 +97,11 @@ impl ActivePlan {
     }
 
     /// Working directory for the session: the plan worktree for executing
-    /// and merging plans, the main root for scoping plans. Plan files
+    /// and landing plans, the main root for scoping plans. Plan files
     /// always stay in the main checkout; only the agent's cwd moves.
     pub(crate) fn cwd(&self, repo_root: &Path) -> PathBuf {
         match self.phase {
-            plans::Phase::Executing | plans::Phase::Merging => {
+            plans::Phase::Executing | plans::Phase::Landing => {
                 crate::worktrees::worktree_path(repo_root, &self.name)
             }
             plans::Phase::Scoping | plans::Phase::Completed | plans::Phase::Cancelled => {
@@ -284,7 +284,7 @@ impl AgentManager {
                 },
             );
             state.repo_root = Some(repo_root.to_path_buf());
-            state.branch = branch.to_string();
+            state.checkout_branch = branch.to_string();
             state.current = Some(key.clone());
         }
         super::session_ids::record(repo_root, &key, &session_id);
@@ -769,7 +769,7 @@ impl AgentManager {
 
     pub(crate) fn reopen_snapshot(&self) -> Option<(PathBuf, String)> {
         let state = lock_state(&self.state)?;
-        Some((state.repo_root.clone()?, state.branch.clone()))
+        Some((state.repo_root.clone()?, state.checkout_branch.clone()))
     }
 
     pub(crate) fn connection_snapshot_for(&self, key: &SessionKey) -> Option<ConnectionTo<Agent>> {

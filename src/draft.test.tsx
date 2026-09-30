@@ -19,7 +19,7 @@ const api = vi.hoisted(() => ({
 	openRepo: vi.fn(),
 	createPlan: vi.fn(),
 	executePlan: vi.fn(),
-	markCompleted: vi.fn(),
+	finishLanding: vi.fn(),
 	cancelPlan: vi.fn(),
 	selectPlan: vi.fn(),
 	sendPrompt: vi.fn(),
@@ -55,10 +55,10 @@ beforeEach(() => {
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo" }],
 	});
-	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "main" });
+	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "feature" });
 	api.openRepo.mockResolvedValue({
 		repo_root: "/repo",
-		branch: "main",
+		branch: "feature",
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
@@ -73,7 +73,7 @@ async function openChat(plans?: PlanEntry[], selected?: SessionKey) {
 	if (plans !== undefined) {
 		api.openRepo.mockResolvedValue({
 			repo_root: "/repo",
-			branch: "main",
+			branch: "feature",
 			plans,
 			selected: selected ?? testKey(plans[0]?.name ?? "a"),
 			config_defaults: testDefaults(),

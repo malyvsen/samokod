@@ -19,8 +19,8 @@ export function SessionRow({
 	onSelect,
 	onExecute,
 	onCancel,
-	onDone,
-	onBeginMerge,
+	onFinishLanding,
+	onBeginLanding,
 }: {
 	planName: string;
 	planTitle: string;
@@ -32,8 +32,8 @@ export function SessionRow({
 	onSelect: (session: SessionKey) => void;
 	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
-	onDone: (session: SessionKey) => void;
-	onBeginMerge: (session: SessionKey) => void;
+	onFinishLanding: (session: SessionKey) => void;
+	onBeginLanding: (session: SessionKey) => void;
 }) {
 	const key: SessionKey = { plan: planName, role: status.role };
 	const isSelected = sameSession(selected, key);
@@ -64,17 +64,17 @@ export function SessionRow({
 					running={status.working}
 					worktree={worktree}
 					onCancel={() => onCancel(key)}
-					onDone={() => onDone(key)}
-					onBeginMerge={() => onBeginMerge(key)}
+					onFinishLanding={() => onFinishLanding(key)}
+					onBeginLanding={() => onBeginLanding(key)}
 				/>
-			) : kind === "merging" ? (
+			) : kind === "landing" ? (
 				<RowActions
 					kind={kind}
 					planName={planName}
 					running={status.working}
 					dirty={worktree?.dirty ?? false}
 					onCancel={() => onCancel(key)}
-					onDone={() => onDone(key)}
+					onFinishLanding={() => onFinishLanding(key)}
 				/>
 			) : (
 				<RowActions kind={kind} planName={planName} />

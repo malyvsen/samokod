@@ -8,7 +8,7 @@ import type {
 export const PHASES: PlanPhase[] = [
 	"scoping",
 	"executing",
-	"merging",
+	"landing",
 	"completed",
 	"cancelled",
 ];
@@ -17,8 +17,8 @@ export type AttentionKind = "idle" | "approval" | "failed";
 
 export function latestRole(plan: PlanEntry): SessionRole {
 	const roles = new Set(plan.sessions.map((status) => status.role));
-	if (roles.has("merging")) {
-		return "merging";
+	if (roles.has("landing")) {
+		return "landing";
 	}
 	if (roles.has("executing")) {
 		return "executing";
@@ -61,7 +61,7 @@ export function attentionTitle(kind: AttentionKind): string {
 const ROLE_LABELS: Record<SessionRole, string> = {
 	scoping: "Scoping",
 	executing: "Executing",
-	merging: "Merging",
+	landing: "Landing",
 };
 
 export function roleLabel(role: SessionRole): string {

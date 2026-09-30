@@ -6,13 +6,13 @@ import { PlansPanel } from "./components/PlansPanel";
 import { testEntryWith, testStatus, testWorktree } from "./fixtures";
 import type { PlanEntry } from "./types";
 
-const SECTIONS = ["SCOPING", "EXECUTING", "MERGING", "COMPLETED", "CANCELLED"];
+const SECTIONS = ["SCOPING", "EXECUTING", "LANDING", "COMPLETED", "CANCELLED"];
 
 function panelProps(
 	plans: PlanEntry[],
 	selected: {
 		plan: string;
-		role: "scoping" | "executing" | "merging";
+		role: "scoping" | "executing" | "landing";
 	} | null = null,
 ) {
 	return {
@@ -22,8 +22,8 @@ function panelProps(
 		onNewPlan: vi.fn(),
 		onExecute: vi.fn(),
 		onCancel: vi.fn(),
-		onDone: vi.fn(),
-		onBeginMerge: vi.fn(),
+		onFinishLanding: vi.fn(),
+		onBeginLanding: vi.fn(),
 	};
 }
 
@@ -48,20 +48,20 @@ function executingPlan() {
 	);
 }
 
-function mergingPlan() {
+function landingPlan() {
 	return testEntryWith(
-		"2026-09-25.10-54-59.merge",
-		"merging",
+		"2026-09-25.10-54-59.landing",
+		"landing",
 		"Shiny",
 		true,
-		[testStatus("scoping"), testStatus("executing"), testStatus("merging")],
+		[testStatus("scoping"), testStatus("executing"), testStatus("landing")],
 		testWorktree(),
 	);
 }
 
 function sectionHeaders() {
 	return screen
-		.getAllByText(/^(SCOPING|EXECUTING|MERGING|COMPLETED|CANCELLED)$/)
+		.getAllByText(/^(SCOPING|EXECUTING|LANDING|COMPLETED|CANCELLED)$/)
 		.map((node) => node.textContent);
 }
 
@@ -98,7 +98,7 @@ describe("plans panel", () => {
 		test("renders all five sections in fixed order", () => {
 			render(
 				<PlansPanel
-					{...panelProps([executingPlan(), scopingPlan(), mergingPlan()])}
+					{...panelProps([executingPlan(), scopingPlan(), landingPlan()])}
 				/>,
 			);
 			expect(sectionHeaders()).toEqual(SECTIONS);
@@ -142,7 +142,7 @@ describe("plans panel", () => {
 			for (const [plan, role] of [
 				[scopingPlan(), "scoping"],
 				[executingPlan(), "executing"],
-				[mergingPlan(), "merging"],
+				[landingPlan(), "landing"],
 			] as const) {
 				const props = panelProps([plan], null);
 				const { unmount } = render(<PlansPanel {...props} />);
@@ -192,23 +192,25 @@ describe("plans panel", () => {
 			expect(screen.getByText("Executing")).toBeInTheDocument();
 		});
 
-		test("expanded merging plans list three sessions with cancel and finish", () => {
-			const plan = mergingPlan();
+		test("expanded landing plans list three sessions with cancel and finish", () => {
+			const plan = landingPlan();
 			render(
 				<PlansPanel
-					{...panelProps([plan], { plan: plan.name, role: "merging" })}
+					{...panelProps([plan], { plan: plan.name, role: "landing" })}
 				/>,
 			);
 			expect(screen.getByText("Scoping")).toBeInTheDocument();
 			expect(screen.getByText("Executing")).toBeInTheDocument();
-			expect(screen.getByText("Merging")).toBeInTheDocument();
-			const buttons = sessionRow("Shiny Merging");
+			expect(screen.getByText("Landing")).toBeInTheDocument();
+			const buttons = sessionRow("Shiny Landing");
 			expect(
-				buttons.getByRole("button", { name: "Cancel merge and delete branch" }),
+				buttons.getByRole("button", {
+					name: "Cancel landing and delete branch",
+				}),
 			).toBeInTheDocument();
 			expect(
 				buttons.getByRole("button", {
-					name: `Finish ${plan.name} merge`,
+					name: `Finish landing ${plan.name}`,
 				}),
 			).toBeInTheDocument();
 		});
@@ -227,7 +229,7 @@ describe("plans panel", () => {
 			expect(
 				within(
 					planGroup("Parallel sessions, scoping, opens Scoping"),
-				).queryByRole("button", { name: /Cancel|Send|Merge/ }),
+				).queryByRole("button", { name: /Cancel|Send|Land/i }),
 			).toBeNull();
 		});
 
@@ -343,12 +345,12 @@ describe("plans panel", () => {
 			).toBeInTheDocument();
 			expect(
 				buttons.getByRole("button", {
-					name: `Merge ${plan.name} to main`,
+					name: `Land ${plan.name} onto feature`,
 				}),
 			).toBeInTheDocument();
 		});
 
-		test("diverged executing rows offer rebase instead of done", () => {
+		test("diverged executing rows offer landing instead of done", () => {
 			const diverged = testEntryWith(
 				"2026-09-25.10-54-59.slug",
 				"executing",
@@ -367,17 +369,17 @@ describe("plans panel", () => {
 			);
 			expect(
 				screen.getByRole("button", {
-					name: `Rebase ${diverged.name} onto latest main`,
+					name: `Start landing ${diverged.name} onto feature`,
 				}),
 			).toBeInTheDocument();
 			expect(
 				screen.queryByRole("button", {
-					name: `Merge ${diverged.name} to main`,
+					name: `Land ${diverged.name} onto feature`,
 				}),
 			).toBeNull();
 		});
 
-		test("dirty executing rows disable merging with a tooltip", () => {
+		test("dirty executing rows disable landing with a tooltip", () => {
 			const dirty = testEntryWith(
 				"2026-09-25.10-54-59.slug",
 				"executing",
@@ -391,11 +393,11 @@ describe("plans panel", () => {
 					{...panelProps([dirty], { plan: dirty.name, role: "executing" })}
 				/>,
 			);
-			const merge = screen.getByRole("button", {
-				name: `Merge ${dirty.name} to main`,
+			const land = screen.getByRole("button", {
+				name: `Land ${dirty.name} onto feature`,
 			});
-			expect(merge).toBeDisabled();
-			expect(merge.getAttribute("title")).toBe(
+			expect(land).toBeDisabled();
+			expect(land.getAttribute("title")).toBe(
 				"Commit or discard worktree changes first",
 			);
 		});
@@ -499,17 +501,17 @@ describe("plans panel", () => {
 			render(<PlansPanel {...props} />);
 			await user.click(
 				screen.getByRole("button", {
-					name: `Merge ${active.name} to main`,
+					name: `Land ${active.name} onto feature`,
 				}),
 			);
-			expect(props.onDone).toHaveBeenCalledWith({
+			expect(props.onFinishLanding).toHaveBeenCalledWith({
 				plan: active.name,
 				role: "executing",
 			});
 			expect(props.onCancel).not.toHaveBeenCalled();
 		});
 
-		test("rebase actions call back with the executing session", async () => {
+		test("landing actions call back with the executing session", async () => {
 			const diverged = testEntryWith(
 				"2026-09-25.10-54-59.slug",
 				"executing",
@@ -526,14 +528,14 @@ describe("plans panel", () => {
 			render(<PlansPanel {...props} />);
 			await user.click(
 				screen.getByRole("button", {
-					name: `Rebase ${diverged.name} onto latest main`,
+					name: `Start landing ${diverged.name} onto feature`,
 				}),
 			);
-			expect(props.onBeginMerge).toHaveBeenCalledWith({
+			expect(props.onBeginLanding).toHaveBeenCalledWith({
 				plan: diverged.name,
 				role: "executing",
 			});
-			expect(props.onDone).not.toHaveBeenCalled();
+			expect(props.onFinishLanding).not.toHaveBeenCalled();
 		});
 
 		test("selecting a row marks it selected", async () => {

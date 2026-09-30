@@ -82,23 +82,23 @@ async fn execute_plan(
 }
 
 #[tauri::command]
-async fn mark_completed(
+async fn finish_landing(
     state: State<'_, AgentManager>,
     session: SessionKey,
 ) -> Result<PlansUpdate, String> {
     state
-        .mark_completed(session)
+        .finish_landing(session)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn begin_merge(
+async fn begin_landing(
     state: State<'_, AgentManager>,
     session: SessionKey,
 ) -> Result<PlansUpdate, String> {
     state
-        .begin_merge(session)
+        .begin_landing(session)
         .await
         .map_err(|error| error.to_string())
 }
@@ -247,8 +247,8 @@ pub fn run() {
             refresh_branch,
             create_plan,
             execute_plan,
-            mark_completed,
-            begin_merge,
+            finish_landing,
+            begin_landing,
             cancel_plan,
             select_plan,
             send_prompt,

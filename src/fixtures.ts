@@ -62,5 +62,11 @@ export function testEntryWith(
 export function testWorktree(
 	overrides: Partial<WorktreeStatus> = {},
 ): WorktreeStatus {
-	return { branch: "samokod/shiny", dirty: false, ffable: true, ...overrides };
+	return {
+		worktree_branch: "samokod/shiny",
+		target_branch: "feature",
+		dirty: false,
+		ffable: true,
+		...overrides,
+	};
 }

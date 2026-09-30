@@ -2,13 +2,13 @@
 // Lifecycle first, pure naming helpers below, git edge at the bottom.
 use std::path::{Path, PathBuf};
 
-/// One plan checkout: where it lives and which branches it spans.
+/// One plan checkout: where it lives and which branch it spans. The
+/// landing target is never stored: callers resolve the live checkout branch
+/// at decision time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeRecord {
     pub path: PathBuf,
-    pub branch: String,
-    pub base: String,
-    pub main_branch: String,
+    pub worktree_branch: String,
 }
 
 /// Create a worktree for one plan on a fresh branch at `base`.
@@ -17,9 +17,8 @@ pub fn create(
     repo_root: &Path,
     plan_name: &str,
     base: &str,
-    main_branch: &str,
 ) -> Result<WorktreeRecord, WorktreeError> {
-    let branch = branch_name(plan_name);
+    let worktree_branch = branch_name(plan_name);
     let path = worktree_path(repo_root, plan_name);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -30,7 +29,7 @@ pub fn create(
             "worktree",
             "add",
             "-b",
-            branch.as_str(),
+            worktree_branch.as_str(),
             path.to_string_lossy().as_ref(),
             base,
         ],
@@ -42,14 +41,12 @@ pub fn create(
     }
     Ok(WorktreeRecord {
         path,
-        branch,
-        base: base.to_string(),
-        main_branch: main_branch.to_string(),
+        worktree_branch,
     })
 }
 
 /// Tip commit of the main checkout. Snapshot at approval so the worktree
-/// starts exactly where the main branch was.
+/// starts exactly where the checkout was.
 pub fn head_commit(repo_root: &Path) -> Result<String, WorktreeError> {
     Ok(run_git(repo_root, &["rev-parse", "HEAD"])?
         .trim()
@@ -57,24 +54,33 @@ pub fn head_commit(repo_root: &Path) -> Result<String, WorktreeError> {
 }
 
 /// Whether the worktree has uncommitted changes.
-/// A worktree with uncommitted changes never merges.
+/// A worktree with uncommitted changes never lands.
 pub fn is_dirty(path: &Path) -> Result<bool, WorktreeError> {
     let output = run_git(path, &["status", "--porcelain"])?;
     Ok(!output.trim().is_empty())
 }
 
-/// Whether `main_branch` is an ancestor of `branch`: the fast path.
+/// Whether `target_branch` is an ancestor of `worktree_branch`: the fast path.
 /// Exit 0 means ancestor, exit 1 means diverged; other failures are loud.
-pub fn is_ffable(repo_root: &Path, main_branch: &str, branch: &str) -> Result<bool, WorktreeError> {
+pub fn is_ffable(
+    repo_root: &Path,
+    target_branch: &str,
+    worktree_branch: &str,
+) -> Result<bool, WorktreeError> {
     let output = crate::git::command(repo_root)
-        .args(["merge-base", "--is-ancestor", main_branch, branch])
+        .args([
+            "merge-base",
+            "--is-ancestor",
+            target_branch,
+            worktree_branch,
+        ])
         .output()
         .map_err(WorktreeError::Io)?;
     match output.status.code() {
         Some(0) => Ok(true),
         Some(1) => Ok(false),
         _ => Err(WorktreeError::Git {
-            args: format!("merge-base --is-ancestor {main_branch} {branch}"),
+            args: format!("merge-base --is-ancestor {target_branch} {worktree_branch}"),
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         }),
     }
@@ -87,7 +93,7 @@ pub fn is_ffable(repo_root: &Path, main_branch: &str, branch: &str) -> Result<bo
 pub fn remove(
     repo_root: &Path,
     path: &Path,
-    branch: &str,
+    worktree_branch: &str,
     force: bool,
 ) -> Result<(), WorktreeError> {
     if path.exists() {
@@ -98,9 +104,9 @@ pub fn remove(
         let path_str = path.to_string_lossy().to_string();
         args.push(path_str.as_str());
         run_git(repo_root, &args)?;
-        run_git(repo_root, &["branch", "-D", branch])?;
+        run_git(repo_root, &["branch", "-D", worktree_branch])?;
     } else {
-        match run_git(repo_root, &["branch", "-D", branch]) {
+        match run_git(repo_root, &["branch", "-D", worktree_branch]) {
             Ok(_) => {}
             Err(WorktreeError::Git { stderr, .. }) if stderr.contains("not found") => {}
             Err(error) => return Err(error),
@@ -110,39 +116,21 @@ pub fn remove(
     Ok(())
 }
 
-/// Fast-forward `main_branch` to `branch`. Refuses a diverged branch
-/// loud. When the main checkout sits on the main branch, merges there so
-/// the working tree follows; otherwise moves the ref atomically with an
-/// old-value guard so a racing finish fails instead of clobbering.
+/// Fast-forward the live checkout branch to `worktree_branch` with
+/// `git merge --ff-only`. Refuses a diverged branch loud. The target is
+/// always the live checkout branch the caller passes in.
 pub fn fast_forward(
     repo_root: &Path,
-    main_branch: &str,
-    branch: &str,
+    target_branch: &str,
+    worktree_branch: &str,
 ) -> Result<(), WorktreeError> {
-    if !is_ffable(repo_root, main_branch, branch)? {
+    if !is_ffable(repo_root, target_branch, worktree_branch)? {
         return Err(WorktreeError::NotAncestor {
-            main_branch: main_branch.to_string(),
-            branch: branch.to_string(),
+            target_branch: target_branch.to_string(),
+            worktree_branch: worktree_branch.to_string(),
         });
     }
-    let current = crate::branch::current_branch(repo_root).unwrap_or_else(|| "HEAD".to_string());
-    if current == main_branch {
-        run_git(repo_root, &["merge", "--ff-only", branch])?;
-    } else {
-        let old = run_git(repo_root, &["rev-parse", "--verify", main_branch])?;
-        let new = run_git(repo_root, &["rev-parse", "--verify", branch])?;
-        run_git(
-            repo_root,
-            &[
-                "update-ref",
-                "-m",
-                "samokod: fast-forward on plan finish",
-                format!("refs/heads/{main_branch}").as_str(),
-                new.trim(),
-                old.trim(),
-            ],
-        )?;
-    }
+    run_git(repo_root, &["merge", "--ff-only", worktree_branch])?;
     Ok(())
 }
 
@@ -194,8 +182,11 @@ pub fn plan_slug(plan_name: &str) -> String {
 pub enum WorktreeError {
     #[error("git {args} failed: {stderr}")]
     Git { args: String, stderr: String },
-    #[error("{branch} is not a fast-forward of {main_branch}")]
-    NotAncestor { main_branch: String, branch: String },
+    #[error("{worktree_branch} is not a fast-forward of {target_branch}")]
+    NotAncestor {
+        target_branch: String,
+        worktree_branch: String,
+    },
     #[error("worktree io failed: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -248,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn head_commit_reports_main_tip() {
+    fn head_commit_reports_checkout_tip() {
         let dir = git_repo();
         let root = dir.path();
         let expected = head_commit_shell(root);
@@ -301,13 +292,9 @@ mod tests {
     fn create_checks_out_branch_with_empty_samokod() {
         let dir = git_repo();
         let root = dir.path();
-        let main = current_branch(root);
         let base = head_commit(root).expect("head");
-        let record =
-            create(root, "2026-09-26.14-53-26.shiny-feature", &base, &main).expect("create");
-        assert_eq!(record.branch, "samokod/shiny-feature");
-        assert_eq!(record.base, base);
-        assert_eq!(record.main_branch, main);
+        let record = create(root, "2026-09-26.14-53-26.shiny-feature", &base).expect("create");
+        assert_eq!(record.worktree_branch, "samokod/shiny-feature");
         assert!(record.path.is_dir());
         assert!(record.path.join(".samokod").is_dir());
         let branch = current_branch(&record.path);
@@ -318,39 +305,38 @@ mod tests {
     fn dirty_tracks_uncommitted_changes() {
         let dir = git_repo();
         let root = dir.path();
-        let main = current_branch(root);
         let base = head_commit(root).expect("head");
-        let record = create(root, "2026-09-26.14-53-26.dirty-check", &base, &main).expect("create");
+        let record = create(root, "2026-09-26.14-53-26.dirty-check", &base).expect("create");
         assert!(!is_dirty(&record.path).expect("clean"));
         std::fs::write(record.path.join("wip.txt"), "wip\n").expect("write");
         assert!(is_dirty(&record.path).expect("dirty"));
     }
 
     #[test]
-    fn ffable_tracks_main_ancestry() {
+    fn ffable_tracks_target_ancestry() {
         let dir = git_repo();
         let root = dir.path();
-        let main = current_branch(root);
+        let target = current_branch(root);
         let base = head_commit(root).expect("head");
         let name = "2026-09-26.14-53-26.ff-check";
         let branch = branch_name(name);
-        let record = create(root, name, &base, &main).expect("create");
-        assert!(is_ffable(root, &main, &branch).expect("ffable"));
-        commit_file(root, "main.txt", "main\n", "main moves on");
-        assert!(!is_ffable(root, &main, &branch).expect("diverged"));
-        remove(root, &record.path, &record.branch, true).expect("remove");
+        let record = create(root, name, &base).expect("create");
+        assert!(is_ffable(root, &target, &branch).expect("ffable"));
+        commit_file(root, "target.txt", "target\n", "target moves on");
+        assert!(!is_ffable(root, &target, &branch).expect("diverged"));
+        remove(root, &record.path, &record.worktree_branch, true).expect("remove");
     }
 
     #[test]
-    fn fast_forward_advances_main_to_branch() {
+    fn fast_forward_advances_target_to_branch() {
         let dir = git_repo();
         let root = dir.path();
-        let main = current_branch(root);
+        let target = current_branch(root);
         let base = head_commit(root).expect("head");
-        let record = create(root, "2026-09-26.14-53-26.ff-soon", &base, &main).expect("create");
+        let record = create(root, "2026-09-26.14-53-26.ff-soon", &base).expect("create");
         commit_file(&record.path, "work.txt", "work\n", "plan work");
         let tip = head_commit(&record.path).expect("tip");
-        fast_forward(root, &main, &record.branch).expect("ff");
+        fast_forward(root, &target, &record.worktree_branch).expect("ff");
         assert_eq!(head_commit(root).expect("head"), tip);
     }
 
@@ -358,27 +344,26 @@ mod tests {
     fn fast_forward_refuses_diverged_branch() {
         let dir = git_repo();
         let root = dir.path();
-        let main = current_branch(root);
+        let target = current_branch(root);
         let base = head_commit(root).expect("head");
-        let record = create(root, "2026-09-26.14-53-26.no-ff", &base, &main).expect("create");
+        let record = create(root, "2026-09-26.14-53-26.no-ff", &base).expect("create");
         commit_file(&record.path, "work.txt", "work\n", "plan work");
-        commit_file(root, "main.txt", "main\n", "main moves on");
+        commit_file(root, "target.txt", "target\n", "target moves on");
         assert!(matches!(
-            fast_forward(root, &main, &record.branch),
+            fast_forward(root, &target, &record.worktree_branch),
             Err(WorktreeError::NotAncestor { .. })
         ));
-        remove(root, &record.path, &record.branch, true).expect("remove");
+        remove(root, &record.path, &record.worktree_branch, true).expect("remove");
     }
 
     #[test]
     fn remove_deletes_worktree_and_branch() {
         let dir = git_repo();
         let root = dir.path();
-        let main = current_branch(root);
         let base = head_commit(root).expect("head");
-        let record = create(root, "2026-09-26.14-53-26.gone-soon", &base, &main).expect("create");
+        let record = create(root, "2026-09-26.14-53-26.gone-soon", &base).expect("create");
         let path = record.path.clone();
-        let branch = record.branch.clone();
+        let branch = record.worktree_branch.clone();
         remove(root, &path, &branch, false).expect("remove");
         assert!(!path.exists());
         let output = test_git(root, &["branch", "--list", branch.as_str()]);
@@ -394,19 +379,18 @@ mod tests {
     fn prune_reconciles_without_deleting_branches() {
         let dir = git_repo();
         let root = dir.path();
-        let main = current_branch(root);
         let base = head_commit(root).expect("head");
-        let record = create(root, "2026-09-26.14-53-26.stale-check", &base, &main).expect("create");
+        let record = create(root, "2026-09-26.14-53-26.stale-check", &base).expect("create");
         std::fs::remove_dir_all(&record.path).expect("rmdir");
         prune(root).expect("prune");
         // The branch survives pruning; only metadata reconciles.
-        let output = test_git(root, &["branch", "--list", record.branch.as_str()]);
+        let output = test_git(root, &["branch", "--list", record.worktree_branch.as_str()]);
         assert!(
             !String::from_utf8(output.stdout)
                 .expect("utf8")
                 .trim()
                 .is_empty()
         );
-        run_git(root, &["branch", "-D", record.branch.as_str()]).expect("cleanup");
+        run_git(root, &["branch", "-D", record.worktree_branch.as_str()]).expect("cleanup");
     }
 }

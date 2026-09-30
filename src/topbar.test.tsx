@@ -7,7 +7,7 @@ function topBar(status: AgentStatus, options: { onStop?: () => void } = {}) {
 	return (
 		<TopBar
 			repoLabel="~/repo"
-			branch="main"
+			branch="feature"
 			status={status}
 			onStop={options.onStop ?? vi.fn()}
 		/>
@@ -69,7 +69,7 @@ describe("top bar", () => {
 	test("repo chip is static text", () => {
 		const { container } = render(topBar("idle"));
 		const chip = container.querySelector(".repo-static");
-		expect(chip?.textContent).toBe("~/repo · main");
+		expect(chip?.textContent).toBe("~/repo · feature");
 		expect(
 			screen.queryByRole("button", { name: /repo/ }),
 		).not.toBeInTheDocument();

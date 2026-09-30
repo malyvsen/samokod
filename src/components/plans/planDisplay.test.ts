@@ -18,16 +18,16 @@ function plan(
 }
 
 describe("latestRole", () => {
-	test("prefers merging over executing over scoping", () => {
+	test("prefers landing over executing over scoping", () => {
 		expect(
 			latestRole(
-				plan("a", "merging", [
+				plan("a", "landing", [
 					testStatus("scoping"),
 					testStatus("executing"),
-					testStatus("merging"),
+					testStatus("landing"),
 				]),
 			),
-		).toBe("merging");
+		).toBe("landing");
 		expect(
 			latestRole(
 				plan("a", "executing", [
@@ -137,6 +137,6 @@ describe("roleLabel", () => {
 	test("capitalizes roles", () => {
 		expect(roleLabel("scoping")).toBe("Scoping");
 		expect(roleLabel("executing")).toBe("Executing");
-		expect(roleLabel("merging")).toBe("Merging");
+		expect(roleLabel("landing")).toBe("Landing");
 	});
 });
