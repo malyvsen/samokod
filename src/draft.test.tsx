@@ -143,12 +143,16 @@ describe("draft bubble in chat", () => {
 		expect(await screen.findByRole("textbox")).toHaveTextContent("DRAFT-A");
 		await user.keyboard("!");
 		await user.click(
-			await screen.findByRole("button", { name: "Second Scoping" }),
+			await screen.findByRole("button", {
+				name: "Second, scoping, opens Scoping",
+			}),
 		);
 		expect(await screen.findByRole("textbox")).toHaveTextContent("DRAFT-B");
 		await user.keyboard("?");
 		await user.click(
-			await screen.findByRole("button", { name: "First Scoping" }),
+			await screen.findByRole("button", {
+				name: "First, scoping, opens Scoping",
+			}),
 		);
 		expect(await screen.findByRole("textbox")).toHaveTextContent("DRAFT-A!");
 		expect(api.scopingDraft).toHaveBeenCalledTimes(2);

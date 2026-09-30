@@ -5,8 +5,8 @@ import type {
 	WorktreeStatus,
 } from "../../types";
 import { sameSession } from "../../types";
+import { roleLabel } from "./planDisplay";
 import { actionKind, RowActions } from "./RowActions";
-import { dotClass, sessionLabel } from "./sessionDot";
 
 export function SessionRow({
 	planName,
@@ -37,7 +37,6 @@ export function SessionRow({
 }) {
 	const key: SessionKey = { plan: planName, role: status.role };
 	const isSelected = sameSession(selected, key);
-	const dot = dotClass(phase, status.role, status);
 	const kind = actionKind(phase, status.role);
 	return (
 		<div className={`session${isSelected ? " selected" : ""}`}>
@@ -45,10 +44,9 @@ export function SessionRow({
 				className="srow"
 				type="button"
 				onClick={() => onSelect(key)}
-				aria-label={`${planTitle} ${sessionLabel(status.role)}`}
+				aria-label={`${planTitle} ${roleLabel(status.role)}`}
 			>
-				<span className={`dot ${dot}`} aria-hidden="true" />
-				<span className="slabel">{sessionLabel(status.role)}</span>
+				<span className="slabel">{roleLabel(status.role)}</span>
 			</button>
 			{kind === "scoping" ? (
 				<RowActions

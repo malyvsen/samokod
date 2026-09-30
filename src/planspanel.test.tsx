@@ -66,6 +66,24 @@ describe("plans panel", () => {
 		expect(props.onNewPlan).toHaveBeenCalledTimes(1);
 	});
 
+	test("renders all five sections in fixed order", () => {
+		render(
+			<PlansPanel
+				{...panelProps([executingPlan(), scopingPlan(), mergingPlan()])}
+			/>,
+		);
+		const headers = screen
+			.getAllByText(/^(SCOPING|EXECUTING|MERGING|COMPLETED|CANCELLED)$/)
+			.map((node) => node.textContent);
+		expect(headers).toEqual([
+			"SCOPING",
+			"EXECUTING",
+			"MERGING",
+			"COMPLETED",
+			"CANCELLED",
+		]);
+	});
+
 	test("derives the plan name from the title with an Untitled fallback", () => {
 		render(
 			<PlansPanel
@@ -81,18 +99,32 @@ describe("plans panel", () => {
 		expect(screen.getByText("Untitled")).toBeInTheDocument();
 	});
 
-	test("an approved plan lists both its sessions", () => {
-		render(<PlansPanel {...panelProps([executingPlan()])} />);
+	test("collapsed plans expose only their header", () => {
+		render(<PlansPanel {...panelProps([executingPlan()], null)} />);
+		expect(screen.getByText("Shiny")).toBeInTheDocument();
+		expect(screen.queryByText("Scoping")).toBeNull();
+		expect(screen.queryByText("Executing")).toBeNull();
+	});
+
+	test("an approved plan lists both its sessions once expanded", () => {
+		render(
+			<PlansPanel
+				{...panelProps([executingPlan()], {
+					plan: "2026-09-25.10-54-59.slug",
+					role: "executing",
+				})}
+			/>,
+		);
 		expect(screen.getByText("Scoping")).toBeInTheDocument();
 		expect(screen.getByText("Executing")).toBeInTheDocument();
 	});
 
-	test("dots follow working, approval, and failure flags", () => {
+	test("only plans waiting on the user show attention", () => {
 		const { container } = render(
 			<PlansPanel
 				{...panelProps([
-					testEntryWith("run", "scoping", "Run", true, [
-						testStatus("scoping", { working: true }),
+					testEntryWith("idle", "scoping", "Idle", true, [
+						testStatus("scoping"),
 					]),
 					testEntryWith("wait", "scoping", "Wait", true, [
 						testStatus("scoping", { approval: true }),
@@ -100,23 +132,9 @@ describe("plans panel", () => {
 					testEntryWith("broke", "scoping", "Broke", true, [
 						testStatus("scoping", { failed: true }),
 					]),
-					testEntryWith("idle", "scoping", "Idle", true, [
-						testStatus("scoping"),
+					testEntryWith("run", "scoping", "Run", true, [
+						testStatus("scoping", { working: true }),
 					]),
-				])}
-			/>,
-		);
-		expect(container.querySelector(".dot.running")).not.toBeNull();
-		expect(container.querySelector(".dot.approval")).not.toBeNull();
-		expect(container.querySelector(".dot.failed")).not.toBeNull();
-		expect(container.querySelector(".dot.input")).not.toBeNull();
-	});
-
-	test("inactive rows stay gray", () => {
-		const { container } = render(
-			<PlansPanel
-				{...panelProps([
-					executingPlan(),
 					testEntryWith("done", "completed", "Done", true, [
 						testStatus("scoping"),
 						testStatus("executing"),
@@ -124,12 +142,78 @@ describe("plans panel", () => {
 				])}
 			/>,
 		);
-		const doneDots = container.querySelectorAll(".dot.done");
-		expect(doneDots.length).toBeGreaterThanOrEqual(3);
+		expect(container.querySelector(".adot.idle")).not.toBeNull();
+		expect(container.querySelector(".adot.approval")).not.toBeNull();
+		expect(container.querySelector(".adot.failed")).not.toBeNull();
+		expect(container.querySelectorAll(".adot").length).toBe(3);
+	});
+
+	test("attention dots name their cause", () => {
+		const { container } = render(
+			<PlansPanel
+				{...panelProps([
+					testEntryWith("idle", "scoping", "Idle", true, [
+						testStatus("scoping"),
+					]),
+					testEntryWith("wait", "scoping", "Wait", true, [
+						testStatus("scoping", { approval: true }),
+					]),
+					testEntryWith("broke", "scoping", "Broke", true, [
+						testStatus("scoping", { failed: true }),
+					]),
+				])}
+			/>,
+		);
+		const tips = [...container.querySelectorAll(".adot")].map((node) =>
+			node.getAttribute("title"),
+		);
+		expect(tips).toEqual([
+			"needs input",
+			"needs approval",
+			"failed, needs a response",
+		]);
+	});
+
+	test("headers name the title, phase, and target agent", () => {
+		render(<PlansPanel {...panelProps([executingPlan()], null)} />);
+		expect(
+			screen.getByRole("button", {
+				name: "Shiny, executing, opens Executing",
+			}),
+		).toBeInTheDocument();
+	});
+
+	test("header clicks select the latest role", async () => {
+		const user = userEvent.setup();
+		for (const [plan, role] of [
+			[scopingPlan(), "scoping"],
+			[executingPlan(), "executing"],
+			[mergingPlan(), "merging"],
+		] as const) {
+			const props = panelProps([plan], null);
+			const { unmount } = render(<PlansPanel {...props} />);
+			await user.click(
+				screen.getByRole("button", {
+					name: new RegExp(`opens ${role}$`, "i"),
+				}),
+			);
+			expect(props.onSelect).toHaveBeenCalledWith({
+				plan: plan.name,
+				role,
+			});
+			unmount();
+		}
 	});
 
 	test("scoping rows offer cancel and execute", () => {
-		render(<PlansPanel {...panelProps([scopingPlan()])} />);
+		render(
+			<PlansPanel
+				{...panelProps([scopingPlan()], {
+					plan: "2026-09-25.10-54-59",
+					role: "scoping",
+				})}
+			/>,
+		);
 		const row = screen
 			.getByRole("button", { name: "Parallel sessions Scoping" })
 			.closest(".session");
@@ -146,7 +230,14 @@ describe("plans panel", () => {
 	});
 
 	test("executing rows offer cancel and done", () => {
-		render(<PlansPanel {...panelProps([executingPlan()])} />);
+		render(
+			<PlansPanel
+				{...panelProps([executingPlan()], {
+					plan: "2026-09-25.10-54-59.slug",
+					role: "executing",
+				})}
+			/>,
+		);
 		const row = screen
 			.getByRole("button", { name: "Shiny Executing" })
 			.closest(".session");
@@ -173,7 +264,14 @@ describe("plans panel", () => {
 			[testStatus("scoping"), testStatus("executing")],
 			testWorktree({ ffable: false }),
 		);
-		render(<PlansPanel {...panelProps([diverged])} />);
+		render(
+			<PlansPanel
+				{...panelProps([diverged], {
+					plan: "2026-09-25.10-54-59.slug",
+					role: "executing",
+				})}
+			/>,
+		);
 		expect(
 			screen.getByRole("button", {
 				name: "Rebase 2026-09-25.10-54-59.slug onto latest main",
@@ -195,7 +293,14 @@ describe("plans panel", () => {
 			[testStatus("scoping"), testStatus("executing")],
 			testWorktree({ dirty: true }),
 		);
-		render(<PlansPanel {...panelProps([dirty])} />);
+		render(
+			<PlansPanel
+				{...panelProps([dirty], {
+					plan: "2026-09-25.10-54-59.slug",
+					role: "executing",
+				})}
+			/>,
+		);
 		const merge = screen.getByRole("button", {
 			name: "Merge 2026-09-25.10-54-59.slug to main",
 		});
@@ -206,7 +311,14 @@ describe("plans panel", () => {
 	});
 
 	test("merging plans list three sessions with cancel and finish", () => {
-		render(<PlansPanel {...panelProps([mergingPlan()])} />);
+		render(
+			<PlansPanel
+				{...panelProps([mergingPlan()], {
+					plan: "2026-09-25.10-54-59.slug",
+					role: "merging",
+				})}
+			/>,
+		);
 		expect(screen.getByText("Scoping")).toBeInTheDocument();
 		expect(screen.getByText("Executing")).toBeInTheDocument();
 		expect(screen.getByText("Merging")).toBeInTheDocument();
@@ -225,48 +337,83 @@ describe("plans panel", () => {
 		).toBeInTheDocument();
 	});
 
+	test("buttons appear only on the expanded active agent", () => {
+		const { container } = render(
+			<PlansPanel
+				{...panelProps([scopingPlan(), executingPlan()], {
+					plan: "2026-09-25.10-54-59.slug",
+					role: "executing",
+				})}
+			/>,
+		);
+		expect(container.querySelectorAll(".sbtn").length).toBeGreaterThan(0);
+		const collapsed = screen
+			.getByRole("button", {
+				name: "Parallel sessions, scoping, opens Scoping",
+			})
+			.closest(".plan-group");
+		if (collapsed === null) throw new Error("plan missing");
+		expect(
+			within(collapsed as HTMLElement).queryByRole("button", {
+				name: /Cancel|Send|Merge/,
+			}),
+		).toBeNull();
+	});
+
 	test("inactive and finished rows have no buttons", () => {
 		render(
 			<PlansPanel
-				{...panelProps([
-					executingPlan(),
-					testEntryWith("done", "completed", "Done", true, [
-						testStatus("scoping"),
-						testStatus("executing"),
-					]),
-					testEntryWith("drop", "cancelled", "Drop", false, [
-						testStatus("scoping"),
-					]),
-				])}
+				{...panelProps(
+					[
+						executingPlan(),
+						testEntryWith("done", "completed", "Done", true, [
+							testStatus("scoping"),
+							testStatus("executing"),
+						]),
+						testEntryWith("drop", "cancelled", "Drop", false, [
+							testStatus("scoping"),
+						]),
+					],
+					{ plan: "2026-09-25.10-54-59.slug", role: "executing" },
+				)}
 			/>,
 		);
 		const inactive = screen
 			.getByRole("button", { name: "Shiny Scoping" })
 			.closest(".session");
-		const done = screen
-			.getByRole("button", { name: "Done Executing" })
-			.closest(".session");
-		const dropped = screen
-			.getByRole("button", { name: "Drop Scoping" })
-			.closest(".session");
-		for (const row of [inactive, done, dropped]) {
-			if (row === null) throw new Error("row missing");
-			expect(
-				within(row as HTMLElement).queryByRole("button", {
-					name: /Cancel|Send|Mark/,
-				}),
-			).toBeNull();
-		}
+		if (inactive === null) throw new Error("row missing");
+		expect(
+			within(inactive as HTMLElement).queryByRole("button", {
+				name: /Cancel|Send|Mark/,
+			}),
+		).toBeNull();
+		const { container } = render(
+			<PlansPanel
+				{...panelProps(
+					[
+						testEntryWith("done", "completed", "Done", true, [
+							testStatus("scoping"),
+							testStatus("executing"),
+						]),
+					],
+					{ plan: "done", role: "executing" },
+				)}
+			/>,
+		);
+		expect(container.querySelectorAll(".sbtn").length).toBe(0);
 	});
 
 	test("execute stays disabled without plan.md", () => {
 		render(
 			<PlansPanel
-				{...panelProps([
-					testEntryWith("bare", "scoping", "Bare", false, [
-						testStatus("scoping"),
-					]),
-				])}
+				{...panelProps(
+					[
+						testEntryWith("bare", "scoping", "Bare", false, [
+							testStatus("scoping"),
+						]),
+					],
+					{ plan: "bare", role: "scoping" },
+				)}
 			/>,
 		);
 		expect(
@@ -275,7 +422,10 @@ describe("plans panel", () => {
 	});
 
 	test("row actions call back with the session key", async () => {
-		const props = panelProps([scopingPlan()]);
+		const props = panelProps([scopingPlan()], {
+			plan: "2026-09-25.10-54-59",
+			role: "scoping",
+		});
 		const user = userEvent.setup();
 		render(<PlansPanel {...props} />);
 		await user.click(
@@ -297,7 +447,10 @@ describe("plans panel", () => {
 	});
 
 	test("row actions never act on the wrong session", async () => {
-		const props = panelProps([scopingPlan(), executingPlan()]);
+		const props = panelProps([scopingPlan(), executingPlan()], {
+			plan: "2026-09-25.10-54-59.slug",
+			role: "executing",
+		});
 		const user = userEvent.setup();
 		render(<PlansPanel {...props} />);
 		await user.click(
@@ -321,7 +474,10 @@ describe("plans panel", () => {
 			[testStatus("scoping"), testStatus("executing")],
 			testWorktree({ ffable: false }),
 		);
-		const props = panelProps([diverged]);
+		const props = panelProps([diverged], {
+			plan: "2026-09-25.10-54-59.slug",
+			role: "executing",
+		});
 		const user = userEvent.setup();
 		render(<PlansPanel {...props} />);
 		await user.click(
@@ -338,7 +494,7 @@ describe("plans panel", () => {
 
 	test("selecting a row marks it selected", async () => {
 		const props = panelProps([scopingPlan(), executingPlan()], {
-			plan: "2026-09-25.10-54-59",
+			plan: "2026-09-25.10-54-59.slug",
 			role: "scoping",
 		});
 		const user = userEvent.setup();
@@ -352,7 +508,12 @@ describe("plans panel", () => {
 
 	test("action buttons carry no tooltips", () => {
 		const { container } = render(
-			<PlansPanel {...panelProps([scopingPlan(), executingPlan()])} />,
+			<PlansPanel
+				{...panelProps([scopingPlan(), executingPlan()], {
+					plan: "2026-09-25.10-54-59.slug",
+					role: "executing",
+				})}
+			/>,
 		);
 		for (const button of container.querySelectorAll(".sbtn")) {
 			expect(button.getAttribute("title")).toBeNull();
@@ -364,11 +525,17 @@ describe("plans panel", () => {
 		}
 	});
 
-	test("the sharp-corners reset leaves dots circular in CSS", () => {
+	test("expanded agents render muted in CSS", () => {
+		const css = readFileSync("src/App.css", "utf8");
+		const label = /\.session\s+\.slabel\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(label).toContain("#9d9a92");
+	});
+
+	test("the sharp-corners reset leaves attention dots circular in CSS", () => {
 		const css = readFileSync("src/App.css", "utf8");
 		expect(css).not.toContain(".app *");
 		const reset = /\.app[^{]*\{[^}]*border-radius[^}]*\}/.exec(css)?.[0] ?? "";
-		expect(reset).toContain(".dot");
+		expect(reset).toContain(".adot");
 	});
 
 	test("the select button fills the whole row in CSS", () => {

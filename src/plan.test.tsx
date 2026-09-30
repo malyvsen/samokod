@@ -248,13 +248,17 @@ describe("plan", () => {
 		});
 		emit({ type: "spend_tick", session: bbb, cost: 1.5, ctx_pct: 10 });
 		expect(screen.getByText("aaa chat")).toBeInTheDocument();
-		await user.click(screen.getByRole("button", { name: "Beta Scoping" }));
+		await user.click(
+			screen.getByRole("button", { name: "Beta, scoping, opens Scoping" }),
+		);
 		expect(api.selectPlan).toHaveBeenCalledWith(bbb);
 		await screen.findByText("bbb chat");
 		expect(screen.queryByText("aaa chat")).not.toBeInTheDocument();
 		expect(screen.getByText("Beta todo")).toBeInTheDocument();
 		expect(screen.getByText("$1.50")).toBeInTheDocument();
-		await user.click(screen.getByRole("button", { name: "Alpha Scoping" }));
+		await user.click(
+			screen.getByRole("button", { name: "Alpha, scoping, opens Scoping" }),
+		);
 		await screen.findByText("aaa chat");
 		expect(screen.queryByText("Beta todo")).not.toBeInTheDocument();
 	});
@@ -283,7 +287,9 @@ describe("plan", () => {
 		emit({ type: "agent_text", session: aaa, chunk: "aaa ephemeral" });
 		emit({ type: "turn_done", session: aaa });
 		expect(screen.getByText("aaa ephemeral")).toBeInTheDocument();
-		await user.click(screen.getByRole("button", { name: "Beta Scoping" }));
+		await user.click(
+			screen.getByRole("button", { name: "Beta, scoping, opens Scoping" }),
+		);
 		expect(api.selectPlan).toHaveBeenCalledWith({
 			plan: "bbb",
 			role: "scoping",

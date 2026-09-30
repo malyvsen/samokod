@@ -38,7 +38,7 @@ body {
 	line-height: 1.5;
 }
 
-.app :where(:not(.dot)) {
+.app :where(:not(.adot)) {
 	border-radius: 0;
 }
 
@@ -976,16 +976,37 @@ body {
 	margin-bottom: 10px;
 }
 
+.sect-head {
+	font-size: 11px;
+	letter-spacing: 0.14em;
+	color: #8f8c85;
+	padding: 12px 2px 4px;
+}
+
+.plans > .sect-head:first-of-type {
+	padding-top: 0;
+}
+
 .plan-name {
 	position: relative;
 	display: flex;
-	gap: 6px;
-	align-items: baseline;
+	gap: 8px;
+	align-items: center;
+	width: 100%;
+	font: inherit;
 	font-size: 11px;
 	letter-spacing: 0.1em;
 	color: #fff;
+	background: transparent;
+	border: 0;
 	padding: 6px 2px 2px;
 	white-space: nowrap;
+	cursor: pointer;
+	text-align: left;
+}
+
+.plan-name:hover {
+	background: rgba(255, 255, 255, 0.04);
 }
 
 .plan-name .ptitle {
@@ -996,11 +1017,23 @@ body {
 	white-space: nowrap;
 }
 
-.plan-name .phase-tag {
+.plan-name .adot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
 	flex: none;
-	color: #8f8c85;
-	letter-spacing: 0.08em;
-	font-size: 10px;
+}
+
+.plan-name .adot.idle {
+	background: #57c8ff;
+}
+
+.plan-name .adot.approval {
+	background: #ffd98a;
+}
+
+.plan-name .adot.failed {
+	background: #ff6b6b;
 }
 
 .plan-name[data-full]:hover::after {
@@ -1060,37 +1093,7 @@ body {
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-}
-
-.session .dot {
-	width: 8px;
-	height: 8px;
-	border-radius: 50%;
-	flex: none;
-}
-
-.session .dot.running {
-	background: #7dffc4;
-	animation: pulse 1.6s ease-in-out infinite;
-}
-
-.session .dot.input {
-	background: #57c8ff;
-	animation: pulse 1.6s ease-in-out infinite;
-}
-
-.session .dot.approval {
-	background: #ffd98a;
-	animation: pulse 1.6s ease-in-out infinite;
-}
-
-.session .dot.failed {
-	background: #ff6b6b;
-	animation: pulse 1.6s ease-in-out infinite;
-}
-
-.session .dot.done {
-	background: #8f8c85;
+	color: #9d9a92;
 }
 
 .sbtn {
