@@ -3,7 +3,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use tauri::{AppHandle, Emitter};
 
@@ -30,9 +29,9 @@ pub(crate) struct State {
     branch: String,
     branch_watch: Option<notify::RecommendedWatcher>,
     awake: Option<awake::Guard>,
-    /// Last user-sent prompt per plan directory name. Drives plan sorting;
-    /// migrated across renames so an approved plan keeps its recency.
-    activity: HashMap<String, Instant>,
+    /// Plans with a sent user prompt. Feeds the empty-scoping gate;
+    /// carried across renames with the plan.
+    prompted: HashSet<String>,
     /// Reserved scoping timestamp with no directory yet. Listed as a
     /// normal `Untitled` entry until the first `send_prompt` materializes
     /// it; vanishing on cancel or select-away leaves no trace.
@@ -112,7 +111,7 @@ pub(crate) fn is_empty_scoping(state: &State, repo_root: &Path, name: &str) -> b
     if plan.has_plan_md(repo_root) {
         return false;
     }
-    if state.activity.contains_key(name) {
+    if state.prompted.contains(name) {
         return false;
     }
     let key = SessionKey {
@@ -133,7 +132,7 @@ pub(crate) fn is_empty_scoping(state: &State, repo_root: &Path, name: &str) -> b
 /// Discard an empty scoping session without a `cancelled/` trace:
 /// `remove_dir_all` when present (`NotFound` is fine, other errors are
 /// logged per the preserve-evidence rule), plus the `LiveSession` and
-/// `activity` entry. Clears `pending_scoping` on match. Caller owns the
+/// `prompted` entry. Clears `pending_scoping` on match. Caller owns the
 /// lock.
 pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str) {
     let plan = plans::PlanRef {
@@ -152,7 +151,7 @@ pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str) {
         plan: name.to_string(),
         role: SessionRole::Scoping,
     });
-    state.activity.remove(name);
+    state.prompted.remove(name);
     if state.pending_scoping.as_deref() == Some(name) {
         state.pending_scoping = None;
     }
@@ -428,7 +427,7 @@ impl AgentManager {
             }
         }
         self.drop_live(&session).await;
-        self.move_activity(&from.name, &next.name);
+        self.carry_prompted(&from.name, &next.name);
         let mut plan = ActivePlan::executing(next.name.clone());
         // The role goes out hidden below, so later turns never prefix again.
         plan.prefixed = true;
@@ -437,7 +436,7 @@ impl AgentManager {
             self.spawn_session(&repo_root, &branch, plan, agent).await?;
         let plan_dir_abs = next.path(&repo_root).to_string_lossy().to_string();
         let text = opencode::executing_first_message(&plan_dir_abs);
-        self.touch_activity(&next.name);
+        self.mark_prompted(&next.name);
         self.start_turn(connection, session_id, key, text).await?;
         Ok(self.plans_update())
     }
@@ -483,7 +482,7 @@ impl AgentManager {
             _ => unreachable!("gated on executing or merging above"),
         };
         self.drop_plan_lives(&from.name).await;
-        self.move_activity(&from.name, &next.name);
+        self.carry_prompted(&from.name, &next.name);
         self.select_key(SessionKey {
             plan: next.name,
             role: session.role,
@@ -528,7 +527,7 @@ impl AgentManager {
             &status.path.to_string_lossy(),
             &plan_md_abs,
         );
-        self.touch_activity(&next.name);
+        self.mark_prompted(&next.name);
         self.start_turn(connection, session_id, key, text).await?;
         Ok(self.plans_update())
     }
@@ -559,7 +558,6 @@ impl AgentManager {
                         let plans = plans_list::sorted_entries(
                             &repo_root,
                             &state.sessions,
-                            &state.activity,
                             state.pending_scoping.as_deref(),
                             &state.worktrees,
                             &state.branch,
@@ -602,7 +600,7 @@ impl AgentManager {
         } else {
             self.drop_plan_lives(&from.name).await;
         }
-        self.move_activity(&from.name, &next.name);
+        self.carry_prompted(&from.name, &next.name);
         self.select_key(SessionKey {
             plan: next.name,
             role: session.role,
@@ -656,9 +654,9 @@ impl AgentManager {
 
     /// Prefilled scoping draft: the scoping template with its plan dir
     /// filled in, returned only while the session is fresh under the
-    /// `is_empty_scoping` gate (no `plan.md`, no activity, no sent prompt).
-    /// Non-fresh and non-scoping sessions get `None`; missing repos and
-    /// gone plans are errors, never silent fallbacks.
+    /// `is_empty_scoping` gate. Non-fresh and non-scoping sessions get
+    /// `None`; missing repos and gone plans are errors, never silent
+    /// fallbacks.
     pub fn scoping_draft(&self, session: SessionKey) -> Result<Option<String>, AgentError> {
         let Some(state_guard) = lock_state(&self.state) else {
             return Err(AgentError::RequestFailed {
@@ -885,7 +883,6 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::path::Path;
-    use std::time::Instant;
 
     #[test]
     fn config_views_keep_agent_ordering() {
@@ -1098,10 +1095,6 @@ mod tests {
         }
     }
 
-    fn empty_activity() -> HashMap<String, Instant> {
-        HashMap::new()
-    }
-
     #[test]
     fn entries_sort_scoping_first_then_rest() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1112,14 +1105,7 @@ mod tests {
         write_plan_dir(root, plans::Phase::Merging, "m", Some("M"));
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
         write_plan_dir(root, plans::Phase::Scoping, "s", Some("S"));
-        let entries = sorted_entries(
-            root,
-            &HashMap::new(),
-            &empty_activity(),
-            None,
-            &HashMap::new(),
-            "main",
-        );
+        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new(), "main");
         let phases: Vec<plans::Phase> = entries.iter().map(|entry| entry.phase).collect();
         assert_eq!(
             phases,
@@ -1135,42 +1121,27 @@ mod tests {
     }
 
     #[test]
-    fn activity_beats_newer_mtime() {
+    fn arrival_orders_newest_first() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
-        write_plan_dir(root, plans::Phase::Scoping, "old", Some("Old"));
-        write_plan_dir(root, plans::Phase::Scoping, "new", Some("New"));
-        let mut activity = empty_activity();
-        activity.insert("old".to_string(), Instant::now());
-        let entries = sorted_entries(
-            root,
-            &HashMap::new(),
-            &activity,
-            None,
-            &HashMap::new(),
-            "main",
-        );
+        plans::materialize_scoping(root, "2026-09-26.08-41-03").expect("old");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("new");
+        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new(), "main");
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].name, "old");
-        assert_eq!(entries[1].name, "new");
+        assert_eq!(entries[0].name, "2026-09-26.08-41-04");
+        assert_eq!(entries[1].name, "2026-09-26.08-41-03");
     }
 
     #[test]
-    fn idle_plans_fall_back_to_newest_first() {
+    fn unstamped_plans_fall_back_to_name_descending() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Scoping, "first", Some("First"));
         write_plan_dir(root, plans::Phase::Scoping, "second", Some("Second"));
-        let entries = sorted_entries(
-            root,
-            &HashMap::new(),
-            &empty_activity(),
-            None,
-            &HashMap::new(),
-            "main",
-        );
+        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new(), "main");
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "second");
         assert_eq!(entries[1].name, "first");
@@ -1182,14 +1153,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Scoping, "bare", None);
-        let entries = sorted_entries(
-            root,
-            &HashMap::new(),
-            &empty_activity(),
-            None,
-            &HashMap::new(),
-            "main",
-        );
+        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new(), "main");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "Untitled");
         assert_eq!(entries[0].sessions.len(), 1);
@@ -1201,14 +1165,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
-        let entries = sorted_entries(
-            root,
-            &HashMap::new(),
-            &empty_activity(),
-            None,
-            &HashMap::new(),
-            "main",
-        );
+        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new(), "main");
         assert_eq!(
             most_recent_key(&entries),
             Some(SessionKey {
@@ -1225,14 +1182,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Merging, "m", Some("M"));
-        let entries = sorted_entries(
-            root,
-            &HashMap::new(),
-            &empty_activity(),
-            None,
-            &HashMap::new(),
-            "main",
-        );
+        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new(), "main");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 3);
         assert_eq!(
@@ -1271,14 +1221,7 @@ mod tests {
         live.working = true;
         live.approval = true;
         let sessions = HashMap::from([(key, live)]);
-        let entries = sorted_entries(
-            root,
-            &sessions,
-            &empty_activity(),
-            None,
-            &HashMap::new(),
-            "main",
-        );
+        let entries = sorted_entries(root, &sessions, None, &HashMap::new(), "main");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 2);
         let executing = entries[0]
@@ -1304,14 +1247,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Cancelled, "c", Some("C"));
-        let entries = sorted_entries(
-            root,
-            &HashMap::new(),
-            &empty_activity(),
-            None,
-            &HashMap::new(),
-            "main",
-        );
+        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new(), "main");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 1);
         assert_eq!(entries[0].sessions[0].role, SessionRole::Scoping);
@@ -1331,14 +1267,7 @@ mod tests {
             .path(root)
             .exists()
         );
-        let entries = sorted_entries(
-            root,
-            &HashMap::new(),
-            &empty_activity(),
-            Some(name),
-            &HashMap::new(),
-            "main",
-        );
+        let entries = sorted_entries(root, &HashMap::new(), Some(name), &HashMap::new(), "main");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, name);
         assert_eq!(entries[0].title, "Untitled");
@@ -1367,7 +1296,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_scoping_needs_no_plan_md_no_activity_no_prompt() {
+    fn empty_scoping_needs_no_plan_md_no_prompt() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
@@ -1376,9 +1305,9 @@ mod tests {
         assert!(is_empty_scoping(&state, root, name));
         plans::materialize_scoping(root, name).expect("materialize");
         assert!(is_empty_scoping(&state, root, name));
-        state.activity.insert(name.to_string(), Instant::now());
+        state.prompted.insert(name.to_string());
         assert!(!is_empty_scoping(&state, root, name));
-        state.activity.remove(name);
+        state.prompted.remove(name);
         let key = SessionKey {
             plan: name.to_string(),
             role: SessionRole::Scoping,
@@ -1458,7 +1387,7 @@ mod tests {
             plan: "2026-09-26.08-41-04".to_string(),
             role: SessionRole::Scoping,
         };
-        state.activity.insert(other.plan.clone(), Instant::now());
+        state.prompted.insert(other.plan.clone());
         assert_eq!(scoping_draft_for(&state, root, &other).expect("gate"), None);
 
         let mut state = State::default();
@@ -1496,7 +1425,7 @@ mod tests {
     }
 
     #[test]
-    fn vanish_removes_dir_session_activity_and_pending() {
+    fn vanish_removes_dir_session_prompt_and_pending() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
@@ -1506,7 +1435,7 @@ mod tests {
             pending_scoping: Some(name.to_string()),
             ..Default::default()
         };
-        state.activity.insert(name.to_string(), Instant::now());
+        state.prompted.insert(name.to_string());
         state.sessions.insert(
             SessionKey {
                 plan: name.to_string(),
@@ -1527,7 +1456,7 @@ mod tests {
             .exists()
         );
         assert!(state.sessions.is_empty());
-        assert!(!state.activity.contains_key(name));
+        assert!(!state.prompted.contains(name));
         assert_eq!(state.pending_scoping, None);
         vanish_scoping(&mut state, root, "2026-09-26.08-41-99");
     }
@@ -1627,7 +1556,6 @@ mod tests {
         let entries = sorted_entries(
             root,
             &state.sessions,
-            &state.activity,
             state.pending_scoping.as_deref(),
             &HashMap::new(),
             "main",

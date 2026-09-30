@@ -1,9 +1,8 @@
 // Plans list: sorting, per-session statuses, and the payloads pushed to
-// the frontend after every transition, activity, or title change.
+// the frontend after every prompt, transition, or title change.
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
-use std::time::Instant;
 
 use tauri::AppHandle;
 
@@ -26,7 +25,6 @@ impl AgentManager {
         let plans = sorted_entries(
             &repo_root,
             &state.sessions,
-            &state.activity,
             state.pending_scoping.as_deref(),
             &state.worktrees,
             &state.branch,
@@ -49,14 +47,13 @@ impl AgentManager {
     }
 
     /// Fresh plans payload with the current selection. Emitted after every
-    /// transition, activity, or title change.
+    /// prompt, transition, or title change.
     pub(crate) fn plans_update(&self) -> PlansUpdate {
         let state = self.state.lock().expect("state poisoned");
         let repo_root = state.repo_root.clone().unwrap_or_default();
         let plans = sorted_entries(
             &repo_root,
             &state.sessions,
-            &state.activity,
             state.pending_scoping.as_deref(),
             &state.worktrees,
             &state.branch,
@@ -89,20 +86,20 @@ impl AgentManager {
         );
     }
 
-    /// Record one user prompt for plan sorting. Pure timestamp edge.
-    pub(crate) fn touch_activity(&self, plan: &str) {
+    /// Record one user prompt for the empty-scoping gate.
+    pub(crate) fn mark_prompted(&self, plan: &str) {
         if let Some(mut state) = lock_state(&self.state) {
-            state.activity.insert(plan.to_string(), Instant::now());
+            state.prompted.insert(plan.to_string());
         }
         self.push_plans();
     }
 
-    /// Carry recency across a plan rename. Pure timestamp edge.
-    pub(crate) fn move_activity(&self, from: &str, to: &str) {
+    /// Carry the gate flag across a plan rename.
+    pub(crate) fn carry_prompted(&self, from: &str, to: &str) {
         if let Some(mut state) = lock_state(&self.state)
-            && let Some(when) = state.activity.remove(from)
+            && state.prompted.remove(from)
         {
-            state.activity.insert(to.to_string(), when);
+            state.prompted.insert(to.to_string());
         }
     }
 
@@ -119,15 +116,13 @@ impl AgentManager {
     }
 }
 
-/// Plans sorted by phase, then most recent user activity first. Before any
-/// activity, `plan.md` modification time newest first, falling back to the
-/// directory name (which starts with a creation timestamp). A reserved
-/// pending name appends a synthetic scoping `PlanRef` rendering like an
-/// on-disk bare plan; with no mtime it orders by name, newest first.
+/// Plans sorted by phase, then phase-entry arrival newest first, then
+/// name descending. A reserved pending name appends a synthetic scoping
+/// `PlanRef` rendering like an on-disk bare plan; with no timestamp it
+/// orders by name, newest first.
 pub(crate) fn sorted_entries(
     repo_root: &Path,
     sessions: &HashMap<SessionKey, LiveSession>,
-    activity: &HashMap<String, Instant>,
     pending: Option<&str>,
     worktrees: &HashMap<String, crate::worktrees::WorktreeRecord>,
     main_branch: &str,
@@ -147,16 +142,9 @@ pub(crate) fn sorted_entries(
         plans::phase_rank(left.phase)
             .cmp(&plans::phase_rank(right.phase))
             .then_with(|| {
-                // Active plans sort before idle ones; recency decides
-                // within each group.
-                match (activity.get(&left.name), activity.get(&right.name)) {
-                    (Some(left_at), Some(right_at)) => right_at.cmp(left_at),
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (None, None) => plans::plan_mtime(repo_root, right)
-                        .cmp(&plans::plan_mtime(repo_root, left))
-                        .then_with(|| right.name.cmp(&left.name)),
-                }
+                plans::arrival_ms(repo_root, right)
+                    .cmp(&plans::arrival_ms(repo_root, left))
+                    .then_with(|| right.name.cmp(&left.name))
             })
     });
     plans
@@ -296,7 +284,6 @@ pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
             let plans = sorted_entries(
                 &repo_root,
                 &guard.sessions,
-                &guard.activity,
                 guard.pending_scoping.as_deref(),
                 &guard.worktrees,
                 &guard.branch,

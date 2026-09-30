@@ -295,7 +295,6 @@ pub(crate) fn unix_ms(time: std::time::SystemTime) -> Option<i64> {
 /// the directory `ctime` (a rename bumps `ctime` but not `mtime`), else
 /// the existing `plan_mtime`, else `None` so the caller falls back to the
 /// name. Pure except the metadata probes.
-#[allow(dead_code)]
 pub(crate) fn arrival_ms(repo_root: &Path, plan: &PlanRef) -> Option<i64> {
     let dir = plan.path(repo_root);
     if let Some(stamped) = load_state(&dir).entered_at {
@@ -310,7 +309,6 @@ pub(crate) fn arrival_ms(repo_root: &Path, plan: &PlanRef) -> Option<i64> {
 /// Directory `ctime` in epoch millis. Only a fallback for plans without
 /// stamped state: later files inside the plan bump it again.
 #[cfg(unix)]
-#[allow(dead_code)]
 fn dir_ctime_ms(path: &Path) -> Option<i64> {
     use std::os::unix::fs::MetadataExt;
     let meta = std::fs::metadata(path).ok()?;
@@ -318,7 +316,6 @@ fn dir_ctime_ms(path: &Path) -> Option<i64> {
 }
 
 #[cfg(not(unix))]
-#[allow(dead_code)]
 fn dir_ctime_ms(_path: &Path) -> Option<i64> {
     None
 }
@@ -446,8 +443,8 @@ pub fn scan_plans(repo_root: &Path) -> Vec<PlanRef> {
     plans
 }
 
-/// Sort key fallback for plans without user activity: `plan.md`
-/// modification time, newest first. Missing times sort last.
+/// Arrival fallback for plans without stamped state: `plan.md`
+/// modification time, else the directory time. Missing times sort last.
 pub fn plan_mtime(repo_root: &Path, plan: &PlanRef) -> Option<std::time::SystemTime> {
     std::fs::metadata(plan.plan_md(repo_root))
         .and_then(|meta| meta.modified())

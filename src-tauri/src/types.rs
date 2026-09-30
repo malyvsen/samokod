@@ -190,7 +190,7 @@ pub struct RepoDefaults {
     pub effort: Option<String>,
 }
 
-/// Plans list pushed after every transition, activity, or title change,
+/// Plans list pushed after every prompt, transition, or title change,
 /// and returned by plan commands.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlansUpdate {

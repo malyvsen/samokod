@@ -88,7 +88,7 @@ impl AgentManager {
             live.failed = false;
         }
         self.select_key(session.clone());
-        self.touch_activity(&session.plan);
+        self.mark_prompted(&session.plan);
         let mut text = text;
         if let Some(prefixed) = self.claim_role_prefix(&session, &text) {
             text = prefixed;
