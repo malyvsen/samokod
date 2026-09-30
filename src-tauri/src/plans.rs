@@ -1,5 +1,5 @@
-// Plan directory lifecycle under `.samokod/plans/`.
-// Lifecycle transitions first, per-plan state plus naming and filesystem
+// Plan directories under `.samokod/plans/`.
+// Phase moves first, per-plan state plus naming and filesystem
 // helpers below.
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::SessionRole;
 
-/// Lifecycle phase. One directory per phase under `.samokod/plans/`.
+/// Phase. One directory per phase under `.samokod/plans/`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
@@ -74,8 +74,8 @@ pub(crate) const LEGACY_SESSION_FILE: &str = "session.json";
 
 /// Per-plan state: one OpenCode session ID per role the plan has used,
 /// plus the last phase-entry time in epoch millis. `entered_at` stamps the
-/// last lifecycle transition into this phase; session spawns preserve it
-/// while transitions preserve the IDs.
+/// last move into this phase; session spawns preserve it
+/// while moves preserve the IDs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PlanState {
     #[serde(default)]
@@ -272,9 +272,9 @@ pub(crate) fn store_state(plan_dir: &Path, state: &PlanState) {
     }
 }
 
-/// Stamp the phase-entry clock for one plan directory, preserving session
+/// Stamp `entered_at` for one plan directory, preserving session
 /// IDs. Best-effort: a missing directory skips, failures log and the
-/// transition stands.
+/// move stands.
 fn stamp_entered_at(plan_dir: &Path) {
     if !plan_dir.is_dir() {
         return;
@@ -744,7 +744,7 @@ mod tests {
     }
 
     #[test]
-    fn structure_and_lifecycle_round_trip_on_disk() {
+    fn structure_round_trip_on_disk() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
@@ -868,7 +868,7 @@ mod tests {
     }
 
     #[test]
-    fn transitions_stamp_entered_at_and_keep_ids() {
+    fn moves_stamp_entered_at_and_keep_ids() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");

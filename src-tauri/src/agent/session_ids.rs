@@ -1,7 +1,7 @@
 // OpenCode session IDs keyed by plan plus role. Persisted IDs win; missing
 // ones recover via the CLI on demand below and persist for next time.
-// Storage lives in `plans::PlanState`, so ID writes preserve the
-// phase-entry clock.
+// Storage lives in `plans::PlanState`, so ID writes preserve
+// `entered_at`.
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -30,11 +30,10 @@ pub(crate) fn resolve(repo_root: &Path, session: &SessionKey) -> Option<String> 
 }
 
 /// Record one role's session ID inside its plan directory, preserving the
-/// other roles and the phase-entry clock. Best-effort like the executed
-/// markers: missing directories (a warmed pending session spawns before
-/// its directory exists) skip quietly, failures log and the live session
-/// continues, and an unchanged ID skips the rewrite. The next prompt heals
-/// anything skipped here.
+/// other roles and `entered_at`. Best-effort: missing directories
+/// (a warmed pending session spawns before its directory exists) skip
+/// quietly, failures log and the live session continues, and an unchanged
+/// ID skips the rewrite. The next prompt heals anything skipped here.
 pub(crate) fn record(repo_root: &Path, key: &SessionKey, session_id: &str) {
     let Some(plan_dir) = locate(repo_root, &key.plan) else {
         return;
@@ -47,7 +46,7 @@ pub(crate) fn record(repo_root: &Path, key: &SessionKey, session_id: &str) {
     crate::plans::store_state(&plan_dir, &state);
 }
 
-/// True when a plan name exists in any phase. Name-based: transitions
+/// True when a plan name exists in any phase. Name-based: moves
 /// rename rather than copy, so names stay unique across phases. Pure
 /// except the directory probes.
 pub(crate) fn plan_exists(repo_root: &Path, plan_name: &str) -> bool {
@@ -74,7 +73,7 @@ pub(crate) fn is_finished(repo_root: &Path, plan_name: &str) -> bool {
 }
 
 /// Locate the on-disk directory for a plan name across all phases. Plan
-/// names are unique across phases since transitions rename rather than
+/// names are unique across phases since moves rename rather than
 /// copy. Pure except the directory probes.
 pub(crate) fn locate(repo_root: &Path, plan_name: &str) -> Option<PathBuf> {
     for phase in [

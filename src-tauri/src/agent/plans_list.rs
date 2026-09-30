@@ -161,7 +161,8 @@ pub(crate) fn sorted_entries(
 }
 
 /// One status row per session a plan owns, from `roles_for`: scoping
-/// always, executing once approved, each staying as history.
+/// always, executing once approved, merging on the conflict path, finished
+/// plans keeping their rows as history from the stored session IDs.
 pub(crate) fn session_statuses(
     repo_root: &Path,
     plan: &plans::PlanRef,
