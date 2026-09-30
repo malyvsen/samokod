@@ -416,7 +416,6 @@ impl AgentManager {
             });
         }
         let next = plans::execute(&repo_root, &from)?;
-        plans::mark_executed(&repo_root, &next);
         let record = crate::worktrees::create(&repo_root, &next.name, &base, &branch)?;
         match self.state.lock() {
             Ok(mut state) => {
@@ -512,7 +511,6 @@ impl AgentManager {
         let status = self.worktree_status_for(&repo_root, &from.name)?;
         gate_merge(status.dirty, status.ffable, MergeStep::Rebase)?;
         let next = plans::begin_merge(&repo_root, &from)?;
-        plans::mark_merging(&repo_root, &next);
         self.drop_live(&session).await;
         let mut plan = ActivePlan::merging(next.name.clone());
         // The role goes out hidden below, so later turns never prefix again.

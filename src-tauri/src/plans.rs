@@ -273,8 +273,8 @@ pub(crate) fn store_state(plan_dir: &Path, state: &PlanState) {
 }
 
 /// Stamp the phase-entry clock for one plan directory, preserving session
-/// IDs. Best-effort like the executed markers: a missing directory skips,
-/// failures log and the transition stands.
+/// IDs. Best-effort: a missing directory skips, failures log and the
+/// transition stands.
 fn stamp_entered_at(plan_dir: &Path) {
     if !plan_dir.is_dir() {
         return;
@@ -349,43 +349,9 @@ pub fn phase_rank(phase: Phase) -> u8 {
     }
 }
 
-/// Marker left inside a plan directory once its scoping chat was approved.
-/// It travels with the directory through executing, merging, completed,
-/// and cancelled, so a rescan still knows the plan owns an execution
-/// session.
-const EXECUTED_MARKER: &str = ".executed";
-
-/// Marker left once a diverged plan entered merging. It travels with the
-/// directory, so completed and cancelled plans still know they own a
-/// merging session as history.
-const MERGING_MARKER: &str = ".merging";
-
-/// Record that a plan was approved for execution. Best-effort: a missing
-/// marker only collapses a cancelled plan to one row after a restart.
-pub fn mark_executed(repo_root: &Path, plan: &PlanRef) {
-    if let Err(error) = std::fs::write(plan.path(repo_root).join(EXECUTED_MARKER), "") {
-        log::warn!(
-            "failed to mark {} as executed: {error}",
-            plan.path(repo_root).display()
-        );
-    }
-}
-
-/// Record that a plan entered merging. Best-effort like `mark_executed`.
-pub fn mark_merging(repo_root: &Path, plan: &PlanRef) {
-    if let Err(error) = std::fs::write(plan.path(repo_root).join(MERGING_MARKER), "") {
-        log::warn!(
-            "failed to mark {} as merging: {error}",
-            plan.path(repo_root).display()
-        );
-    }
-}
-
-/// Session roles one plan owns: scoping always runs, executing joins
-/// once approved, merging joins on the conflict path. Finished plans keep
-/// their rows as history: completed and cancelled plans show the merging
-/// row only with the merging marker, the executing row with either
-/// marker. Pure except the marker reads.
+/// Session roles one plan owns: scoping always, executing once approved,
+/// merging on the conflict path. Completed and cancelled plans keep their
+/// rows as history from the stored session IDs. Pure except the state read.
 pub fn roles_for(repo_root: &Path, plan: &PlanRef) -> Vec<SessionRole> {
     match plan.phase {
         Phase::Scoping => vec![SessionRole::Scoping],
@@ -396,13 +362,12 @@ pub fn roles_for(repo_root: &Path, plan: &PlanRef) -> Vec<SessionRole> {
             SessionRole::Merging,
         ],
         Phase::Completed | Phase::Cancelled => {
-            let merging = plan.path(repo_root).join(MERGING_MARKER).is_file();
-            let executed = merging || plan.path(repo_root).join(EXECUTED_MARKER).is_file();
+            let state = load_state(&plan.path(repo_root));
             let mut roles = vec![SessionRole::Scoping];
-            if executed {
+            if state.session(SessionRole::Executing).is_some() {
                 roles.push(SessionRole::Executing);
             }
-            if merging {
+            if state.session(SessionRole::Merging).is_some() {
                 roles.push(SessionRole::Merging);
             }
             roles
@@ -549,6 +514,12 @@ fn rename(repo_root: &Path, from: &PlanRef, to: &PlanRef) -> Result<(), PlanErro
 mod tests {
     use super::*;
 
+    fn seed_session(root: &Path, plan: &PlanRef, role: SessionRole, id: &str) {
+        let mut state = load_state(&plan.path(root));
+        state.set_session(role, id.to_string());
+        store_state(&plan.path(root), &state);
+    }
+
     #[test]
     fn phases_have_distinct_dirs() {
         let dirs: HashSet<&str> = [
@@ -676,7 +647,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_roles_survive_cancel() {
+    fn finished_roles_derive_from_state() {
         let scoping_only = vec![SessionRole::Scoping];
         let both = vec![SessionRole::Scoping, SessionRole::Executing];
         let all = vec![
@@ -691,23 +662,33 @@ mod tests {
         assert_eq!(roles_for(root, &plain), scoping_only);
         std::fs::write(plain.plan_md(root), "# Shiny\n").expect("write");
         let executing = execute(root, &plain).expect("execute");
-        mark_executed(root, &executing);
+        seed_session(root, &executing, SessionRole::Executing, "ses_executing");
         assert_eq!(roles_for(root, &executing), both);
         let done = complete(root, &executing).expect("complete");
         assert_eq!(roles_for(root, &done), both);
         let second = materialize_scoping(root, "2026-09-26.08-41-04").expect("second");
         std::fs::write(second.plan_md(root), "# Second\n").expect("write");
         let running = execute(root, &second).expect("execute");
-        mark_executed(root, &running);
+        seed_session(
+            root,
+            &running,
+            SessionRole::Executing,
+            "ses_second_executing",
+        );
         let merging = begin_merge(root, &running).expect("begin");
-        mark_merging(root, &merging);
+        seed_session(root, &merging, SessionRole::Merging, "ses_second_merging");
         assert_eq!(roles_for(root, &merging), all);
         let rebased = finish_merge(root, &merging).expect("finish");
         assert_eq!(roles_for(root, &rebased), all);
         let third = materialize_scoping(root, "2026-09-26.08-41-05").expect("third");
         std::fs::write(third.plan_md(root), "# Third\n").expect("write");
         let diverged = execute(root, &third).expect("execute");
-        mark_executed(root, &diverged);
+        seed_session(
+            root,
+            &diverged,
+            SessionRole::Executing,
+            "ses_third_executing",
+        );
         let dropped = cancel(root, &diverged).expect("cancel");
         assert_eq!(roles_for(root, &dropped), both);
         let fresh = materialize_scoping(root, "2026-09-26.08-41-06").expect("fresh");
@@ -921,8 +902,7 @@ mod tests {
         let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         let before = load_state(&scoping.path(root)).entered_at.expect("stamped");
         std::thread::sleep(std::time::Duration::from_millis(10));
-        std::fs::write(scoping.path(root).join("mockup.html"), "<p>hi</p>").expect("mockup");
-        std::fs::write(scoping.path(root).join(".executed"), "").expect("marker");
+        std::fs::write(scoping.path(root).join("notes.md"), "# notes\n").expect("notes");
         assert_eq!(load_state(&scoping.path(root)).entered_at, Some(before));
         assert_eq!(arrival_ms(root, &scoping), Some(before));
     }
