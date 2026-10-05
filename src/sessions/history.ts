@@ -3,6 +3,8 @@ import { loadHistory } from "../api";
 import { type SessionKey, sessionKeyOf } from "../types";
 import type { Chats } from "./store";
 
+// History replays only for idle empty transcripts. A live turn owns its
+// session pickers, so replays never run over a working key.
 export function useSessionHistory(
 	selectedKey: SessionKey | null,
 	chats: Chats,
@@ -13,10 +15,12 @@ export function useSessionHistory(
 		const id = sessionKeyOf(selectedKey);
 		if (fired.current.has(id)) return;
 		const chat = chats[id];
-		const isEmpty = (chat?.transcript.length ?? 0) === 0;
-		const isLoading = chat?.historyLoading ?? false;
-		const hasError = (chat?.historyError ?? null) !== null;
-		if (!isEmpty || isLoading || hasError) return;
+		const idleEmpty =
+			(chat?.transcript.length ?? 0) === 0 &&
+			!(chat?.historyLoading ?? false) &&
+			(chat?.historyError ?? null) === null &&
+			!(chat?.working ?? false);
+		if (!idleEmpty) return;
 		fired.current.add(id);
 		loadHistory(selectedKey).catch((error: unknown) => {
 			console.warn("load_history failed", error);

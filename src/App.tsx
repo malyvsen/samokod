@@ -100,10 +100,7 @@ export function App() {
 
 	const entry = selectedEntry(plans, selectedKey);
 	const readOnly = isReadOnly(entry);
-	const isLive = chat.configOptions.length > 0;
-	// load_history implies warm_session, so empty transcripts skip the warm.
-	const needsHistory = chat.transcript.length === 0;
-	useWarmSession(selectedKey, isLive || needsHistory, readOnly);
+	useWarmSession(selectedKey, chats, readOnly);
 	useSessionHistory(selectedKey, chats);
 	const selectors = readOnly
 		? { kind: "live" as const, options: chat.configOptions }

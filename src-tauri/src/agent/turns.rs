@@ -107,12 +107,7 @@ impl AgentManager {
     ) -> Result<(), AgentError> {
         {
             let mut state = self.state.lock().expect("state poisoned");
-            let busy = state
-                .sessions
-                .get(&key)
-                .map(|session| session.working)
-                .unwrap_or(false);
-            if busy {
+            if state.is_working(&key) {
                 return Err(AgentError::RequestFailed {
                     raw: "a turn is already running".to_string(),
                 });

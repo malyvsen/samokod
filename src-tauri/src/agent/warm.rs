@@ -1,6 +1,5 @@
 // Background warm: eager `ensure_live` so MODEL/EFFORT pickers turn
 // interactive before the first prompt. Single-flight per session key.
-use std::collections::HashSet;
 use std::path::Path;
 
 use crate::plans;
@@ -8,17 +7,6 @@ use crate::types::{AgentError, SessionKey};
 
 use super::AgentManager;
 use super::lock_state;
-
-/// Claim the warm slot. True when this caller owns the warm; false when
-/// another warm is already in flight. Pure.
-pub(crate) fn try_claim_warm(warming: &mut HashSet<SessionKey>, key: &SessionKey) -> bool {
-    warming.insert(key.clone())
-}
-
-/// Release the warm slot. Pure.
-pub(crate) fn release_warm(warming: &mut HashSet<SessionKey>, key: &SessionKey) {
-    warming.remove(key);
-}
 
 /// Finished plans never warm: completed/cancelled dirs hold the name.
 fn is_finished(repo_root: &Path, key: &SessionKey) -> bool {
@@ -36,7 +24,9 @@ fn is_finished(repo_root: &Path, key: &SessionKey) -> bool {
 
 impl AgentManager {
     /// Warm one session in the background: `ensure_live` without a prompt.
-    /// Finished phases return early. Failures log and release so the next
+    /// Finished phases return early. History replays imply their warm, so
+    /// started histories skip; live sessions skip since the warm would fork
+    /// a fresh session beside them. Failures log and release so the next
     /// explicit prompt retries through the existing error path.
     pub async fn warm_session(&self, session: SessionKey) -> Result<(), AgentError> {
         let repo_root = lock_state(&self.state).and_then(|state| state.repo_root.clone());
@@ -46,33 +36,20 @@ impl AgentManager {
         if is_finished(&repo_root, &session) {
             return Ok(());
         }
-        // History owns its keys: a past or in-flight replay implies the
-        // warm, so a racing warm never forks a fresh session beside it.
-        let owned_by_history = lock_state(&self.state)
-            .map(|state| state.history_owned(&session))
-            .unwrap_or(false);
-        if owned_by_history {
-            return Ok(());
-        }
         if let Some((connection, _, _, _)) = self.session_snapshot_for(&session)
             && !connection.is_incoming_closed()
         {
             return Ok(());
         }
-        let claimed = match self.state.lock() {
-            Ok(mut state) => try_claim_warm(&mut state.warming, &session),
-            Err(error) => {
-                log::warn!("failed to claim warm session: {error}");
-                return Ok(());
-            }
-        };
+        let claimed = lock_state(&self.state)
+            .map(|mut state| state.claim_warm(&session))
+            .unwrap_or(false);
         if !claimed {
             return Ok(());
         }
         let result = self.ensure_live_claimed(&session).await;
-        match self.state.lock() {
-            Ok(mut state) => release_warm(&mut state.warming, &session),
-            Err(error) => log::warn!("failed to release warm session: {error}"),
+        if let Some(mut state) = lock_state(&self.state) {
+            state.release_warm(&session);
         }
         if let Err(error) = &result {
             log::warn!("failed to warm session {}: {error}", session.plan);
@@ -84,6 +61,7 @@ impl AgentManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::State;
     use crate::types::SessionRole;
 
     fn key() -> SessionKey {
@@ -95,19 +73,42 @@ mod tests {
 
     #[test]
     fn claim_is_single_flight() {
-        let mut warming = HashSet::new();
+        let mut state = State::default();
         let key = key();
-        assert!(try_claim_warm(&mut warming, &key));
-        assert!(!try_claim_warm(&mut warming, &key));
+        assert!(state.claim_warm(&key));
+        assert!(!state.claim_warm(&key));
     }
 
     #[test]
     fn release_allows_reclaim_after_failure() {
-        let mut warming = HashSet::new();
+        let mut state = State::default();
         let key = key();
-        assert!(try_claim_warm(&mut warming, &key));
-        release_warm(&mut warming, &key);
-        assert!(try_claim_warm(&mut warming, &key));
+        assert!(state.claim_warm(&key));
+        state.release_warm(&key);
+        assert!(state.claim_warm(&key));
+    }
+
+    #[test]
+    fn warm_loses_to_started_history() {
+        let mut state = State::default();
+        let key = key();
+        assert!(state.claim_history(&key));
+        assert!(!state.claim_warm(&key));
+    }
+
+    #[test]
+    fn history_loses_to_working_turn() {
+        let mut state = State::default();
+        let key = key();
+        state.sessions.insert(
+            key.clone(),
+            crate::agent::LiveSession::fresh(
+                crate::agent::ActivePlan::scoping(key.plan.clone()),
+                crate::repo_state::RepoState::default(),
+            ),
+        );
+        state.set_working(&key, true);
+        assert!(!state.claim_history(&key));
     }
 
     #[test]

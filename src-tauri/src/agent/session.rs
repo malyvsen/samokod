@@ -18,7 +18,6 @@ use super::config::{
 use super::permissions::handle_permission_request;
 use super::plans_list::push_sorted;
 use super::turns::handle_notification;
-use super::warm::{release_warm, try_claim_warm};
 use super::{emit_event, lock_state, map_startup_error, set_failed};
 
 /// User decision for one permission card.
@@ -318,18 +317,13 @@ impl AgentManager {
         {
             return Ok((connection, session_id));
         }
-        let claimed = match self.state.lock() {
-            Ok(mut state) => try_claim_warm(&mut state.warming, key),
-            Err(error) => {
-                log::warn!("failed to claim live session: {error}");
-                false
-            }
-        };
+        let claimed = lock_state(&self.state)
+            .map(|mut state| state.claim_warm(key))
+            .unwrap_or(false);
         if claimed {
             let result = self.ensure_live_claimed(key).await;
-            match self.state.lock() {
-                Ok(mut state) => release_warm(&mut state.warming, key),
-                Err(error) => log::warn!("failed to release live session: {error}"),
+            if let Some(mut state) = lock_state(&self.state) {
+                state.release_warm(key);
             }
             return result;
         }
@@ -344,7 +338,7 @@ impl AgentManager {
                 return Ok((connection, session_id));
             }
             let still_warming = lock_state(&self.state)
-                .map(|state| state.warming.contains(key))
+                .map(|state| state.is_warming(key))
                 .unwrap_or(false);
             if !still_warming {
                 if let Some((connection, session_id, _, _)) = self.session_snapshot_for(key)
@@ -352,18 +346,13 @@ impl AgentManager {
                 {
                     return Ok((connection, session_id));
                 }
-                let reclaimed = match self.state.lock() {
-                    Ok(mut state) => try_claim_warm(&mut state.warming, key),
-                    Err(error) => {
-                        log::warn!("failed to reclaim live session: {error}");
-                        false
-                    }
-                };
+                let reclaimed = lock_state(&self.state)
+                    .map(|mut state| state.claim_warm(key))
+                    .unwrap_or(false);
                 if reclaimed {
                     let result = self.ensure_live_claimed(key).await;
-                    match self.state.lock() {
-                        Ok(mut state) => release_warm(&mut state.warming, key),
-                        Err(error) => log::warn!("failed to release live session: {error}"),
+                    if let Some(mut state) = lock_state(&self.state) {
+                        state.release_warm(key);
                     }
                     return result;
                 }
@@ -426,15 +415,16 @@ impl AgentManager {
     /// Restore a past session's history via `session/load`: the replay
     /// streams through the same global notification path as live turns, so
     /// the transcript rebuilds with no extra mapping except user bubbles.
-    /// Single-flights on the history slot; finished plans replay read-only
-    /// history the same way. Plans without a persisted ID recover it from
-    /// the CLI on demand; with no past at all (a brand-new plan) a live
-    /// session starts instead so the pickers turn live and the transcript
-    /// stays empty.
+    /// Single-flights on the history slot; a live turn owns its session,
+    /// so replays never run over a working key. Finished plans replay
+    /// read-only history the same way. Plans without a persisted ID recover
+    /// it from the CLI on demand; with no past at all (a brand-new plan) a
+    /// live session starts instead so the pickers turn live and the
+    /// transcript stays empty.
     pub async fn load_history(&self, session: SessionKey) -> Result<(), AgentError> {
         {
-            let state = self.state.lock().expect("state poisoned");
-            if state.history_owned(&session) {
+            let mut state = self.state.lock().expect("state poisoned");
+            if !state.claim_history(&session) {
                 return Ok(());
             }
         }
@@ -443,12 +433,6 @@ impl AgentManager {
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
-        {
-            let mut state = self.state.lock().expect("state poisoned");
-            if !state.claim_history(&session) {
-                return Ok(());
-            }
-        }
         emit_event(
             &self.app,
             AppEvent::HistoryBegin {

@@ -38,7 +38,7 @@ describe("useSessionHistory", () => {
 		expect(loadHistory).not.toHaveBeenCalled();
 	});
 
-	test("never fires while loading or failed", () => {
+	test("never fires for non-idle empty transcripts", () => {
 		const loading: Chats = {
 			[KEY_ID]: { ...emptyChat(), historyLoading: true },
 		};
@@ -51,6 +51,11 @@ describe("useSessionHistory", () => {
 			},
 		};
 		renderHook(() => useSessionHistory(testKey(), failed));
+		expect(loadHistory).not.toHaveBeenCalled();
+		const working: Chats = {
+			[KEY_ID]: { ...emptyChat(), working: true },
+		};
+		renderHook(() => useSessionHistory(testKey(), working));
 		expect(loadHistory).not.toHaveBeenCalled();
 	});
 

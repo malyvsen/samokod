@@ -67,22 +67,50 @@ impl State {
         }
     }
 
+    /// True while a live turn runs for the key. The turn owns the
+    /// session pickers while it runs.
+    fn is_working(&self, key: &SessionKey) -> bool {
+        self.sessions
+            .get(key)
+            .map(|session| session.working)
+            .unwrap_or(false)
+    }
+
     /// True while a history replay runs for the key. Prompts wait on this;
     /// replayed notifications and approvals render on this.
     fn is_history_loading(&self, key: &SessionKey) -> bool {
         self.history_loading.contains(key)
     }
 
-    /// True once a history replay started or finished for the key. Warms
-    /// and replays single-flight on this: history owns its keys.
-    fn history_owned(&self, key: &SessionKey) -> bool {
+    /// True once a history replay started or finished for the key. History
+    /// replays imply their warm, so warms and replays single-flight on this.
+    fn history_started(&self, key: &SessionKey) -> bool {
         self.history_loading.contains(key) || self.history_loaded.contains(key)
     }
 
-    /// Claim the history slot. False when the replay already streamed or
-    /// another replay is in flight. Pure.
+    /// True while a background warm runs for the key.
+    fn is_warming(&self, key: &SessionKey) -> bool {
+        self.warming.contains(key)
+    }
+
+    /// Claim the warm slot. False when another warm is in flight or history
+    /// already started for the key. Pure.
+    fn claim_warm(&mut self, key: &SessionKey) -> bool {
+        if self.history_started(key) {
+            return false;
+        }
+        self.warming.insert(key.clone())
+    }
+
+    /// Release the warm slot. Pure.
+    fn release_warm(&mut self, key: &SessionKey) {
+        self.warming.remove(key);
+    }
+
+    /// Claim the history slot. False when the replay already ran, another
+    /// replay is in flight, or a live turn owns the session. Pure.
     fn claim_history(&mut self, key: &SessionKey) -> bool {
-        if self.history_loaded.contains(key) {
+        if self.history_started(key) || self.is_working(key) {
             return false;
         }
         self.history_loading.insert(key.clone())
@@ -795,12 +823,7 @@ fn gate_landing(dirty: bool, ffable: bool, step: LandingStep) -> Result<(), Agen
 fn ensure_idle(state: &Mutex<State>, key: &SessionKey) -> Result<(), AgentError> {
     match state.lock() {
         Ok(state) => {
-            let busy = state
-                .sessions
-                .get(key)
-                .map(|session| session.working)
-                .unwrap_or(false);
-            if busy {
+            if state.is_working(key) {
                 return Err(AgentError::RequestFailed {
                     raw: "a turn is already running".to_string(),
                 });
