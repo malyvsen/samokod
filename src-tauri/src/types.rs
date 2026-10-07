@@ -222,7 +222,8 @@ pub enum AppEvent {
         chunk: String,
     },
     /// Replayed user message chunk. Only emitted while a session's history
-    /// loads; live turns append the user bubble optimistically instead.
+    /// loads, plus the eager executing/landing first prompt which emits
+    /// live; live scoping turns append the user bubble optimistically instead.
     UserText {
         session: SessionKey,
         chunk: String,

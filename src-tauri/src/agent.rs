@@ -371,7 +371,7 @@ impl AgentManager {
     /// Approve the scoping plan: snapshot the commit, create
     /// the worktree on a fresh branch, move the plan to executing, and
     /// start the executing agent inside the worktree with the absolute plan path.
-    /// The prompt stays hidden: no user bubble, the chat opens working.
+    /// The first prompt shows as a YOU bubble, the chat opens working.
     /// The selection follows the new executing session.
     pub async fn execute_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
         ensure_idle(&self.state, &session)?;
@@ -411,7 +411,9 @@ impl AgentManager {
         let plan_dir_abs = next.path(&repo_root).to_string_lossy().to_string();
         let text = opencode::executing_first_message(&plan_dir_abs);
         self.mark_prompted(&next.name);
-        self.start_turn(connection, session_id, key, text).await?;
+        self.start_turn(connection, session_id, key.clone(), text.clone())
+            .await?;
+        self.announce_first_prompt(&key, &text);
         Ok(self.plans_update())
     }
 
@@ -501,7 +503,9 @@ impl AgentManager {
             &plan_md_abs,
         );
         self.mark_prompted(&next.name);
-        self.start_turn(connection, session_id, key, text).await?;
+        self.start_turn(connection, session_id, key.clone(), text.clone())
+            .await?;
+        self.announce_first_prompt(&key, &text);
         Ok(self.plans_update())
     }
 
@@ -712,6 +716,19 @@ impl AgentManager {
             state.worktrees.remove(plan_name);
         }
         Ok(())
+    }
+
+    /// Announce an eager executing/landing first prompt as a live YOU
+    /// bubble, matching what history replay shows. Shared so the two
+    /// call sites cannot drift apart; retries never call here.
+    fn announce_first_prompt(&self, key: &SessionKey, text: &str) {
+        emit_event(
+            &self.app,
+            AppEvent::UserText {
+                session: key.clone(),
+                chunk: text.to_string(),
+            },
+        );
     }
 }
 
