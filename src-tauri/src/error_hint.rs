@@ -11,6 +11,7 @@ pub enum ErrorHintKind {
     RateLimit,
     ApprovalStalled,
     NoSavedSession,
+    StillStarting,
     PlainRetry,
 }
 
@@ -71,6 +72,13 @@ pub fn classify_error(raw: &str) -> ErrorHint {
             retryable: true,
         };
     }
+    if lowered.contains("still starting") || lowered.contains("still loading") {
+        return ErrorHint {
+            kind: ErrorHintKind::StillStarting,
+            text: "the agent is still starting - wait a moment, then retry".to_string(),
+            retryable: true,
+        };
+    }
     ErrorHint {
         kind: ErrorHintKind::PlainRetry,
         text: "retry the turn".to_string(),
@@ -122,6 +130,19 @@ mod tests {
             "permission queue stalled 30s waiting on session/request_permission for tool call_9f3a",
         );
         assert_eq!(hint.kind, ErrorHintKind::ApprovalStalled);
+    }
+
+    #[test]
+    fn still_starting_hint_for_start_waits() {
+        for raw in [
+            "agent is still starting, try again",
+            "history is still loading, try again",
+        ] {
+            let hint = classify_error(raw);
+            assert_eq!(hint.kind, ErrorHintKind::StillStarting);
+            assert!(hint.retryable);
+            assert!(hint.text.contains("still starting"));
+        }
     }
 
     #[test]

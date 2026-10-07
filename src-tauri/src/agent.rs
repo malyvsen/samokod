@@ -16,6 +16,7 @@ mod permissions;
 mod plans_list;
 mod session;
 mod session_ids;
+mod start;
 mod turns;
 mod warm;
 
@@ -79,59 +80,6 @@ impl State {
             .map(|session| session.working)
             .unwrap_or(false)
     }
-
-    /// True while a history replay runs for the key. Prompts wait on this;
-    /// replayed notifications and approvals render on this.
-    fn is_history_loading(&self, key: &SessionKey) -> bool {
-        self.history_loading.contains(key)
-    }
-
-    /// True once a history replay started or finished for the key. History
-    /// replays imply their warm, so warms and replays single-flight on this.
-    fn history_started(&self, key: &SessionKey) -> bool {
-        self.history_loading.contains(key) || self.history_loaded.contains(key)
-    }
-
-    /// True while a background warm runs for the key.
-    fn is_warming(&self, key: &SessionKey) -> bool {
-        self.warming.contains(key)
-    }
-
-    /// Claim the warm slot. False when another warm is in flight or history
-    /// already started for the key. Pure.
-    fn claim_warm(&mut self, key: &SessionKey) -> bool {
-        if self.history_started(key) {
-            return false;
-        }
-        self.warming.insert(key.clone())
-    }
-
-    /// Release the warm slot. Pure.
-    fn release_warm(&mut self, key: &SessionKey) {
-        self.warming.remove(key);
-    }
-
-    /// Claim the history slot. False when the replay already ran, another
-    /// replay is in flight, a warm owns the key, or a live turn owns the
-    /// session. Pure.
-    fn claim_history(&mut self, key: &SessionKey) -> bool {
-        if self.history_started(key) || self.is_working(key) || self.is_warming(key) {
-            return false;
-        }
-        self.history_loading.insert(key.clone())
-    }
-
-    /// Settle a finished replay: off the in-flight set, onto the replayed
-    /// set. Pure.
-    fn finish_history(&mut self, key: &SessionKey) {
-        self.history_loading.remove(key);
-        self.history_loaded.insert(key.clone());
-    }
-
-    /// Release a failed replay so a retry can claim it again. Pure.
-    fn abort_history(&mut self, key: &SessionKey) {
-        self.history_loading.remove(key);
-    }
 }
 
 /// Empty scoping session: no `plan.md` and no sent message, whether or
@@ -182,6 +130,10 @@ pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str) {
         ),
     }
     state.sessions.remove(&SessionKey {
+        plan: name.to_string(),
+        role: SessionRole::Scoping,
+    });
+    state.drop_start_claims_for(&SessionKey {
         plan: name.to_string(),
         role: SessionRole::Scoping,
     });

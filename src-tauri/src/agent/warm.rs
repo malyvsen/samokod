@@ -7,6 +7,7 @@ use crate::types::{AgentError, SessionKey};
 
 use super::AgentManager;
 use super::lock_state;
+use super::start::WarmGuard;
 
 /// Finished plans never warm: completed/cancelled dirs hold the name.
 fn is_finished(repo_root: &Path, key: &SessionKey) -> bool {
@@ -31,26 +32,47 @@ impl AgentManager {
     pub async fn warm_session(&self, session: SessionKey) -> Result<(), AgentError> {
         let repo_root = lock_state(&self.state).and_then(|state| state.repo_root.clone());
         let Some(repo_root) = repo_root else {
+            log::debug!("skipping warm: no repository open");
             return Ok(());
         };
         if is_finished(&repo_root, &session) {
+            log::debug!(
+                "skipping warm for {} {:?}: finished plan",
+                session.plan,
+                session.role
+            );
             return Ok(());
         }
         if let Some((connection, _, _, _)) = self.session_snapshot_for(&session)
             && !connection.is_incoming_closed()
         {
+            log::debug!(
+                "skipping warm for {} {:?}: already live",
+                session.plan,
+                session.role
+            );
             return Ok(());
         }
-        let claimed = lock_state(&self.state)
-            .map(|mut state| state.claim_warm(&session))
-            .unwrap_or(false);
-        if !claimed {
+        if lock_state(&self.state)
+            .map(|state| state.history_started(&session))
+            .unwrap_or(false)
+        {
+            log::debug!(
+                "skipping warm for {} {:?}: history started, transcript owns the key",
+                session.plan,
+                session.role
+            );
             return Ok(());
         }
+        let Some(_guard) = WarmGuard::claim(&self.state, &session) else {
+            log::debug!(
+                "skipping warm for {} {:?}: warm already in flight",
+                session.plan,
+                session.role
+            );
+            return Ok(());
+        };
         let result = self.ensure_live_claimed(&session).await;
-        if let Some(mut state) = lock_state(&self.state) {
-            state.release_warm(&session);
-        }
         if let Err(error) = &result {
             log::warn!("failed to warm session {}: {error}", session.plan);
         }
@@ -61,7 +83,6 @@ impl AgentManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::State;
     use crate::types::SessionRole;
 
     fn key() -> SessionKey {
@@ -69,54 +90,6 @@ mod tests {
             plan: "2026-09-26.08-52-57".to_string(),
             role: SessionRole::Scoping,
         }
-    }
-
-    #[test]
-    fn claim_is_single_flight() {
-        let mut state = State::default();
-        let key = key();
-        assert!(state.claim_warm(&key));
-        assert!(!state.claim_warm(&key));
-    }
-
-    #[test]
-    fn release_allows_reclaim_after_failure() {
-        let mut state = State::default();
-        let key = key();
-        assert!(state.claim_warm(&key));
-        state.release_warm(&key);
-        assert!(state.claim_warm(&key));
-    }
-
-    #[test]
-    fn warm_loses_to_started_history() {
-        let mut state = State::default();
-        let key = key();
-        assert!(state.claim_history(&key));
-        assert!(!state.claim_warm(&key));
-    }
-
-    #[test]
-    fn history_loses_to_working_turn() {
-        let mut state = State::default();
-        let key = key();
-        state.sessions.insert(
-            key.clone(),
-            crate::agent::LiveSession::fresh(
-                crate::agent::ActivePlan::scoping(key.plan.clone()),
-                crate::repo_state::RepoState::default(),
-            ),
-        );
-        state.set_working(&key, true);
-        assert!(!state.claim_history(&key));
-    }
-
-    #[test]
-    fn history_loses_to_warming_session() {
-        let mut state = State::default();
-        let key = key();
-        assert!(state.claim_warm(&key));
-        assert!(!state.claim_history(&key));
     }
 
     #[test]

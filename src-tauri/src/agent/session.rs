@@ -17,6 +17,9 @@ use super::config::{
 };
 use super::permissions::handle_permission_request;
 use super::plans_list::push_sorted;
+use super::start::{
+    ENSURE_LIVE_TIMEOUT, HISTORY_TIMEOUT, HistoryGuard, WARM_TIMEOUT, WarmGuard, wait_until,
+};
 use super::turns::handle_notification;
 use super::{emit_event, lock_state, map_startup_error, set_failed};
 
@@ -210,6 +213,7 @@ impl AgentManager {
         plan: ActivePlan,
         agent: &str,
     ) -> Result<(ConnectionTo<Agent>, String, SessionKey), AgentError> {
+        let spawn_start = std::time::Instant::now();
         let key = plan.key().ok_or_else(|| AgentError::RequestFailed {
             raw: "cannot open a session for a finished plan".to_string(),
         })?;
@@ -289,6 +293,12 @@ impl AgentManager {
             state.current = Some(key.clone());
         }
         super::session_ids::record(repo_root, &key, &session_id);
+        log::info!(
+            "spawned session {} {:?} in {:?}",
+            key.plan,
+            key.role,
+            spawn_start.elapsed()
+        );
         emit_event(
             &self.app,
             AppEvent::SessionReset {
@@ -314,59 +324,64 @@ impl AgentManager {
         &self,
         key: &SessionKey,
     ) -> Result<(ConnectionTo<Agent>, String), AgentError> {
-        if let Some((connection, session_id, _, _)) = self.session_snapshot_for(key)
-            && !connection.is_incoming_closed()
-        {
-            return Ok((connection, session_id));
+        if let Some(live) = self.live_snapshot_for(key) {
+            return Ok(live);
         }
-        let claimed = lock_state(&self.state)
-            .map(|mut state| state.claim_warm(key))
-            .unwrap_or(false);
-        if claimed {
-            let result = self.ensure_live_claimed(key).await;
-            if let Some(mut state) = lock_state(&self.state) {
-                state.release_warm(key);
-            }
-            return result;
+        if let Some(_guard) = WarmGuard::claim(&self.state, key) {
+            log::debug!("ensure_live claimed {} {:?}", key.plan, key.role);
+            return self.ensure_live_claimed(key).await;
         }
-        let timeout = std::time::Duration::from_secs(10);
-        let interval = std::time::Duration::from_millis(50);
         let start = std::time::Instant::now();
         loop {
-            tokio::time::sleep(interval).await;
-            if let Some((connection, session_id, _, _)) = self.session_snapshot_for(key)
-                && !connection.is_incoming_closed()
-            {
-                return Ok((connection, session_id));
+            let remaining = ENSURE_LIVE_TIMEOUT.saturating_sub(start.elapsed());
+            let settled = wait_until(remaining, || {
+                self.live_snapshot_for(key).is_some()
+                    || lock_state(&self.state)
+                        .map(|state| !state.is_warming(key))
+                        .unwrap_or(true)
+            })
+            .await;
+            if let Some(live) = self.live_snapshot_for(key) {
+                log::debug!(
+                    "ensure_live polled {} {:?} in {:?}",
+                    key.plan,
+                    key.role,
+                    start.elapsed()
+                );
+                return Ok(live);
             }
             let still_warming = lock_state(&self.state)
                 .map(|state| state.is_warming(key))
                 .unwrap_or(false);
             if !still_warming {
-                if let Some((connection, session_id, _, _)) = self.session_snapshot_for(key)
-                    && !connection.is_incoming_closed()
-                {
-                    return Ok((connection, session_id));
+                if let Some(live) = self.live_snapshot_for(key) {
+                    return Ok(live);
                 }
-                let reclaimed = lock_state(&self.state)
-                    .map(|mut state| state.claim_warm(key))
-                    .unwrap_or(false);
-                if reclaimed {
-                    let result = self.ensure_live_claimed(key).await;
-                    if let Some(mut state) = lock_state(&self.state) {
-                        state.release_warm(key);
-                    }
-                    return result;
+                if let Some(_guard) = WarmGuard::claim(&self.state, key) {
+                    log::debug!(
+                        "ensure_live reclaimed {} {:?} in {:?}",
+                        key.plan,
+                        key.role,
+                        start.elapsed()
+                    );
+                    return self.ensure_live_claimed(key).await;
                 }
             }
-            if start.elapsed() >= timeout {
-                if let Some((connection, session_id, _, _)) = self.session_snapshot_for(key)
-                    && !connection.is_incoming_closed()
-                {
-                    return Ok((connection, session_id));
+            if !settled || start.elapsed() >= ENSURE_LIVE_TIMEOUT {
+                if let Some(live) = self.live_snapshot_for(key) {
+                    return Ok(live);
                 }
+                let snapshot_present = self.session_snapshot_for(key).is_some();
+                log::warn!(
+                    "ensure_live timeout {} {:?} after {:?}: still_warming={} snapshot_present={}",
+                    key.plan,
+                    key.role,
+                    start.elapsed(),
+                    still_warming,
+                    snapshot_present
+                );
                 return Err(AgentError::RequestFailed {
-                    raw: "session is warming, try again".to_string(),
+                    raw: "agent is still starting, try again".to_string(),
                 });
             }
         }
@@ -424,12 +439,43 @@ impl AgentManager {
     /// live session starts instead so the pickers turn live and the
     /// transcript stays empty.
     pub async fn load_history(&self, session: SessionKey) -> Result<(), AgentError> {
+        // Serialize a racing warm: history replays wait for the connection
+        // to settle instead of silently skipping and leaving the transcript
+        // empty forever under the fire-once `useSessionStart`.
+        if lock_state(&self.state)
+            .map(|state| state.is_warming(&session))
+            .unwrap_or(false)
         {
-            let mut state = self.state.lock().expect("state poisoned");
-            if !state.claim_history(&session) {
-                return Ok(());
+            let wait_start = std::time::Instant::now();
+            let settled = wait_until(WARM_TIMEOUT, || {
+                lock_state(&self.state)
+                    .map(|state| !state.is_warming(&session))
+                    .unwrap_or(true)
+            })
+            .await;
+            if !settled {
+                let still_warming = lock_state(&self.state)
+                    .map(|state| state.is_warming(&session))
+                    .unwrap_or(false);
+                let snapshot_present = self.session_snapshot_for(&session).is_some();
+                log::warn!(
+                    "history wait timeout {} {:?} after {:?}: still_warming={} snapshot_present={}",
+                    session.plan,
+                    session.role,
+                    wait_start.elapsed(),
+                    still_warming,
+                    snapshot_present
+                );
+                let raw = "agent is still starting, try again".to_string();
+                self.emit_history_failed(&session, raw.clone());
+                return Err(AgentError::RequestFailed { raw });
             }
         }
+        let Some(history_guard) = HistoryGuard::claim(&self.state, &session) else {
+            return Ok(());
+        };
+        // Guard drop aborts on early return: a missing repo no longer wedges
+        // the key on `history_loading` forever.
         let (repo_root, _) = self
             .reopen_snapshot()
             .ok_or_else(|| AgentError::NoSession {
@@ -451,7 +497,7 @@ impl AgentManager {
         // HistoryBegin only follows when past exists and the connection is
         // ready, just before `session/load`; empty keys finish without it.
         let Some(session_id) = super::session_ids::resolve(&repo_root, &session) else {
-            return self.finish_empty_history(session).await;
+            return self.finish_empty_history(session, history_guard).await;
         };
         let plan = ActivePlan::for_session(&session);
         let connection = match self
@@ -460,7 +506,9 @@ impl AgentManager {
         {
             Ok(connection) => connection,
             Err(error) => {
-                self.fail_history(&session, error.to_string());
+                let raw = error.to_string();
+                history_guard.fail();
+                self.emit_history_failed(&session, raw.clone());
                 return Err(error);
             }
         };
@@ -484,12 +532,12 @@ impl AgentManager {
             Ok(response) => {
                 let views = config_views(&response.config_options.unwrap_or_default());
                 let roles = crate::repo_state::roles_from_options(&views);
-                if let Some(mut state) = lock_state(&self.state) {
-                    if let Some(live) = state.sessions.get_mut(&session) {
-                        live.last_roles = roles;
-                    }
-                    state.finish_history(&session);
+                if let Some(mut state) = lock_state(&self.state)
+                    && let Some(live) = state.sessions.get_mut(&session)
+                {
+                    live.last_roles = roles;
                 }
+                history_guard.finish();
                 emit_event(
                     &self.app,
                     AppEvent::ConfigOptions {
@@ -503,7 +551,8 @@ impl AgentManager {
             }
             Err(error) => {
                 let raw = error.to_string();
-                self.fail_history(&session, raw.clone());
+                history_guard.fail();
+                self.emit_history_failed(&session, raw.clone());
                 Err(AgentError::RequestFailed { raw })
             }
         }
@@ -515,37 +564,53 @@ impl AgentManager {
     /// emitting `HistoryBegin`. Finished plans never say "plan is gone":
     /// with no recoverable past they fail with an honest non-retryable
     /// reason instead.
-    async fn finish_empty_history(&self, session: SessionKey) -> Result<(), AgentError> {
+    ///
+    /// Holds both guards explicitly and spawns without polling: the history
+    /// guard arrives held from `load_history`, the warm guard is taken here
+    /// beside it. No contender: a racing `send_prompt` blocks in
+    /// `wait_for_history` first, and a racing `warm_session` skips started
+    /// histories, so the double-hold is the single spawner.
+    async fn finish_empty_history(
+        &self,
+        session: SessionKey,
+        history_guard: HistoryGuard,
+    ) -> Result<(), AgentError> {
         if let Some((repo_root, _)) = self.reopen_snapshot()
             && super::session_ids::is_finished(&repo_root, &session.plan)
         {
             let raw = "no saved session found for this plan - it predates session recording or its session was pruned"
                 .to_string();
-            self.fail_history(&session, raw.clone());
+            history_guard.fail();
+            self.emit_history_failed(&session, raw.clone());
             return Err(AgentError::RequestFailed { raw });
         }
-        match self.ensure_live(&session).await {
+        let Some(warm_guard) = WarmGuard::claim(&self.state, &session) else {
+            let raw = "agent is still starting, try again".to_string();
+            history_guard.fail();
+            self.emit_history_failed(&session, raw.clone());
+            return Err(AgentError::RequestFailed { raw });
+        };
+        let result = self.ensure_live_claimed(&session).await;
+        drop(warm_guard);
+        match result {
             Ok(_) => {
-                if let Some(mut state) = lock_state(&self.state) {
-                    state.finish_history(&session);
-                }
+                history_guard.finish();
                 emit_event(&self.app, AppEvent::HistoryDone { session });
                 Ok(())
             }
             Err(error) => {
-                self.fail_history(&session, error.to_string());
+                let raw = error.to_string();
+                history_guard.fail();
+                self.emit_history_failed(&session, raw.clone());
                 Err(error)
             }
         }
     }
 
-    /// Fail one history load: release the single-flight and emit an error
-    /// bar with the classified hint. The partial replay stays in the
-    /// transcript; a retry clears it on `HistoryPreparing`.
-    fn fail_history(&self, session: &SessionKey, raw: String) {
-        if let Some(mut state) = lock_state(&self.state) {
-            state.abort_history(session);
-        }
+    /// Emit one history failure bar with the classified hint. The guard
+    /// already settled the single-flight; the partial replay stays in the
+    /// transcript and a retry clears it on `HistoryPreparing`.
+    fn emit_history_failed(&self, session: &SessionKey, raw: String) {
         let hint = classify_error(&raw);
         emit_event(
             &self.app,
@@ -562,23 +627,31 @@ impl AgentManager {
     /// interleave a live turn with the replay; on timeout the caller
     /// refuses instead.
     pub(crate) async fn wait_for_history(&self, key: &SessionKey) -> Result<(), AgentError> {
-        let timeout = std::time::Duration::from_secs(30);
-        let interval = std::time::Duration::from_millis(50);
-        let start = std::time::Instant::now();
-        loop {
-            let loading = lock_state(&self.state)
-                .map(|state| state.is_history_loading(key))
-                .unwrap_or(false);
-            if !loading {
-                return Ok(());
-            }
-            if start.elapsed() >= timeout {
-                return Err(AgentError::RequestFailed {
-                    raw: "history is still loading, try again".to_string(),
-                });
-            }
-            tokio::time::sleep(interval).await;
+        let wait_start = std::time::Instant::now();
+        let settled = wait_until(HISTORY_TIMEOUT, || {
+            lock_state(&self.state)
+                .map(|state| !state.is_history_loading(key))
+                .unwrap_or(true)
+        })
+        .await;
+        if settled {
+            return Ok(());
         }
+        let still_warming = lock_state(&self.state)
+            .map(|state| state.is_warming(key))
+            .unwrap_or(false);
+        let snapshot_present = self.session_snapshot_for(key).is_some();
+        log::warn!(
+            "history wait timeout {} {:?} after {:?}: still_warming={} snapshot_present={}",
+            key.plan,
+            key.role,
+            wait_start.elapsed(),
+            still_warming,
+            snapshot_present
+        );
+        Err(AgentError::RequestFailed {
+            raw: "history is still loading, try again".to_string(),
+        })
     }
 
     /// Drop every live session entry. Repo opens start from scratch.
@@ -591,8 +664,7 @@ impl AgentManager {
                 state.pending_scoping = None;
                 state.pending_titles.clear();
                 state.worktrees.clear();
-                state.history_loading.clear();
-                state.history_loaded.clear();
+                state.clear_start_claims();
             }
             Err(error) => {
                 log::warn!("failed to clear sessions: {error}");
@@ -785,5 +857,15 @@ impl AgentManager {
             session.supports_close,
             key.clone(),
         ))
+    }
+
+    /// Live connection plus session id, `None` while the transport is down.
+    /// Pure read; callers that need to spawn fall through to the warm claim.
+    pub(crate) fn live_snapshot_for(
+        &self,
+        key: &SessionKey,
+    ) -> Option<(ConnectionTo<Agent>, String)> {
+        let (connection, session_id, _, _) = self.session_snapshot_for(key)?;
+        (!connection.is_incoming_closed()).then_some((connection, session_id))
     }
 }
