@@ -144,6 +144,30 @@ describe("transcript user messages", () => {
 	});
 });
 
+describe("transcript lead", () => {
+	test("lead renders first as a YOU bubble", () => {
+		const { container } = render(
+			<Transcript
+				items={[{ kind: "user", id: "u1", text: "hello" }]}
+				lead="TEMPLATE"
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		const bubbles = container.querySelectorAll(".msg.user");
+		expect(bubbles).toHaveLength(2);
+		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
+		expect(bubbles[1]?.textContent).toContain("hello");
+	});
+
+	test("absent lead renders nothing extra", () => {
+		const { container } = render(transcript("hello"));
+		expect(container.querySelectorAll(".msg.user")).toHaveLength(1);
+	});
+});
+
 describe("transcript agent tables", () => {
 	const table = "| File | Status |\n| --- | --- |\n| `a.ts` | ok |";
 

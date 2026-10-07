@@ -403,7 +403,8 @@ impl AgentManager {
         self.drop_live(&session).await;
         self.carry_prompted(&from.name, &next.name);
         let mut plan = ActivePlan::executing(next.name.clone());
-        // The role goes out hidden below, so later turns never prefix again.
+        // The role goes out as the full first turn below, so later turns
+        // never prefix again.
         plan.prefixed = true;
         let agent = opencode::agent_for(plan.phase);
         let (connection, session_id, key) =
@@ -490,7 +491,8 @@ impl AgentManager {
         let next = plans::begin_landing(&repo_root, &from)?;
         self.drop_live(&session).await;
         let mut plan = ActivePlan::landing(next.name.clone());
-        // The role goes out hidden below, so later turns never prefix again.
+        // The role goes out as the full first turn below, so later turns
+        // never prefix again.
         plan.prefixed = true;
         let agent = opencode::agent_for(plan.phase);
         let (connection, session_id, key) =

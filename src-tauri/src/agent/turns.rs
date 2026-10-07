@@ -279,9 +279,10 @@ pub(crate) fn handle_notification(
             },
         );
     }
-    // Replayed user messages only exist while history replays. Live turns
-    // append the user bubble optimistically, so mapping them outside a
-    // replay would double-add every prompt.
+    // User messages only surface here while history replays. Live turns
+    // already show their bubble (scoping appends optimistically, eager
+    // executing/landing first prompts arrive as their own event), so
+    // mapping them outside a replay would double-add every prompt.
     if let Some(chunk) = crate::updates::user_text_of(&notification.update)
         && lock_state(state)
             .map(|guard| guard.is_history_loading(key))

@@ -45,7 +45,7 @@ pub(crate) struct ActivePlan {
     pub(crate) name: String,
     pub(crate) phase: plans::Phase,
     /// Role already delivered for this ACP conversation. Executing and
-    /// landing send once, hidden or prefixed to the first prompt;
+    /// landing send once, as the full first turn or prefixed to it;
     /// scoping prefixes its template server-side to the first prompt.
     pub(crate) prefixed: bool,
 }
@@ -421,7 +421,8 @@ impl AgentManager {
         // A known session keeps its prefix state across transport deaths;
         // anything without an entry starts with the caller's flag.
         // Eager executing sessions bypass this path: `execute_plan` marks their
-        // prefixed flag, since their role already went out hidden.
+        // prefixed flag, since their role already went out as the full
+        // first turn.
         plan.prefixed = stored_prefixed.unwrap_or(plan.prefixed);
         let agent = opencode::agent_for(plan.phase);
         let (connection, session_id, _) =

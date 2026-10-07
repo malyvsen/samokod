@@ -145,13 +145,14 @@ pub fn scoping_template(plan_dir: &str) -> String {
 }
 
 /// Executing role and instruction. Sent once per executing conversation:
-/// hidden on approval, prefixed to the first prompt otherwise. Pure.
+/// as the full first turn on approval, prefixed to the first prompt
+/// otherwise. Pure.
 pub fn executing_first_message(plan_dir: &str) -> String {
     EXECUTING_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
-/// Landing role and instruction. Sent hidden when the conflict path starts
-/// the landing agent in the worktree. Pure.
+/// Landing role and instruction. Sent as the full first turn when the
+/// conflict path starts the landing agent in the worktree. Pure.
 pub fn landing_first_message(
     worktree_branch: &str,
     target_branch: &str,

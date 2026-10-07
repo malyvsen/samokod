@@ -244,7 +244,7 @@ export function App() {
 		const template = await previewPromiseFor(key);
 		updateChat(key, (chat) => ({
 			...chat,
-			...(template === null ? null : { scopingPreview: template }),
+			scopingPreview: template ?? chat.scopingPreview,
 			transcript: [
 				...chat.transcript,
 				{
