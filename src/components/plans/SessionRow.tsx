@@ -15,10 +15,8 @@ export function SessionRow({
 	worktree,
 	status,
 	openPath,
-	isOpen,
-	isBeforeOpen,
-	isLast,
-	isSingle,
+	trail,
+	position,
 	onSelect,
 	onExecute,
 	onCancel,
@@ -31,11 +29,9 @@ export function SessionRow({
 	hasPlanMd: boolean;
 	worktree: WorktreeStatus | null;
 	status: SessionStatusView;
-	openPath: AttentionKind | "neutral";
-	isOpen: boolean;
-	isBeforeOpen: boolean;
-	isLast: boolean;
-	isSingle: boolean;
+	openPath: AttentionKind | "sel";
+	trail: "before" | "open" | "after";
+	position: "single" | "last" | "middle";
 	onSelect: (session: SessionKey) => void;
 	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
@@ -46,14 +42,12 @@ export function SessionRow({
 	const kind = actionKind(phase, status.role);
 	return (
 		<>
-			<span className={gutterClass(isLast, isSingle)} aria-hidden="true">
-				<i
-					className={`v${spineClass(openPath, isOpen, isBeforeOpen, isLast)}`}
-				/>
-				<i className={`h${nodeClass(openPath, isOpen)}`} />
-				<i className={`nd${nodeClass(openPath, isOpen)}`} />
+			<span className={gutterClass(position)} aria-hidden="true">
+				<i className={`v${spineClass(openPath, trail, position)}`} />
+				<i className={`h${nodeClass(openPath, trail)}`} />
+				<i className={`nd${nodeClass(openPath, trail)}`} />
 			</span>
-			<div className={`sbody${isOpen ? " selected" : ""}`}>
+			<div className={`sbody${trail === "open" ? " selected" : ""}`}>
 				<button
 					className="srow"
 					type="button"
@@ -98,41 +92,38 @@ export function SessionRow({
 	);
 }
 
-function gutterClass(isLast: boolean, isSingle: boolean): string {
-	if (isSingle) {
-		return "ngutter single";
+function gutterClass(position: "single" | "last" | "middle"): string {
+	switch (position) {
+		case "single":
+			return "ngutter single";
+		case "last":
+			return "ngutter last";
+		case "middle":
+			return "ngutter";
 	}
-	if (isLast) {
-		return "ngutter last";
-	}
-	return "ngutter";
-}
-
-function pathKey(openPath: AttentionKind | "neutral"): string {
-	return openPath === "neutral" ? "sel" : openPath;
 }
 
 function spineClass(
-	openPath: AttentionKind | "neutral",
-	isOpen: boolean,
-	isBeforeOpen: boolean,
-	isLast: boolean,
+	openPath: AttentionKind | "sel",
+	trail: "before" | "open" | "after",
+	position: "single" | "last" | "middle",
 ): string {
-	if (isBeforeOpen) {
-		return ` c-${pathKey(openPath)}`;
+	switch (trail) {
+		case "before":
+			return ` c-${openPath}`;
+		case "open":
+			return position === "middle" ? ` u-${openPath}` : ` c-${openPath}`;
+		case "after":
+			return "";
 	}
-	if (isOpen) {
-		return isLast ? ` c-${pathKey(openPath)}` : ` u-${pathKey(openPath)}`;
-	}
-	return "";
 }
 
 function nodeClass(
-	openPath: AttentionKind | "neutral",
-	isOpen: boolean,
+	openPath: AttentionKind | "sel",
+	trail: "before" | "open" | "after",
 ): string {
-	if (!isOpen) {
+	if (trail !== "open") {
 		return "";
 	}
-	return openPath === "neutral" ? " sel" : ` c-${pathKey(openPath)}`;
+	return openPath === "sel" ? " sel" : ` c-${openPath}`;
 }

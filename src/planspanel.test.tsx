@@ -346,7 +346,7 @@ describe("plans panel", () => {
 			);
 			expect(
 				planGroup("Idle, scoping, opens Scoping").querySelector(
-					".ptitle.gleam-idle",
+					".ptitle.sheen-idle",
 				),
 			).not.toBeNull();
 			expect(

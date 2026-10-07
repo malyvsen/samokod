@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import type { PlanEntry, PlanPhase, SessionKey } from "../types";
 import {
+	type AttentionKind,
 	attentionFor,
 	attentionTitle,
 	headerKey,
@@ -42,8 +43,6 @@ export function PlansPanel({
 						<PlanGroup
 							key={plan.name}
 							plan={plan}
-							phase={phase}
-							expanded={selected?.plan === plan.name}
 							selected={selected}
 							onSelect={onSelect}
 							onExecute={onExecute}
@@ -60,8 +59,6 @@ export function PlansPanel({
 
 function PlanGroup({
 	plan,
-	phase,
-	expanded,
 	selected,
 	onSelect,
 	onExecute,
@@ -70,8 +67,6 @@ function PlanGroup({
 	onBeginLanding,
 }: {
 	plan: PlanEntry;
-	phase: PlanPhase;
-	expanded: boolean;
 	selected: SessionKey | null;
 	onSelect: (session: SessionKey) => void;
 	onExecute: (session: SessionKey) => void;
@@ -81,30 +76,24 @@ function PlanGroup({
 }) {
 	const target = headerKey(plan);
 	const attention = attentionFor(plan);
-	const openRole = selected?.plan === plan.name ? selected.role : null;
-	const openPath = openRole === null ? "neutral" : openPathFor(plan, openRole);
+	const expanded = selected !== null && selected.plan === plan.name;
+	const openRole = expanded ? selected.role : null;
+	const openPath = openRole === null ? "sel" : openPathFor(plan, openRole);
 	const openIdx =
 		openRole === null
 			? -1
 			: plan.sessions.findIndex((status) => status.role === openRole);
-	const markerClass =
-		attention === null
-			? expanded
-				? "mk mk-sel"
-				: "mk mk-none"
-			: `mk mk-${attention}`;
-	const pathKey = openPath === "neutral" ? "sel" : openPath;
 	return (
 		<div className="plan-group tree">
 			<span className="mgutter">
 				{expanded ? (
 					<i
-						className={`v${openIdx >= 0 ? ` c-${pathKey}` : ""}`}
+						className={`v${openIdx >= 0 ? ` c-${openPath}` : ""}`}
 						aria-hidden="true"
 					/>
 				) : null}
 				<span
-					className={markerClass}
+					className={markerClassFor(attention, expanded)}
 					title={attention === null ? undefined : attentionTitle(attention)}
 					aria-hidden="true"
 				/>
@@ -113,11 +102,11 @@ function PlanGroup({
 				className="plan-name"
 				type="button"
 				onClick={() => onSelect(target)}
-				aria-label={`${plan.title}, ${phase}, opens ${roleLabel(target.role)}`}
+				aria-label={`${plan.title}, ${plan.phase}, opens ${roleLabel(target.role)}`}
 				data-full={plan.title}
 			>
 				<span
-					className={`ptitle${attention === null ? "" : ` gleam-${attention}`}`}
+					className={`ptitle${attention === null ? "" : ` sheen-${attention}`}`}
 				>
 					{plan.title}
 				</span>
@@ -133,10 +122,8 @@ function PlanGroup({
 							worktree={plan.worktree}
 							status={status}
 							openPath={openPath}
-							isOpen={index === openIdx}
-							isBeforeOpen={openIdx >= 0 && index < openIdx}
-							isLast={index === plan.sessions.length - 1}
-							isSingle={plan.sessions.length === 1}
+							trail={trailFor(index, openIdx)}
+							position={positionFor(index, plan.sessions.length)}
 							onSelect={onSelect}
 							onExecute={onExecute}
 							onCancel={onCancel}
@@ -147,6 +134,39 @@ function PlanGroup({
 				: null}
 		</div>
 	);
+}
+
+function markerClassFor(
+	attention: AttentionKind | null,
+	expanded: boolean,
+): string {
+	if (attention !== null) {
+		return `mk mk-${attention}`;
+	}
+	return expanded ? "mk mk-sel" : "mk mk-none";
+}
+
+function trailFor(index: number, openIdx: number): "before" | "open" | "after" {
+	if (index === openIdx) {
+		return "open";
+	}
+	if (openIdx >= 0 && index < openIdx) {
+		return "before";
+	}
+	return "after";
+}
+
+function positionFor(
+	index: number,
+	total: number,
+): "single" | "last" | "middle" {
+	if (total === 1) {
+		return "single";
+	}
+	if (index === total - 1) {
+		return "last";
+	}
+	return "middle";
 }
 
 function groupByPhase(plans: PlanEntry[]): Map<PlanPhase, PlanEntry[]> {

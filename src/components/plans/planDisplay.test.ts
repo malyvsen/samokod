@@ -156,24 +156,24 @@ describe("openPathFor", () => {
 		).toBe("failed");
 	});
 
-	test("stays neutral when an older session is open", () => {
+	test("stays white when an older session is open", () => {
 		const broke = plan("broke", "executing", [
 			testStatus("scoping"),
 			testStatus("executing", { failed: true }),
 		]);
-		expect(openPathFor(broke, "scoping")).toBe("neutral");
+		expect(openPathFor(broke, "scoping")).toBe("sel");
 	});
 
-	test("stays neutral while the latest session is working", () => {
+	test("stays white while the latest session is working", () => {
 		expect(
 			openPathFor(
 				plan("run", "scoping", [testStatus("scoping", { working: true })]),
 				"scoping",
 			),
-		).toBe("neutral");
+		).toBe("sel");
 	});
 
-	test("stays neutral for finished phases", () => {
+	test("stays white for finished phases", () => {
 		for (const phase of ["completed", "cancelled"] as const) {
 			expect(
 				openPathFor(
@@ -183,7 +183,7 @@ describe("openPathFor", () => {
 					]),
 					"executing",
 				),
-			).toBe("neutral");
+			).toBe("sel");
 		}
 	});
 });
