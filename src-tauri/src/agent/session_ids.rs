@@ -465,25 +465,6 @@ mod tests {
         assert_eq!(kept.session(SessionRole::Executing), Some("ses_exec"));
     }
 
-    #[test]
-    fn legacy_session_file_migrates_to_state() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        crate::plans::ensure_structure(dir.path()).expect("ensure");
-        let name = "2026-09-30.10-00-00";
-        let plan = plan_dir(dir.path(), Phase::Scoping, name);
-        std::fs::write(
-            plan.join(plans::LEGACY_SESSION_FILE),
-            r#"{"scoping":"ses_old"}"#,
-        )
-        .expect("legacy");
-        record(dir.path(), &key(name, SessionRole::Executing), "ses_exec");
-        let kept = crate::plans::load_state(&plan);
-        assert_eq!(kept.session(SessionRole::Scoping), Some("ses_old"));
-        assert_eq!(kept.session(SessionRole::Executing), Some("ses_exec"));
-        assert!(plan.join(plans::STATE_FILE).is_file());
-        assert!(!plan.join(plans::LEGACY_SESSION_FILE).is_file());
-    }
-
     fn discovered(id: &str, agent: &str, directory: &str, created: i64) -> DiscoveredSession {
         DiscoveredSession {
             id: id.to_string(),

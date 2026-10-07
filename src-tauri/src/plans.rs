@@ -69,9 +69,6 @@ impl PlanRef {
 /// `.samokod/.gitignore`.
 pub const STATE_FILE: &str = "state.json";
 
-/// Legacy session-only file. Read for migration, removed on the next write.
-pub(crate) const LEGACY_SESSION_FILE: &str = "session.json";
-
 /// Per-plan state: one OpenCode session ID per role the plan has used,
 /// plus the last phase-entry time in epoch millis. `entered_at` stamps the
 /// last move into this phase; session spawns preserve it
@@ -82,7 +79,7 @@ pub struct PlanState {
     pub scoping: Option<String>,
     #[serde(default)]
     pub executing: Option<String>,
-    #[serde(default, alias = "merging")]
+    #[serde(default)]
     pub landing: Option<String>,
     #[serde(default)]
     pub entered_at: Option<i64>,
@@ -240,23 +237,17 @@ fn slugged_name(repo_root: &Path, plan: &PlanRef) -> Option<String> {
 
 /// Read the persisted state for one plan directory. Missing files yield a
 /// default; corrupt files log and yield a default so a broken file never
-/// blocks a fresh spawn. Legacy `session.json` files read as state without
-/// a timestamp.
+/// blocks a fresh spawn.
 pub(crate) fn load_state(plan_dir: &Path) -> PlanState {
     let path = plan_dir.join(STATE_FILE);
     if let Some(state) = read_state_file(&path) {
-        return state;
-    }
-    let legacy = plan_dir.join(LEGACY_SESSION_FILE);
-    if let Some(state) = read_state_file(&legacy) {
         return state;
     }
     PlanState::default()
 }
 
 /// Persist the state for one plan directory. Best-effort: failures log
-/// and the live session continues. A migrated legacy file is removed once
-/// the new file lands.
+/// and the live session continues.
 pub(crate) fn store_state(plan_dir: &Path, state: &PlanState) {
     let text = match serde_json::to_string_pretty(state) {
         Ok(text) => text,
@@ -267,13 +258,6 @@ pub(crate) fn store_state(plan_dir: &Path, state: &PlanState) {
     };
     if let Err(error) = std::fs::write(plan_dir.join(STATE_FILE), text) {
         log::warn!("failed to record state {}: {error}", plan_dir.display());
-        return;
-    }
-    let legacy = plan_dir.join(LEGACY_SESSION_FILE);
-    if legacy.is_file()
-        && let Err(error) = std::fs::remove_file(&legacy)
-    {
-        log::warn!("failed to remove legacy {}: {error}", legacy.display());
     }
 }
 
@@ -895,28 +879,5 @@ mod tests {
             phase: Phase::Scoping,
         };
         assert_eq!(arrival_ms(root, &missing), None);
-    }
-
-    #[test]
-    fn legacy_merging_state_key_still_reads() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        ensure_structure(root).expect("ensure");
-        let plan = PlanRef {
-            name: "2026-09-26.08-41-03".to_string(),
-            phase: Phase::Scoping,
-        };
-        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
-        std::fs::write(
-            plan.path(root).join(STATE_FILE),
-            r#"{"scoping":"ses_scoping","merging":"ses_landing"}"#,
-        )
-        .expect("write");
-        let state = load_state(&plan.path(root));
-        assert_eq!(state.session(SessionRole::Landing), Some("ses_landing"));
-        store_state(&plan.path(root), &state);
-        let text = std::fs::read_to_string(plan.path(root).join(STATE_FILE)).expect("read");
-        assert!(text.contains("\"landing\""));
-        assert!(!text.contains("\"merging\""));
     }
 }
