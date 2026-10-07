@@ -248,9 +248,9 @@ describe("plans panel", () => {
 			);
 			expect(screen.getByText("Idle")).toBeInTheDocument();
 			expect(
-				planGroup("Idle, scoping, opens Scoping").querySelector(".adot"),
+				planGroup("Idle, scoping, opens Scoping").querySelector(".mk-idle"),
 			).not.toBeNull();
-			expect(container.querySelectorAll(".adot").length).toBeGreaterThan(0);
+			expect(container.querySelectorAll(".mk-idle").length).toBeGreaterThan(0);
 		});
 	});
 
@@ -278,13 +278,16 @@ describe("plans panel", () => {
 					])}
 				/>,
 			);
-			expect(container.querySelector(".adot.idle")).not.toBeNull();
-			expect(container.querySelector(".adot.approval")).not.toBeNull();
-			expect(container.querySelector(".adot.failed")).not.toBeNull();
-			expect(container.querySelectorAll(".adot").length).toBe(3);
+			expect(container.querySelector(".mk-idle")).not.toBeNull();
+			expect(container.querySelector(".mk-approval")).not.toBeNull();
+			expect(container.querySelector(".mk-failed")).not.toBeNull();
+			expect(
+				container.querySelectorAll(".mk-idle, .mk-approval, .mk-failed").length,
+			).toBe(3);
+			expect(container.querySelectorAll(".mk-none").length).toBe(2);
 		});
 
-		test("names the cause", () => {
+		test("names the cause on markers", () => {
 			const { container } = render(
 				<PlansPanel
 					{...panelProps([
@@ -300,14 +303,56 @@ describe("plans panel", () => {
 					])}
 				/>,
 			);
-			const tips = [...container.querySelectorAll(".adot")].map((node) =>
-				node.getAttribute("title"),
-			);
+			const tips = [
+				...container.querySelectorAll(".mk-idle, .mk-approval, .mk-failed"),
+			].map((node) => node.getAttribute("title"));
 			expect(tips).toEqual([
 				"needs input",
 				"needs approval",
 				"failed, needs a response",
 			]);
+		});
+
+		test("marks the selected quiet plan white and others hollow", () => {
+			const quiet = testEntryWith("run", "scoping", "Run", true, [
+				testStatus("scoping", { working: true }),
+			]);
+			const idle = testEntryWith("idle", "scoping", "Idle", true, [
+				testStatus("scoping"),
+			]);
+			const { container } = render(
+				<PlansPanel
+					{...panelProps([idle, quiet], { plan: "run", role: "scoping" })}
+				/>,
+			);
+			expect(
+				planGroup("Run, scoping, opens Scoping").querySelector(".mk-sel"),
+			).not.toBeNull();
+			expect(container.querySelector(".mk-sel")).not.toBeNull();
+		});
+
+		test("sweeps attention names with a sheen", () => {
+			render(
+				<PlansPanel
+					{...panelProps([
+						testEntryWith("idle", "scoping", "Idle", true, [
+							testStatus("scoping"),
+						]),
+						testEntryWith("run", "scoping", "Run", true, [
+							testStatus("scoping", { working: true }),
+						]),
+					])}
+				/>,
+			);
+			expect(
+				planGroup("Idle, scoping, opens Scoping").querySelector(
+					".ptitle.gleam-idle",
+				),
+			).not.toBeNull();
+			expect(
+				planGroup("Run, scoping, opens Scoping").querySelector(".ptitle")
+					?.className,
+			).toBe("ptitle");
 		});
 	});
 
@@ -581,12 +626,22 @@ describe("plans panel", () => {
 			expect(label).toContain("#9d9a92");
 		});
 
-		test("attention dots stay circular", () => {
+		test("phase headers match the TODOS green", () => {
+			const head = /\.sect-head\s*\{[^}]*\}/.exec(appCss())?.[0] ?? "";
+			expect(head).toContain("#7dffc4");
+			expect(head).toContain("11px");
+			expect(head).toContain("0.14em");
+		});
+
+		test("attention markers stay square", () => {
 			const css = appCss();
+			expect(css).not.toContain(".adot");
 			expect(css).not.toContain(".app *");
+			expect(css).not.toContain("border-radius: 50%");
 			const reset =
 				/\.app[^{]*\{[^}]*border-radius[^}]*\}/.exec(css)?.[0] ?? "";
-			expect(reset).toContain(".adot");
+			expect(reset).toContain(":not(");
+			expect(reset).toContain(".mk");
 		});
 
 		test("the select button fills the whole row", () => {

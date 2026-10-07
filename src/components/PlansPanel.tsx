@@ -80,6 +80,12 @@ function PlanGroup({
 }) {
 	const target = headerKey(plan);
 	const attention = attentionFor(plan);
+	const markerClass =
+		attention === null
+			? expanded
+				? "mk mk-sel"
+				: "mk mk-none"
+			: `mk mk-${attention}`;
 	return (
 		<div className="plan-group">
 			<button
@@ -89,14 +95,16 @@ function PlanGroup({
 				aria-label={`${plan.title}, ${phase}, opens ${roleLabel(target.role)}`}
 				data-full={plan.title}
 			>
-				{attention === null ? null : (
-					<span
-						className={`adot ${attention}`}
-						title={attentionTitle(attention)}
-						aria-hidden="true"
-					/>
-				)}
-				<span className="ptitle">{plan.title}</span>
+				<span
+					className={markerClass}
+					title={attention === null ? undefined : attentionTitle(attention)}
+					aria-hidden="true"
+				/>
+				<span
+					className={`ptitle${attention === null ? "" : ` gleam-${attention}`}`}
+				>
+					{plan.title}
+				</span>
 			</button>
 			{expanded
 				? plan.sessions.map((status) => (
