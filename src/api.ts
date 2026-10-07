@@ -30,6 +30,10 @@ export function createPlan(): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("create_plan");
 }
 
+export function executePlan(session: SessionKey): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("execute_plan", { session });
+}
+
 export function cancelPlan(session: SessionKey): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("cancel_plan", { session });
 }

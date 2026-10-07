@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
 	validateRepo: vi.fn(),
 	openRepo: vi.fn(),
 	createPlan: vi.fn(),
+	executePlan: vi.fn(),
 	cancelPlan: vi.fn(),
 	selectPlan: vi.fn(),
 	sendPrompt: vi.fn(),

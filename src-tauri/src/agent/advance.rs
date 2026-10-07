@@ -1,6 +1,8 @@
 // Automatic plan progression: one pump, one pure decision, one shared core.
 // The pump scans automatic idle plans in phase then arrival order and fires
 // at most one transition per plan, serializing landing behind the scenes.
+// Scoping never rides the pump: approving a plan stays a manual `>` click,
+// and only executing and landing plans carry the auto-manual switch.
 // `next_action` is pure over a plain view (unit-tested with no git repo);
 // `transition` is the single effectful core that the manual commands and
 // the pump all go through, so the pump adds no second copy of any step.
@@ -11,10 +13,12 @@ use crate::types::{AgentError, PlansUpdate, SessionKey, SessionRole};
 use super::session::ActivePlan;
 use super::{AgentManager, lock_state};
 
-/// Pump: advance every automatic idle plan that is ready, oldest arrivals
-/// first, at most one transition per plan per pass. Landing serializes by
-/// only ever moving one waiter into `landing/` at a time; fast finishes
-/// never touch `landing/` so they proceed even while a rebase is active.
+/// Pump: advance every automatic idle executing or landing plan that is
+/// ready, oldest arrivals first, at most one transition per plan per pass.
+/// Scoping plans always wait for the manual `>` click and never fire here.
+/// Landing serializes by only ever moving one waiter into `landing/` at a
+/// time; fast finishes never touch `landing/` so they proceed even while a
+/// rebase is active.
 // Dirty or diverged plans hold and are skipped until a later trigger,
 // showing only their existing markers. A landing whose target moved under
 // it re-rebases automatically while still on A. Background plans never
@@ -113,7 +117,6 @@ impl AgentManager {
                     .unwrap_or(true)
             })
             .unwrap_or(true);
-        let has_plan_md = plan.has_plan_md(repo_root);
         let (dirty, ffable) = match plan.phase {
             Phase::Executing | Phase::Landing => {
                 match self.worktree_status_for(repo_root, &plan.name) {
@@ -134,7 +137,6 @@ impl AgentManager {
             phase: plan.phase,
             manual,
             idle,
-            has_plan_md,
             dirty,
             ffable,
             landing_active,
@@ -401,8 +403,9 @@ impl AgentManager {
 }
 
 /// One transition the pump or a manual command can perform. At most one per
-/// plan per pump pass. `FinishExecuting` is the fast path straight from
-/// executing when ffable; `RebaseLanding` re-runs the rebase when the
+/// plan per pump pass. `Execute` is manual-only (the header `>` click) and
+/// never fires from the pump; `FinishExecuting` is the fast path straight
+/// from executing when ffable; `RebaseLanding` re-runs the rebase when the
 /// target moved under an active landing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Transition {
@@ -426,22 +429,21 @@ impl Transition {
 }
 
 /// Plain view of one plan for the pure decision: phase, stored mode, idle
-/// (no turn running), `plan.md` presence, worktree dirtiness and
-/// fast-forwardability, and whether another landing already occupies
-/// `landing/`.
+/// (no turn running), worktree dirtiness and fast-forwardability, and
+/// whether another landing already occupies `landing/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlanView {
     pub name: String,
     pub phase: Phase,
     pub manual: bool,
     pub idle: bool,
-    pub has_plan_md: bool,
     pub dirty: bool,
     pub ffable: bool,
     pub landing_active: bool,
 }
 
-/// Pure automation decision over one plan: at most one transition. Manual
+/// Pure automation decision over one plan: at most one transition. Scoping
+/// always waits for the manual `>` click and never fires here. Manual
 /// plans hold; running turns hold; dirty worktrees hold; diverged
 /// executings wait while another landing occupies `landing/`; clean
 /// ffable executings finish directly without touching `landing/`; clean
@@ -451,15 +453,7 @@ pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
         return None;
     }
     match view.phase {
-        Phase::Scoping => {
-            if view.has_plan_md {
-                Some(Transition::Execute {
-                    plan: view.name.clone(),
-                })
-            } else {
-                None
-            }
-        }
+        Phase::Scoping => None,
         Phase::Executing => {
             if view.dirty {
                 None
@@ -512,7 +506,6 @@ mod tests {
             phase,
             manual: false,
             idle: true,
-            has_plan_md: true,
             dirty: false,
             ffable: false,
             landing_active: false,
@@ -520,17 +513,11 @@ mod tests {
     }
 
     #[test]
-    fn scoping_executes_once_its_turn_ends_with_plan_md() {
-        let ready = view("a", Phase::Scoping);
-        assert_eq!(
-            next_action(&ready),
-            Some(Transition::Execute {
-                plan: "a".to_string()
-            })
-        );
+    fn scoping_always_waits_for_the_button() {
+        assert_eq!(next_action(&view("a", Phase::Scoping)), None);
         assert_eq!(
             next_action(&PlanView {
-                has_plan_md: false,
+                ffable: true,
                 ..view("a", Phase::Scoping)
             }),
             None

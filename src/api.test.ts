@@ -1,10 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
+	executePlan,
 	loadHistory,
 	onAppEvent,
 	selectPlan,
 	setConfigOption,
+	setPlanMode,
 	warmSession,
 } from "./api";
 import { testKey } from "./fixtures";
@@ -46,6 +48,31 @@ describe("session commands", () => {
 		await selectPlan(testKey());
 		expect(invoke).toHaveBeenCalledWith("select_plan", {
 			session: testKey(),
+		});
+	});
+
+	test("execute_plan targets the session", async () => {
+		vi.mocked(invoke).mockResolvedValue({
+			plans: [],
+			selected: testKey(),
+			config_defaults: { model: null, effort: null },
+		});
+		await executePlan(testKey());
+		expect(invoke).toHaveBeenCalledWith("execute_plan", {
+			session: testKey(),
+		});
+	});
+
+	test("set_plan_mode targets the plan", async () => {
+		vi.mocked(invoke).mockResolvedValue({
+			plans: [],
+			selected: testKey(),
+			config_defaults: { model: null, effort: null },
+		});
+		await setPlanMode("2026-09-25.10-54-59", true);
+		expect(invoke).toHaveBeenCalledWith("set_plan_mode", {
+			plan: "2026-09-25.10-54-59",
+			manual: true,
 		});
 	});
 

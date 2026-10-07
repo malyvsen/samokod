@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
 	validateRepo: vi.fn(),
 	openRepo: vi.fn(),
 	createPlan: vi.fn(),
+	executePlan: vi.fn(),
 	cancelPlan: vi.fn(),
 	selectPlan: vi.fn(),
 	sendPrompt: vi.fn(),
@@ -93,6 +94,72 @@ describe("plan", () => {
 		expect(screen.getByText("Shiny")).toBeInTheDocument();
 		expect(screen.getByText("Scoping")).toBeInTheDocument();
 		expect(screen.getByText("Executing")).toBeInTheDocument();
+	});
+
+	test("header execute shows the live first prompt without sending", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [
+				testEntry("2026-09-25.10-54-59", "scoping", "Parallel sessions", true),
+			],
+			selected: testKey(),
+			config_defaults: testDefaults(),
+		});
+		api.executePlan.mockResolvedValue({
+			plans: [
+				testEntry(
+					"2026-09-25.10-54-59",
+					"executing",
+					"Parallel sessions",
+					true,
+				),
+			],
+			selected: { plan: "2026-09-25.10-54-59", role: "executing" },
+			config_defaults: testDefaults(),
+		});
+		const user = await openChat();
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Send Parallel sessions to execution",
+			}),
+		);
+		expect(api.executePlan).toHaveBeenCalledWith({
+			plan: "2026-09-25.10-54-59",
+			role: "scoping",
+		});
+		expect(api.sendPrompt).not.toHaveBeenCalled();
+		emit({
+			type: "user_text",
+			session: { plan: "2026-09-25.10-54-59", role: "executing" },
+			chunk: "EXECUTING-PROMPT",
+		});
+		await screen.findByText("EXECUTING-PROMPT");
+	});
+
+	test("failed execute surfaces its own hint without retry", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [
+				testEntry("2026-09-25.10-54-59", "scoping", "Parallel sessions", true),
+			],
+			selected: testKey(),
+			config_defaults: testDefaults(),
+		});
+		api.executePlan.mockRejectedValue(new Error("nope"));
+		const user = await openChat();
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Send Parallel sessions to execution",
+			}),
+		);
+		expect(
+			await screen.findByText("couldn't start execution - try again"),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "retry" }),
+		).not.toBeInTheDocument();
 	});
 
 	test("header cancel cancels and keeps the transcript", async () => {
@@ -348,6 +415,15 @@ describe("plan", () => {
 	});
 
 	test("mode switch flips the plan to manual", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [
+				testEntry("2026-09-25.10-54-59.slug", "executing", "Shiny", true),
+			],
+			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
+			config_defaults: testDefaults(),
+		});
 		api.setPlanMode.mockResolvedValue({
 			plans: [testEntry()],
 			selected: testKey(),
@@ -357,10 +433,22 @@ describe("plan", () => {
 		await user.click(
 			await screen.findByRole("button", { name: "Switch to manual" }),
 		);
-		expect(api.setPlanMode).toHaveBeenCalledWith("2026-09-25.10-54-59", true);
+		expect(api.setPlanMode).toHaveBeenCalledWith(
+			"2026-09-25.10-54-59.slug",
+			true,
+		);
 	});
 
 	test("failed mode switch surfaces its own hint without retry", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [
+				testEntry("2026-09-25.10-54-59.slug", "executing", "Shiny", true),
+			],
+			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
+			config_defaults: testDefaults(),
+		});
 		api.setPlanMode.mockRejectedValue(new Error("denied"));
 		const user = await openChat();
 		await user.click(

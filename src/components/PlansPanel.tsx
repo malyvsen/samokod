@@ -16,6 +16,7 @@ export function PlansPanel({
 	selected,
 	onSelect,
 	onNewPlan,
+	onExecute,
 	onCancel,
 	onSetMode,
 }: {
@@ -23,6 +24,7 @@ export function PlansPanel({
 	selected: SessionKey | null;
 	onSelect: (session: SessionKey) => void;
 	onNewPlan: () => void;
+	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
 	onSetMode: (plan: string, manual: boolean) => void;
 }) {
@@ -50,6 +52,7 @@ export function PlansPanel({
 							plan={plan}
 							selected={selected}
 							onSelect={onSelect}
+							onExecute={onExecute}
 							onCancel={onCancel}
 							onSetMode={onSetMode}
 						/>
@@ -64,12 +67,14 @@ function PlanGroup({
 	plan,
 	selected,
 	onSelect,
+	onExecute,
 	onCancel,
 	onSetMode,
 }: {
 	plan: PlanEntry;
 	selected: SessionKey | null;
 	onSelect: (session: SessionKey) => void;
+	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
 	onSetMode: (plan: string, manual: boolean) => void;
 }) {
@@ -82,6 +87,8 @@ function PlanGroup({
 		openRole === null
 			? -1
 			: plan.sessions.findIndex((status) => status.role === openRole);
+	const scopingWorking =
+		plan.sessions.find((status) => status.role === "scoping")?.working ?? false;
 	return (
 		<div className={`plan-group tree${expanded ? " sel" : ""}`}>
 			<span className="mgutter">
@@ -124,17 +131,32 @@ function PlanGroup({
 						>
 							✕
 						</button>
-						<button
-							className={`sbtn mode${plan.manual ? " manual" : ""}`}
-							type="button"
-							aria-label={plan.manual ? "Switch to auto" : "Switch to manual"}
-							onClick={(event) => {
-								event.stopPropagation();
-								onSetMode(plan.name, !plan.manual);
-							}}
-						>
-							{plan.manual ? "M" : "A"}
-						</button>
+						{plan.phase === "scoping" ? (
+							<button
+								className="sbtn execute"
+								type="button"
+								aria-label={`Send ${plan.title} to execution`}
+								disabled={scopingWorking || !plan.has_plan_md}
+								onClick={(event) => {
+									event.stopPropagation();
+									onExecute(target);
+								}}
+							>
+								&gt;
+							</button>
+						) : (
+							<button
+								className={`sbtn mode${plan.manual ? " manual" : ""}`}
+								type="button"
+								aria-label={plan.manual ? "Switch to auto" : "Switch to manual"}
+								onClick={(event) => {
+									event.stopPropagation();
+									onSetMode(plan.name, !plan.manual);
+								}}
+							>
+								{plan.manual ? "M" : "A"}
+							</button>
+						)}
 					</span>
 				)}
 			</div>

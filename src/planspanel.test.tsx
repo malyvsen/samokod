@@ -20,6 +20,7 @@ function panelProps(
 		selected,
 		onSelect: vi.fn(),
 		onNewPlan: vi.fn(),
+		onExecute: vi.fn(),
 		onCancel: vi.fn(),
 		onSetMode: vi.fn(),
 	};
@@ -165,7 +166,7 @@ describe("plans panel", () => {
 			expect(header.className).toBe("plan-name");
 		});
 
-		test("shows cancel left of an automatic switch", () => {
+		test("scoping headers offer cancel and execute instead of a switch", () => {
 			const plan = scopingPlan();
 			render(
 				<PlansPanel
@@ -177,6 +178,49 @@ describe("plans panel", () => {
 			const cancel = within(group).getByRole("button", {
 				name: "Cancel Parallel sessions",
 			});
+			const execute = within(group).getByRole("button", {
+				name: "Send Parallel sessions to execution",
+			});
+			expect(execute.textContent).toBe(">");
+			expect(execute.className).toContain("execute");
+			expect(buttons.indexOf(cancel)).toBeLessThan(buttons.indexOf(execute));
+			expect(
+				within(group).queryByRole("button", { name: /Switch to/ }),
+			).toBeNull();
+		});
+
+		test("execute stays disabled without plan.md", () => {
+			render(
+				<PlansPanel
+					{...panelProps(
+						[
+							testEntryWith("bare", "scoping", "Bare", false, [
+								testStatus("scoping"),
+							]),
+						],
+						{ plan: "bare", role: "scoping" },
+					)}
+				/>,
+			);
+			expect(
+				screen.getByRole("button", {
+					name: "Send Bare to execution",
+				}),
+			).toBeDisabled();
+		});
+
+		test("executing headers offer cancel and the mode switch", () => {
+			const plan = executingPlan();
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "executing" })}
+				/>,
+			);
+			const group = planGroup("Shiny, executing, opens Executing");
+			const buttons = within(group).getAllByRole("button");
+			const cancel = within(group).getByRole("button", {
+				name: "Cancel Shiny",
+			});
 			const mode = within(group).getByRole("button", {
 				name: "Switch to manual",
 			});
@@ -184,21 +228,24 @@ describe("plans panel", () => {
 			expect(mode.className).toContain("mode");
 			expect(mode.className).not.toContain("manual");
 			expect(buttons.indexOf(cancel)).toBeLessThan(buttons.indexOf(mode));
+			expect(
+				within(group).queryByRole("button", { name: /to execution/ }),
+			).toBeNull();
 		});
 
 		test("shows a manual switch with the reverse label", async () => {
 			const plan = testEntryWith(
-				"2026-09-25.10-54-59",
-				"scoping",
-				"Parallel sessions",
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
 				true,
-				[testStatus("scoping")],
-				null,
+				[testStatus("scoping"), testStatus("executing")],
+				testWorktree(),
 				true,
 			);
 			const props = panelProps([plan], {
 				plan: plan.name,
-				role: "scoping",
+				role: "executing",
 			});
 			const user = userEvent.setup();
 			render(<PlansPanel {...props} />);
@@ -210,6 +257,20 @@ describe("plans panel", () => {
 		});
 
 		test("flipping to manual calls back with the plan", async () => {
+			const plan = executingPlan();
+			const props = panelProps([plan], {
+				plan: plan.name,
+				role: "executing",
+			});
+			const user = userEvent.setup();
+			render(<PlansPanel {...props} />);
+			await user.click(
+				screen.getByRole("button", { name: "Switch to manual" }),
+			);
+			expect(props.onSetMode).toHaveBeenCalledWith(plan.name, true);
+		});
+
+		test("executing from the header uses the scoping session", async () => {
 			const plan = scopingPlan();
 			const props = panelProps([plan], {
 				plan: plan.name,
@@ -218,9 +279,15 @@ describe("plans panel", () => {
 			const user = userEvent.setup();
 			render(<PlansPanel {...props} />);
 			await user.click(
-				screen.getByRole("button", { name: "Switch to manual" }),
+				screen.getByRole("button", {
+					name: "Send Parallel sessions to execution",
+				}),
 			);
-			expect(props.onSetMode).toHaveBeenCalledWith(plan.name, true);
+			expect(props.onExecute).toHaveBeenCalledWith({
+				plan: plan.name,
+				role: "scoping",
+			});
+			expect(props.onSetMode).not.toHaveBeenCalled();
 		});
 
 		test("cancelling from the header uses the latest role", async () => {
@@ -447,7 +514,7 @@ describe("plans panel", () => {
 			expect(screen.getByText("Executing")).toBeInTheDocument();
 			expect(container.querySelectorAll(".sbody .sbtn").length).toBe(0);
 			expect(
-				screen.queryByRole("button", { name: /Send|Land|Start landing/i }),
+				screen.queryByRole("button", { name: /Land|Start landing/i }),
 			).toBeNull();
 		});
 
@@ -519,6 +586,7 @@ describe("plans panel", () => {
 				expect(button.getAttribute("title")).toBeNull();
 				expect(
 					button.textContent === "✕" ||
+						button.textContent === ">" ||
 						button.textContent === "A" ||
 						button.textContent === "M" ||
 						button.textContent === "+",
@@ -581,6 +649,12 @@ describe("plans panel", () => {
 			expect(auto).toContain("#7dffc4");
 			const manual = /\.sbtn\.mode\.manual\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(manual).toContain("#ffd98a");
+		});
+
+		test("execute uses the same green as new plan", () => {
+			const css = appCss();
+			const execute = /\.sbtn\.execute\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(execute).toContain("#7dffc4");
 		});
 
 		test("the tree uses a dim spine without TODOS green", () => {

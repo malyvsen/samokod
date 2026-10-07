@@ -1352,6 +1352,15 @@ body {
 	background: rgba(255, 107, 107, 0.14);
 }
 
+.sbtn.execute {
+	color: #7dffc4;
+	border-color: rgba(125, 255, 196, 0.4);
+}
+
+.sbtn.execute:hover {
+	background: rgba(125, 255, 196, 0.1);
+}
+
 .sbtn.mode {
 	color: #7dffc4;
 	border-color: rgba(125, 255, 196, 0.4);
