@@ -274,8 +274,16 @@ pub enum AppEvent {
     SessionReset {
         session: SessionKey,
     },
-    /// History replay started for one session. The transcript streams
-    /// through the normal update events; `working` stays false throughout.
+    /// History load started for one session. Emitted immediately after the
+    /// history slot is claimed, before the slow session-ID probes: the
+    /// frontend shows a neutral preparing state with no replay claim.
+    HistoryPreparing {
+        session: SessionKey,
+    },
+    /// History replay started for one session. Only emitted when past
+    /// exists and the connection is ready, just before `session/load`.
+    /// The transcript streams through the normal update events; `working`
+    /// stays false throughout.
     HistoryBegin {
         session: SessionKey,
     },

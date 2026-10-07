@@ -438,7 +438,7 @@ impl AgentManager {
             })?;
         emit_event(
             &self.app,
-            AppEvent::HistoryBegin {
+            AppEvent::HistoryPreparing {
                 session: session.clone(),
             },
         );
@@ -448,7 +448,9 @@ impl AgentManager {
                 session: session.clone(),
             },
         );
-        // After HistoryBegin so the spinner covers the slow CLI probes.
+        // After HistoryPreparing so the spinner covers the slow CLI probes.
+        // HistoryBegin only follows when past exists and the connection is
+        // ready, just before `session/load`; empty keys finish without it.
         let Some(session_id) = super::session_ids::resolve(&repo_root, &session) else {
             return self.finish_empty_history(session).await;
         };
@@ -468,6 +470,12 @@ impl AgentManager {
         {
             live.session_id = Some(session_id.clone());
         }
+        emit_event(
+            &self.app,
+            AppEvent::HistoryBegin {
+                session: session.clone(),
+            },
+        );
         let cwd = plan.cwd(&repo_root);
         match connection
             .send_request(acp::build_load_session_request(&session_id, &cwd))
@@ -504,8 +512,10 @@ impl AgentManager {
 
     /// Empty-history path for keys with no saved session: a brand-new plan
     /// gets a live connection and an empty transcript instead of an error
-    /// bar. Finished plans never say "plan is gone": with no recoverable
-    /// past they fail with an honest non-retryable reason instead.
+    /// bar, going straight to `ConfigOptions` + `HistoryDone` without ever
+    /// emitting `HistoryBegin`. Finished plans never say "plan is gone":
+    /// with no recoverable past they fail with an honest non-retryable
+    /// reason instead.
     async fn finish_empty_history(&self, session: SessionKey) -> Result<(), AgentError> {
         if let Some((repo_root, _)) = self.reopen_snapshot()
             && super::session_ids::is_finished(&repo_root, &session.plan)
@@ -532,7 +542,7 @@ impl AgentManager {
 
     /// Fail one history load: release the single-flight and emit an error
     /// bar with the classified hint. The partial replay stays in the
-    /// transcript; a retry clears it on `HistoryBegin`.
+    /// transcript; a retry clears it on `HistoryPreparing`.
     fn fail_history(&self, session: &SessionKey, raw: String) {
         if let Some(mut state) = lock_state(&self.state) {
             state.abort_history(session);

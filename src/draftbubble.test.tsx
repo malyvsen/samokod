@@ -1,7 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
-import { DraftBubble, extractDraftText } from "./components/DraftBubble";
+import {
+	applyInitialText,
+	DraftBubble,
+	extractDraftText,
+} from "./components/DraftBubble";
 
 function bubble(
 	props: {
@@ -108,6 +112,80 @@ describe("draft bubble", () => {
 		typeLines(area, "hello");
 		fireEvent.input(area);
 		expect(onInput).toHaveBeenCalledWith("hello");
+	});
+
+	test("late template fills an untouched bubble", () => {
+		const onSend = vi.fn();
+		const view = render(
+			<DraftBubble
+				initialText={undefined}
+				onSend={onSend}
+				onEdit={vi.fn()}
+				onInput={vi.fn()}
+			/>,
+		);
+		const area = screen.getByRole("textbox");
+		expect(area.textContent).toBe("");
+		view.rerender(
+			<DraftBubble
+				initialText="TEMPLATE"
+				onSend={onSend}
+				onEdit={vi.fn()}
+				onInput={vi.fn()}
+			/>,
+		);
+		expect(area.textContent).toBe("TEMPLATE");
+	});
+
+	test("late template never clobbers typed text", () => {
+		const onSend = vi.fn();
+		const onInput = vi.fn();
+		const view = render(
+			<DraftBubble
+				initialText={undefined}
+				onSend={onSend}
+				onEdit={vi.fn()}
+				onInput={onInput}
+			/>,
+		);
+		const area = screen.getByRole("textbox");
+		typeLines(area, "typed");
+		fireEvent.input(area);
+		view.rerender(
+			<DraftBubble
+				initialText="TEMPLATE"
+				onSend={onSend}
+				onEdit={vi.fn()}
+				onInput={onInput}
+			/>,
+		);
+		expect(area.textContent).toBe("typed");
+	});
+});
+
+describe("applyInitialText", () => {
+	function nodeWith(text: string) {
+		const node = document.createElement("div");
+		node.textContent = text;
+		return node;
+	}
+
+	test("applies when untouched", () => {
+		const node = nodeWith("");
+		applyInitialText(node, "TEMPLATE", false);
+		expect(node.textContent).toBe("TEMPLATE");
+	});
+
+	test("skips when edited", () => {
+		const node = nodeWith("typed");
+		applyInitialText(node, "TEMPLATE", true);
+		expect(node.textContent).toBe("typed");
+	});
+
+	test("skips when already matching", () => {
+		const node = nodeWith("TEMPLATE");
+		applyInitialText(node, "TEMPLATE", false);
+		expect(node.textContent).toBe("TEMPLATE");
 	});
 });
 

@@ -2,13 +2,16 @@ import { readFileSync } from "node:fs";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import { Transcript } from "./components/Transcript";
+import type { SessionStart } from "./sessions/store";
 
 const multiline = "first line\nsecond line\n- third";
+const IDLE: SessionStart = { kind: "idle" };
 
-function transcript(text: string) {
+function transcript(text: string, start: SessionStart | null = IDLE) {
 	return (
 		<Transcript
 			items={[{ kind: "user", id: "u1", text }]}
+			start={start}
 			repoLabel="~/repo"
 			onRetry={vi.fn()}
 			onAnswer={vi.fn()}
@@ -16,10 +19,23 @@ function transcript(text: string) {
 	);
 }
 
-function agentTranscript(text: string) {
+function agentTranscript(text: string, start: SessionStart | null = IDLE) {
 	return (
 		<Transcript
 			items={[{ kind: "agent", id: "a1", text }]}
+			start={start}
+			repoLabel="~/repo"
+			onRetry={vi.fn()}
+			onAnswer={vi.fn()}
+		/>
+	);
+}
+
+function emptyTranscript(start: SessionStart | null) {
+	return (
+		<Transcript
+			items={[]}
+			start={start}
 			repoLabel="~/repo"
 			onRetry={vi.fn()}
 			onAnswer={vi.fn()}
@@ -31,6 +47,40 @@ describe("transcript agent header", () => {
 	test("agent messages read AI", () => {
 		render(agentTranscript("hello"));
 		expect(screen.getByText("AI")).toBeInTheDocument();
+	});
+});
+
+describe("transcript start copy", () => {
+	test("missing entry shows opening session", () => {
+		render(emptyTranscript(null));
+		expect(screen.getByText(/opening session/)).toBeInTheDocument();
+		expect(screen.getByText("getting session ready")).toBeInTheDocument();
+	});
+
+	test("preparing shows fresh session preparing", () => {
+		render(emptyTranscript({ kind: "preparing" }));
+		expect(screen.getByText(/fresh session/)).toBeInTheDocument();
+		expect(screen.getByText("preparing session")).toBeInTheDocument();
+	});
+
+	test("replaying shows loading history", () => {
+		render(emptyTranscript({ kind: "replaying" }));
+		expect(screen.getByText(/loading history/)).toBeInTheDocument();
+		expect(screen.getByText("replaying past messages")).toBeInTheDocument();
+	});
+
+	test("idle shows fresh session no messages", () => {
+		render(emptyTranscript({ kind: "idle" }));
+		expect(screen.getByText(/fresh session/)).toBeInTheDocument();
+		expect(screen.getByText("no messages yet")).toBeInTheDocument();
+	});
+
+	test("non-empty transcripts render messages regardless of phase", () => {
+		render(transcript("hello", { kind: "replaying" }));
+		expect(screen.getByText("hello")).toBeInTheDocument();
+		expect(
+			screen.queryByText("replaying past messages"),
+		).not.toBeInTheDocument();
 	});
 });
 
@@ -47,6 +97,7 @@ describe("transcript retry", () => {
 						retryable: true,
 					},
 				]}
+				start={IDLE}
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
@@ -67,6 +118,7 @@ describe("transcript retry", () => {
 						retryable: true,
 					},
 				]}
+				start={IDLE}
 				repoLabel="~/repo"
 				onRetry={null}
 				onAnswer={vi.fn()}
@@ -152,6 +204,7 @@ describe("transcript tool lines", () => {
 						line: { id: "t1", text: "edit: edit file.md", status: "completed" },
 					},
 				]}
+				start={IDLE}
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
@@ -175,6 +228,7 @@ describe("transcript tool lines", () => {
 						},
 					},
 				]}
+				start={IDLE}
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}

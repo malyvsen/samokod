@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { HistoryError } from "../sessions/store";
+import type { SessionStart } from "../sessions/store";
 import { todoMark, todoRowClass } from "../todos";
 import type {
 	PermissionOptionView,
@@ -11,35 +11,30 @@ import type {
 } from "../types";
 import { AgentMarkdown } from "./AgentMarkdown";
 
+function assertNever(value: never): never {
+	throw new Error(`unexpected value: ${String(value)}`);
+}
+
 export function Transcript({
 	items,
+	start,
 	repoLabel,
 	onRetry,
 	onAnswer,
-	historyLoading = false,
-	historyError = null,
 	onHistoryRetry = null,
 	children,
 }: {
 	items: TranscriptItem[];
+	start: SessionStart | null;
 	repoLabel: string;
 	onRetry: (() => void) | null;
 	onAnswer: (toolCallId: string, optionId: string) => void;
-	historyLoading?: boolean;
-	historyError?: HistoryError | null;
 	onHistoryRetry?: (() => void) | null;
 	children?: ReactNode;
 }) {
 	return (
 		<>
-			{items.length === 0 && historyError === null && (
-				<div className="empty-hint">
-					<b>
-						{repoLabel} · {historyLoading ? "loading history" : "fresh session"}
-					</b>
-					{historyLoading ? "replaying past messages" : "no messages yet"}
-				</div>
-			)}
+			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
 			<div className="tcol">
 				{items.map((item) => {
 					if (item.kind === "user") {
@@ -136,10 +131,10 @@ export function Transcript({
 						/>
 					);
 				})}
-				{historyError !== null && (
+				{start?.kind === "failed" && (
 					<ErrorBar
-						raw={historyError.raw}
-						hint={historyError.hint}
+						raw={start.error.raw}
+						hint={start.error.hint}
 						onRetry={onHistoryRetry}
 					/>
 				)}
@@ -147,6 +142,49 @@ export function Transcript({
 			</div>
 		</>
 	);
+}
+
+function EmptyHint({
+	items,
+	start,
+	repoLabel,
+}: {
+	items: TranscriptItem[];
+	start: SessionStart | null;
+	repoLabel: string;
+}) {
+	if (items.length > 0) return null;
+	const copy = emptyHintCopy(start);
+	if (copy === null) return null;
+	return (
+		<div className="empty-hint">
+			<b>
+				{repoLabel} · {copy.header}
+			</b>
+			{copy.sub}
+		</div>
+	);
+}
+
+/// Copy for the empty transcript, one row per start phase.
+function emptyHintCopy(
+	start: SessionStart | null,
+): { header: string; sub: string } | null {
+	if (start === null) {
+		return { header: "opening session", sub: "getting session ready" };
+	}
+	switch (start.kind) {
+		case "preparing":
+			return { header: "fresh session", sub: "preparing session" };
+		case "replaying":
+			return { header: "loading history", sub: "replaying past messages" };
+		case "idle":
+			return { header: "fresh session", sub: "no messages yet" };
+		case "failed":
+			return null;
+		default:
+			return assertNever(start);
+	}
 }
 
 function ErrorBar({
@@ -171,10 +209,6 @@ function ErrorBar({
 			<div className="ehint">{hint}</div>
 		</div>
 	);
-}
-
-function assertNever(value: never): never {
-	throw new Error(`unexpected value: ${String(value)}`);
 }
 
 function ToolRow({ line }: { line: ToolLineView }) {

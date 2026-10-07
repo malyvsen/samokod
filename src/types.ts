@@ -185,6 +185,7 @@ export type AppEvent =
 			ctx_pct: number;
 	  }
 	| { type: "session_reset"; session: SessionKey }
+	| { type: "history_preparing"; session: SessionKey }
 	| { type: "history_begin"; session: SessionKey }
 	| { type: "history_done"; session: SessionKey }
 	| {

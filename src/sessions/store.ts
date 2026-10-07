@@ -9,11 +9,14 @@ import type {
 } from "../types";
 import { sessionKeyOf } from "../types";
 
-export interface HistoryError {
-	raw: string;
-	hint: string;
-	retryable: boolean;
-}
+export type SessionStart =
+	| { kind: "idle" }
+	| { kind: "preparing" }
+	| { kind: "replaying" }
+	| {
+			kind: "failed";
+			error: { raw: string; hint: string; retryable: boolean };
+	  };
 
 export interface ChatState {
 	transcript: TranscriptItem[];
@@ -23,8 +26,7 @@ export interface ChatState {
 	working: boolean;
 	approval: boolean;
 	failed: boolean;
-	historyLoading: boolean;
-	historyError: HistoryError | null;
+	start: SessionStart;
 }
 
 export type Chats = Record<string, ChatState>;
@@ -38,8 +40,7 @@ export function emptyChat(): ChatState {
 		working: false,
 		approval: false,
 		failed: false,
-		historyLoading: false,
-		historyError: null,
+		start: { kind: "idle" },
 	};
 }
 
@@ -81,16 +82,32 @@ function appendText(
 	];
 }
 
-/// Replayed transcript streams while history loads without marking a live
+/// Replayed transcript streams while history replays without marking a live
 /// turn, so the status dot stays truthful. Live updates mark working.
 function withTranscript(
 	chat: ChatState,
 	transcript: TranscriptItem[],
 ): ChatState {
-	if (chat.historyLoading) {
+	if (chat.start.kind === "replaying") {
 		return { ...chat, transcript };
 	}
 	return { ...chat, working: true, failed: false, transcript };
+}
+
+/// Enter a start phase. Retrying after a failure replays from empty.
+function beginStart(
+	chat: ChatState,
+	start: Extract<SessionStart, { kind: "preparing" | "replaying" }>,
+): ChatState {
+	return {
+		...chat,
+		start,
+		transcript: chat.start.kind === "failed" ? [] : chat.transcript,
+	};
+}
+
+function assertNever(value: never): never {
+	throw new Error(`unexpected value: ${String(value)}`);
 }
 
 /// Pure per-session event reducer. Session-keyed events route into their own
@@ -160,7 +177,7 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 			return updateEntry(chats, event.session, (chat) => {
 				// Replayed approvals arrive already answered, so they render
 				// resolved without pausing for input.
-				const replaying = chat.historyLoading;
+				const replaying = chat.start.kind === "replaying";
 				return {
 					...chat,
 					approval: replaying ? chat.approval : true,
@@ -217,30 +234,33 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 				todos: [],
 				spend: null,
 			}));
+		case "history_preparing":
+			return updateEntry(chats, event.session, (chat) =>
+				beginStart(chat, { kind: "preparing" }),
+			);
 		case "history_begin":
-			return updateEntry(chats, event.session, (chat) => ({
-				...chat,
-				historyLoading: true,
-				historyError: null,
-				// Retrying after a failure replays from empty.
-				transcript: chat.historyError !== null ? [] : chat.transcript,
-			}));
+			return updateEntry(chats, event.session, (chat) =>
+				beginStart(chat, { kind: "replaying" }),
+			);
 		case "history_done":
 			return updateEntry(chats, event.session, (chat) => ({
 				...chat,
-				historyLoading: false,
-				historyError: null,
+				start: { kind: "idle" },
 			}));
 		case "history_failed":
 			return updateEntry(chats, event.session, (chat) => ({
 				...chat,
-				historyLoading: false,
-				historyError: {
-					raw: event.raw,
-					hint: event.hint,
-					retryable: event.retryable,
+				start: {
+					kind: "failed",
+					error: {
+						raw: event.raw,
+						hint: event.hint,
+						retryable: event.retryable,
+					},
 				},
 			}));
+		default:
+			return assertNever(event);
 	}
 }
 

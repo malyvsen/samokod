@@ -15,15 +15,12 @@ export function useSessionDrafts(
 	chats: Chats,
 ): {
 	initialText: string | undefined;
-	ready: boolean;
 	onDraftInput: (text: string) => void;
 	onDraftSent: () => void;
 } {
 	const [drafts, setDrafts] = useState<Record<string, string>>({});
 	const attempted = useRef<Set<string>>(new Set());
 	const selectedId = selectedKey === null ? null : sessionKeyOf(selectedKey);
-
-	const [readyId, setReadyId] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (selectedKey === null) return;
@@ -43,18 +40,15 @@ export function useSessionDrafts(
 							current[id] === undefined ? { ...current, [id]: draft } : current,
 						);
 					}
-					setReadyId(id);
 				})
 				.catch((error: unknown) => {
 					console.warn("scoping_draft failed", error);
-					if (!cancelled) setReadyId(id);
 				});
 			return () => {
 				cancelled = true;
 			};
 		}
 		attempted.current.add(id);
-		setReadyId(id);
 	}, [selectedKey, chats]);
 
 	const onDraftInput = useCallback(
@@ -80,6 +74,5 @@ export function useSessionDrafts(
 	}, [selectedId]);
 
 	const initialText = selectedId === null ? undefined : drafts[selectedId];
-	const ready = selectedId !== null && readyId === selectedId;
-	return { initialText, ready, onDraftInput, onDraftSent };
+	return { initialText, onDraftInput, onDraftSent };
 }

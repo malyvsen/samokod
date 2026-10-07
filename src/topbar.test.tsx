@@ -1,14 +1,19 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import { TopBar } from "./components/TopBar";
-import type { AgentStatus } from "./types";
+import type { ChatState } from "./sessions/store";
+import { emptyChat } from "./sessions/store";
 
-function topBar(status: AgentStatus, options: { onStop?: () => void } = {}) {
+function chatWith(overrides: Partial<ChatState> = {}): ChatState {
+	return { ...emptyChat(), ...overrides };
+}
+
+function topBar(chat: ChatState | null, options: { onStop?: () => void } = {}) {
 	return (
 		<TopBar
 			repoLabel="~/repo"
 			branch="feature"
-			status={status}
+			chat={chat}
 			onStop={options.onStop ?? vi.fn()}
 		/>
 	);
@@ -16,9 +21,9 @@ function topBar(status: AgentStatus, options: { onStop?: () => void } = {}) {
 
 describe("top bar", () => {
 	test("remounts the status on swap", () => {
-		const view = render(topBar("idle"));
+		const view = render(topBar(chatWith()));
 		const idle = screen.getByText("IDLE");
-		view.rerender(topBar("working"));
+		view.rerender(topBar(chatWith({ working: true })));
 		expect(screen.queryByText("IDLE")).not.toBeInTheDocument();
 		expect(screen.getByText("● WORKING")).toBeInTheDocument();
 		expect(view.container.querySelectorAll(".status")).toHaveLength(1);
@@ -26,21 +31,21 @@ describe("top bar", () => {
 	});
 
 	test("approval shows paused status without working pulse", () => {
-		render(topBar("approval"));
+		render(topBar(chatWith({ approval: true })));
 		const label = screen.getByText("● PAUSED - APPROVAL");
 		expect(label).toHaveClass("paused");
 		expect(label).not.toHaveClass("live");
 	});
 
 	test("failed shows a red pill", () => {
-		render(topBar("failed"));
+		render(topBar(chatWith({ failed: true })));
 		const label = screen.getByText("● FAILED");
 		expect(label).toHaveClass("failed");
 		expect(label).not.toHaveClass("live");
 	});
 
 	test("idle shows no stop control", () => {
-		render(topBar("idle"));
+		render(topBar(chatWith()));
 		expect(screen.getByText("IDLE")).toBeInTheDocument();
 		expect(
 			screen.queryByRole("button", { name: "STOP" }),
@@ -48,17 +53,39 @@ describe("top bar", () => {
 	});
 
 	test("failed shows no stop control", () => {
-		render(topBar("failed"));
+		render(topBar(chatWith({ failed: true })));
 		expect(
 			screen.queryByRole("button", { name: "STOP" }),
 		).not.toBeInTheDocument();
 	});
 
-	test.each(["working", "approval"] as const)(
-		"%s stops the turn from the top bar",
-		(status) => {
+	test("null chat shows idle without stop", () => {
+		render(topBar(null));
+		expect(screen.getByText("IDLE")).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "STOP" }),
+		).not.toBeInTheDocument();
+	});
+
+	test("replaying keeps idle pill but shows stop", () => {
+		render(topBar(chatWith({ start: { kind: "replaying" } })));
+		expect(screen.getByText("IDLE")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "STOP" })).toBeInTheDocument();
+	});
+
+	test("preparing keeps idle pill without stop", () => {
+		render(topBar(chatWith({ start: { kind: "preparing" } })));
+		expect(screen.getByText("IDLE")).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "STOP" }),
+		).not.toBeInTheDocument();
+	});
+
+	test.each([{ working: true }, { approval: true }] as const)(
+		"stops the turn from the top bar (%s)",
+		(overrides) => {
 			const onStop = vi.fn();
-			render(topBar(status, { onStop }));
+			render(topBar(chatWith(overrides), { onStop }));
 			const stop = screen.getByRole("button", { name: "STOP" });
 			expect(stop.parentElement).toHaveClass("stop-wrap");
 			stop.click();
@@ -67,7 +94,7 @@ describe("top bar", () => {
 	);
 
 	test("repo chip is static text", () => {
-		const { container } = render(topBar("idle"));
+		const { container } = render(topBar(chatWith()));
 		const chip = container.querySelector(".repo-static");
 		expect(chip?.textContent).toBe("~/repo · feature");
 		expect(
@@ -76,14 +103,14 @@ describe("top bar", () => {
 	});
 
 	test("repo chip carries no bold segment", () => {
-		const { container } = render(topBar("idle"));
+		const { container } = render(topBar(chatWith()));
 		expect(
 			container.querySelector(".repo-static b, .repo-static strong"),
 		).toBeNull();
 	});
 
 	test("there is no plan menu", () => {
-		render(topBar("idle"));
+		render(topBar(chatWith()));
 		expect(
 			screen.queryByRole("button", { name: /plan phase/ }),
 		).not.toBeInTheDocument();

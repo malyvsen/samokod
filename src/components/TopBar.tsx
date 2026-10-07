@@ -1,3 +1,5 @@
+import { agentStatusOf, isSessionBusy } from "../sessions/select";
+import type { ChatState } from "../sessions/store";
 import type { AgentStatus } from "../types";
 
 const STATUS: Record<AgentStatus, { text: string; className: string }> = {
@@ -10,15 +12,16 @@ const STATUS: Record<AgentStatus, { text: string; className: string }> = {
 export function TopBar({
 	repoLabel,
 	branch,
-	status,
+	chat,
 	onStop,
 }: {
 	repoLabel: string;
 	branch: string;
-	status: AgentStatus;
+	chat: ChatState | null;
 	onStop: () => void;
 }) {
-	const busy = status === "working" || status === "approval";
+	const status = agentStatusOf(chat);
+	const busy = isSessionBusy(chat);
 	const { text, className } = STATUS[status];
 	// Remount on swap so the pulse animation leaves no stale paint in the WebView compositor.
 	const pill = (

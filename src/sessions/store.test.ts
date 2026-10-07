@@ -24,7 +24,13 @@ function chatOf(chats: Chats): ChatState {
 }
 
 describe("history events", () => {
-	test("begin marks loading and clears a past error", () => {
+	test("preparing marks preparing", () => {
+		const chats = eventFor({ type: "history_preparing", session: testKey() });
+		const chat = chatOf(chats);
+		expect(chat.start).toEqual({ kind: "preparing" });
+	});
+
+	test("begin marks replaying and clears a past error", () => {
 		const failed = applySessionEvent(withChat(), {
 			type: "history_failed",
 			session: testKey(),
@@ -37,12 +43,42 @@ describe("history events", () => {
 			session: testKey(),
 		});
 		const chat = chatOf(begun);
-		expect(chat.historyLoading).toBe(true);
-		expect(chat.historyError).toBeNull();
+		expect(chat.start).toEqual({ kind: "replaying" });
+	});
+
+	test("preparing retry clears the partial replay", () => {
+		let chats = eventFor({ type: "history_preparing", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
+		chats = applySessionEvent(chats, {
+			type: "agent_text",
+			session: testKey(),
+			chunk: "partial",
+		});
+		chats = applySessionEvent(chats, {
+			type: "history_failed",
+			session: testKey(),
+			raw: "boom",
+			hint: "retry the turn",
+			retryable: true,
+		});
+		chats = applySessionEvent(chats, {
+			type: "history_preparing",
+			session: testKey(),
+		});
+		const chat = chatOf(chats);
+		expect(chat.transcript).toEqual([]);
+		expect(chat.start).toEqual({ kind: "preparing" });
 	});
 
 	test("retry begin clears the partial replay", () => {
-		let chats = eventFor({ type: "history_begin", session: testKey() });
+		let chats = eventFor({ type: "history_preparing", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
 		chats = applySessionEvent(chats, {
 			type: "agent_text",
 			session: testKey(),
@@ -64,7 +100,7 @@ describe("history events", () => {
 	});
 
 	test("begin never clobbers a live transcript", () => {
-		let chats = eventFor({ type: "history_begin", session: testKey() });
+		let chats = eventFor({ type: "history_preparing", session: testKey() });
 		chats = applySessionEvent(chats, {
 			type: "history_done",
 			session: testKey(),
@@ -78,8 +114,12 @@ describe("history events", () => {
 		expect(chat.transcript).toHaveLength(1);
 	});
 
-	test("done clears loading and keeps the replay", () => {
-		let chats = eventFor({ type: "history_begin", session: testKey() });
+	test("done resets to idle and keeps the replay", () => {
+		let chats = eventFor({ type: "history_preparing", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
 		chats = applySessionEvent(chats, {
 			type: "user_text",
 			session: testKey(),
@@ -90,12 +130,16 @@ describe("history events", () => {
 			session: testKey(),
 		});
 		const chat = chatOf(chats);
-		expect(chat.historyLoading).toBe(false);
+		expect(chat.start).toEqual({ kind: "idle" });
 		expect(chat.transcript).toHaveLength(1);
 	});
 
 	test("failed keeps the partial replay with an error", () => {
-		let chats = eventFor({ type: "history_begin", session: testKey() });
+		let chats = eventFor({ type: "history_preparing", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
 		chats = applySessionEvent(chats, {
 			type: "user_text",
 			session: testKey(),
@@ -109,11 +153,9 @@ describe("history events", () => {
 			retryable: false,
 		});
 		const chat = chatOf(chats);
-		expect(chat.historyLoading).toBe(false);
-		expect(chat.historyError).toEqual({
-			raw: "boom",
-			hint: "history hint",
-			retryable: false,
+		expect(chat.start).toEqual({
+			kind: "failed",
+			error: { raw: "boom", hint: "history hint", retryable: false },
 		});
 		expect(chat.transcript).toHaveLength(1);
 	});
@@ -121,7 +163,11 @@ describe("history events", () => {
 
 describe("replayed updates", () => {
 	test("user chunks merge without touching working", () => {
-		let chats = eventFor({ type: "history_begin", session: testKey() });
+		let chats = eventFor({ type: "history_preparing", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
 		chats = applySessionEvent(chats, {
 			type: "user_text",
 			session: testKey(),
@@ -139,7 +185,11 @@ describe("replayed updates", () => {
 	});
 
 	test("agent and tool replay leaves working false", () => {
-		let chats = eventFor({ type: "history_begin", session: testKey() });
+		let chats = eventFor({ type: "history_preparing", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
 		chats = applySessionEvent(chats, {
 			type: "agent_text",
 			session: testKey(),
@@ -157,7 +207,11 @@ describe("replayed updates", () => {
 	});
 
 	test("replayed approvals resolve without pausing", () => {
-		let chats = eventFor({ type: "history_begin", session: testKey() });
+		let chats = eventFor({ type: "history_preparing", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
 		chats = applySessionEvent(chats, {
 			type: "permission_asked",
 			session: testKey(),

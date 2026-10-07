@@ -353,4 +353,160 @@ describe("plan", () => {
 		await user.click(screen.getByRole("button", { name: "retry" }));
 		expect(api.retryLast).toHaveBeenCalledWith(testKey());
 	});
+
+	test("failed select surfaces an error and keeps selection", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb", "scoping", "Beta", true),
+			],
+			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
+		});
+		api.selectPlan.mockRejectedValue(new Error("gone"));
+		const user = await openChat();
+		await user.click(
+			screen.getByRole("button", { name: "Beta, scoping, opens Scoping" }),
+		);
+		expect(
+			await screen.findByText("couldn't switch plan - try again"),
+		).toBeInTheDocument();
+		expect(screen.getByText(/gone/)).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "retry" }),
+		).not.toBeInTheDocument();
+		expect(screen.getByText("Alpha")).toBeInTheDocument();
+	});
+
+	test("failed create surfaces its own hint without retry", async () => {
+		api.createPlan.mockRejectedValue(new Error("denied"));
+		const user = await openChat();
+		await user.click(screen.getByRole("button", { name: "+ NEW PLAN" }));
+		expect(
+			await screen.findByText("couldn't create plan - try again"),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "retry" }),
+		).not.toBeInTheDocument();
+	});
+
+	test("failed execute surfaces its own hint without retry", async () => {
+		const entry = testEntryWith("aaa", "scoping", "First", true, [
+			testStatus("scoping"),
+		]);
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [entry],
+			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
+		});
+		api.executePlan.mockRejectedValue(new Error("nope"));
+		const user = await openChat();
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Send aaa to execution",
+			}),
+		);
+		expect(
+			await screen.findByText("couldn't start execution - try again"),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "retry" }),
+		).not.toBeInTheDocument();
+	});
+
+	test("failed cancel surfaces its own hint without retry", async () => {
+		api.cancelPlan.mockRejectedValue(new Error("denied"));
+		const user = await openChat();
+		emit({ type: "agent_text", session: testKey(), chunk: "old chat" });
+		emit({ type: "turn_done", session: testKey() });
+		const scoping = screen.getByRole("button", {
+			name: "Parallel sessions Scoping",
+		});
+		const row = scoping.closest(".sbody");
+		if (row === null) throw new Error("scoping row missing");
+		const button = await within(row as HTMLElement).findByRole("button", {
+			name: "Cancel 2026-09-25.10-54-59",
+		});
+		await user.click(button);
+		expect(
+			await screen.findByText("couldn't cancel plan - try again"),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "retry" }),
+		).not.toBeInTheDocument();
+	});
+
+	test("failed begin landing surfaces its own hint without retry", async () => {
+		api.beginLanding.mockRejectedValue(new Error("denied"));
+		await openChat();
+		emit({
+			type: "plans_changed",
+			plans: [
+				testEntryWith(
+					"2026-09-25.10-54-59.slug",
+					"executing",
+					"Shiny",
+					true,
+					[testStatus("scoping"), testStatus("executing")],
+					testWorktree({ ffable: false }),
+				),
+			],
+			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
+		});
+		const executing = screen.getByRole("button", {
+			name: "Shiny Executing",
+		});
+		const row = executing.closest(".sbody");
+		if (row === null) throw new Error("executing row missing");
+		await within(row as HTMLElement)
+			.findByRole("button", {
+				name: "Start landing 2026-09-25.10-54-59.slug onto feature",
+			})
+			.then((button) => button.click());
+		expect(
+			await screen.findByText("couldn't start landing - try again"),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "retry" }),
+		).not.toBeInTheDocument();
+	});
+
+	test("failed finish surfaces its own hint without retry", async () => {
+		api.finishLanding.mockRejectedValue(new Error("denied"));
+		await openChat();
+		emit({
+			type: "plans_changed",
+			plans: [
+				testEntryWith(
+					"2026-09-25.10-54-59.slug",
+					"executing",
+					"Shiny",
+					true,
+					[testStatus("scoping"), testStatus("executing")],
+					testWorktree(),
+				),
+			],
+			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
+		});
+		const executing = screen.getByRole("button", {
+			name: "Shiny Executing",
+		});
+		const row = executing.closest(".sbody");
+		if (row === null) throw new Error("executing row missing");
+		await within(row as HTMLElement)
+			.findByRole("button", {
+				name: "Land 2026-09-25.10-54-59.slug onto feature",
+			})
+			.then((button) => button.click());
+		expect(
+			await screen.findByText("couldn't finish landing - try again"),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "retry" }),
+		).not.toBeInTheDocument();
+	});
 });

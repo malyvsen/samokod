@@ -28,13 +28,14 @@ import { toSelectorModel } from "./components/selectors";
 import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
 import { hasUserMessage, useSessionDrafts } from "./sessions/drafts";
-import { useSessionHistory } from "./sessions/history";
 import {
 	agentStatusOf,
 	isReadOnly,
+	isSessionBusy,
 	selectedChat,
 	selectedEntry,
 } from "./sessions/select";
+import { useSessionStart } from "./sessions/start";
 import {
 	applySessionEvent,
 	type ChatState,
@@ -43,7 +44,6 @@ import {
 	errorItem,
 	updateEntry,
 } from "./sessions/store";
-import { useWarmSession } from "./sessions/warm";
 import type {
 	AppEvent,
 	PlanEntry,
@@ -76,11 +76,11 @@ export function App() {
 	const configGeneration = useRef(0);
 
 	const selectedId = selectedKey === null ? null : sessionKeyOf(selectedKey);
-	const chat: ChatState = selectedChat(chats, selectedKey);
+	const chat: ChatState | null = selectedChat(chats, selectedKey);
 	const draft = useSessionDrafts(selectedKey, chats);
 
 	const status = agentStatusOf(chat);
-	const busy = chat.working || chat.approval || chat.historyLoading;
+	const busy = isSessionBusy(chat);
 
 	const selectedRef = useRef<SessionKey | null>(null);
 	selectedRef.current = selectedKey;
@@ -100,11 +100,13 @@ export function App() {
 
 	const entry = selectedEntry(plans, selectedKey);
 	const readOnly = isReadOnly(entry);
-	useWarmSession(selectedKey, chats, readOnly);
-	useSessionHistory(selectedKey, chats);
-	const selectors = readOnly
-		? { kind: "live" as const, options: chat.configOptions }
-		: toSelectorModel(chat.configOptions, configDefaults);
+	useSessionStart(selectedKey, chats, readOnly);
+	const selectors =
+		chat === null
+			? { kind: "pending" as const, defaults: configDefaults }
+			: readOnly
+				? { kind: "live" as const, options: chat.configOptions }
+				: toSelectorModel(chat.configOptions, configDefaults);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -153,7 +155,7 @@ export function App() {
 		};
 	}, [view.kind]);
 
-	const transcript = chat.transcript;
+	const transcript = chat?.transcript ?? [];
 	// biome-ignore lint/correctness/useExhaustiveDependencies: re-scroll whenever the selected transcript identity changes
 	useEffect(() => {
 		const node = transcriptRef.current;
@@ -211,10 +213,15 @@ export function App() {
 		await handleOpenPath(picked);
 	}
 
-	function appendError(key: SessionKey, raw: string) {
+	function appendError(
+		key: SessionKey,
+		raw: string,
+		hint: string,
+		retryable: boolean,
+	) {
 		updateChat(key, (chat) => ({
 			...chat,
-			transcript: [...chat.transcript, errorItem(raw, "retry the turn", true)],
+			transcript: [...chat.transcript, errorItem(raw, hint, retryable)],
 		}));
 	}
 
@@ -224,7 +231,12 @@ export function App() {
 			await sendPrompt(key, text);
 		} catch (error) {
 			updateChat(key, (chat) => ({ ...chat, working: false }));
-			appendError(key, error instanceof Error ? error.message : String(error));
+			appendError(
+				key,
+				error instanceof Error ? error.message : String(error),
+				"retry the turn",
+				true,
+			);
 		}
 	}
 
@@ -274,6 +286,14 @@ export function App() {
 			applyPlans(update);
 		} catch (error) {
 			console.warn("select_plan failed", error);
+			if (prev !== null) {
+				appendError(
+					prev,
+					error instanceof Error ? error.message : String(error),
+					"couldn't switch plan - try again",
+					false,
+				);
+			}
 		}
 	}
 
@@ -313,13 +333,23 @@ export function App() {
 				updateChat(key, (chat) => ({ ...chat, working: true }));
 			}
 		} catch (error) {
-			appendError(key, error instanceof Error ? error.message : String(error));
+			appendError(
+				key,
+				error instanceof Error ? error.message : String(error),
+				"retry the turn",
+				true,
+			);
 		}
 	}
 
 	async function handleHistoryRetry() {
 		const key = selectedRef.current;
-		if (key === null || chat.historyLoading) return;
+		if (
+			key === null ||
+			chat?.start.kind === "preparing" ||
+			chat?.start.kind === "replaying"
+		)
+			return;
 		try {
 			await loadHistory(key);
 		} catch (error) {
@@ -337,6 +367,8 @@ export function App() {
 				appendError(
 					key,
 					error instanceof Error ? error.message : String(error),
+					"couldn't create plan - try again",
+					false,
 				);
 			}
 		}
@@ -350,7 +382,12 @@ export function App() {
 			applyPlans(update);
 		} catch (error) {
 			updateChat(key, (chat) => ({ ...chat, working: false }));
-			appendError(key, error instanceof Error ? error.message : String(error));
+			appendError(
+				key,
+				error instanceof Error ? error.message : String(error),
+				"couldn't start execution - try again",
+				false,
+			);
 		}
 	}
 
@@ -366,7 +403,12 @@ export function App() {
 			applyPlans(update);
 		} catch (error) {
 			updateChat(key, (chat) => ({ ...chat, working: false }));
-			appendError(key, error instanceof Error ? error.message : String(error));
+			appendError(
+				key,
+				error instanceof Error ? error.message : String(error),
+				"couldn't start landing - try again",
+				false,
+			);
 		}
 	}
 
@@ -387,7 +429,12 @@ export function App() {
 			applyPlans(update);
 		} catch (error) {
 			updateChat(key, (chat) => ({ ...chat, working: false }));
-			appendError(key, error instanceof Error ? error.message : String(error));
+			appendError(
+				key,
+				error instanceof Error ? error.message : String(error),
+				"couldn't cancel plan - try again",
+				false,
+			);
 		}
 	}
 
@@ -402,7 +449,12 @@ export function App() {
 			applyPlans(update);
 		} catch (error) {
 			updateChat(key, (chat) => ({ ...chat, working: false }));
-			appendError(key, error instanceof Error ? error.message : String(error));
+			appendError(
+				key,
+				error instanceof Error ? error.message : String(error),
+				"couldn't finish landing - try again",
+				false,
+			);
 		}
 	}
 
@@ -440,7 +492,7 @@ export function App() {
 					<TopBar
 						repoLabel={repoLabel}
 						branch={branch}
-						status={status}
+						chat={chat}
 						onStop={handleStop}
 					/>
 					<div className="mainrow">
@@ -457,19 +509,18 @@ export function App() {
 						<div className="chatcol">
 							<div className="transcript" ref={transcriptRef}>
 								<Transcript
-									items={chat.transcript}
+									items={transcript}
+									start={chat?.start ?? null}
 									repoLabel={repoLabel}
 									onRetry={readOnly ? null : handleRetry}
 									onAnswer={handleAnswer}
-									historyLoading={chat.historyLoading}
-									historyError={chat.historyError}
 									onHistoryRetry={
-										chat.historyError?.retryable === true
+										chat?.start.kind === "failed" && chat.start.error.retryable
 											? handleHistoryRetry
 											: null
 									}
 								>
-									{!busy && !readOnly && selectedId !== null && draft.ready && (
+									{selectedId !== null && !readOnly && !busy && (
 										<DraftBubble
 											key={selectedId}
 											initialText={draft.initialText}
@@ -487,8 +538,8 @@ export function App() {
 							</div>
 						</div>
 						<SidePanel
-							todos={chat.todos}
-							spend={chat.spend}
+							todos={chat?.todos ?? []}
+							spend={chat?.spend ?? null}
 							sessionId={selectedId ?? ""}
 							selectors={selectors}
 							disabled={busy || readOnly}

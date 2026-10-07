@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 const LABEL = "Ask for a change…";
 
@@ -14,22 +14,16 @@ export function DraftBubble({
 	onInput?: ((text: string) => void) | undefined;
 }) {
 	const ref = useRef<HTMLDivElement | null>(null);
-	const mountText = useRef(initialText ?? "");
+	const edited = useRef(false);
 	const attach = useCallback((node: HTMLDivElement | null) => {
 		ref.current = node;
 		if (node === null) return;
 		node.focus();
-		const text = mountText.current;
-		if (text !== "") {
-			node.textContent = text;
-			const range = document.createRange();
-			range.selectNodeContents(node);
-			range.collapse(false);
-			const selection = window.getSelection();
-			selection?.removeAllRanges();
-			selection?.addRange(range);
-		}
 	}, []);
+
+	useEffect(() => {
+		applyInitialText(ref.current, initialText, edited.current);
+	}, [initialText]);
 
 	function send(): void {
 		const node = ref.current;
@@ -43,6 +37,7 @@ export function DraftBubble({
 	function handleInput(): void {
 		const node = ref.current;
 		if (node !== null) {
+			edited.current = true;
 			onInput?.(extractDraftText(node));
 		}
 		onEdit();
@@ -76,6 +71,24 @@ export function DraftBubble({
 			/>
 		</div>
 	);
+}
+
+export function applyInitialText(
+	node: HTMLElement | null,
+	initialText: string | undefined,
+	edited: boolean,
+): void {
+	if (node === null || edited) return;
+	const text = initialText ?? "";
+	if ((node.textContent ?? "") === text) return;
+	node.textContent = text;
+	if (text === "") return;
+	const range = document.createRange();
+	range.selectNodeContents(node);
+	range.collapse(false);
+	const selection = window.getSelection();
+	selection?.removeAllRanges();
+	selection?.addRange(range);
 }
 
 const BLOCK_TAGS = new Set([

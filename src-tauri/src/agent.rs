@@ -108,9 +108,10 @@ impl State {
     }
 
     /// Claim the history slot. False when the replay already ran, another
-    /// replay is in flight, or a live turn owns the session. Pure.
+    /// replay is in flight, a warm owns the key, or a live turn owns the
+    /// session. Pure.
     fn claim_history(&mut self, key: &SessionKey) -> bool {
-        if self.history_started(key) || self.is_working(key) {
+        if self.history_started(key) || self.is_working(key) || self.is_warming(key) {
             return false;
         }
         self.history_loading.insert(key.clone())
@@ -294,7 +295,9 @@ impl AgentManager {
     }
 
     /// Reserve a fresh scoping session without touching disk. Reuses the
-    /// pending session when the selection is still on an empty one.
+    /// pending session when the selection is still on an empty one. The
+    /// start flow owns liveness: empty keys load history, non-empty keys
+    /// warm, so this path spawns neither.
     pub async fn create_plan(&self) -> Result<PlansUpdate, AgentError> {
         let repo_root = self.current_repo().ok_or_else(|| AgentError::NoSession {
             raw: "open a repository first".to_string(),
@@ -308,16 +311,7 @@ impl AgentManager {
                 && is_empty_scoping(&state, &repo_root, &pending)
             {
                 drop(state);
-                let update = self.plans_update();
-                let manager = AgentManager {
-                    state: Arc::clone(&self.state),
-                    app: self.app.clone(),
-                };
-                let key = update.selected.clone();
-                tauri::async_runtime::spawn(async move {
-                    let _ = manager.warm_session(key).await;
-                });
-                return Ok(update);
+                return Ok(self.plans_update());
             }
         }
         let name = {
@@ -336,16 +330,7 @@ impl AgentManager {
                 log::warn!("failed to select new plan: {error}");
             }
         }
-        let update = self.plans_update();
-        let manager = AgentManager {
-            state: Arc::clone(&self.state),
-            app: self.app.clone(),
-        };
-        let key = update.selected.clone();
-        tauri::async_runtime::spawn(async move {
-            let _ = manager.warm_session(key).await;
-        });
-        Ok(update)
+        Ok(self.plans_update())
     }
 
     /// Re-check the branch for the open repo. Failures keep the last value.

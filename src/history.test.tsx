@@ -77,9 +77,25 @@ async function openChat() {
 }
 
 describe("history", () => {
-	test("loading hint shows while history streams", async () => {
+	test("unknown session shows opening copy", async () => {
+		await openChat();
+		expect(screen.getByText(/opening session/)).toBeInTheDocument();
+		expect(screen.getByText("getting session ready")).toBeInTheDocument();
+	});
+
+	test("preparing shows fresh session without replay claim", async () => {
 		await openChat();
 		expect(api.loadHistory).toHaveBeenCalledWith(testKey());
+		emit({ type: "history_preparing", session: testKey() });
+		expect(screen.getByText("preparing session")).toBeInTheDocument();
+		expect(
+			screen.queryByText("replaying past messages"),
+		).not.toBeInTheDocument();
+	});
+
+	test("loading hint shows while history streams", async () => {
+		await openChat();
+		emit({ type: "history_preparing", session: testKey() });
 		emit({ type: "history_begin", session: testKey() });
 		expect(screen.getByText("replaying past messages")).toBeInTheDocument();
 		emit({ type: "history_done", session: testKey() });
@@ -124,6 +140,7 @@ describe("history", () => {
 
 	test("restored history renders in the transcript", async () => {
 		await openChat();
+		emit({ type: "history_preparing", session: testKey() });
 		emit({ type: "history_begin", session: testKey() });
 		emit({ type: "user_text", session: testKey(), chunk: "hello" });
 		emit({ type: "agent_text", session: testKey(), chunk: "hi there" });

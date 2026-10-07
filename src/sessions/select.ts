@@ -1,17 +1,23 @@
 import type { AgentStatus, PlanEntry, SessionKey } from "../types";
 import { sessionKeyOf } from "../types";
 import type { ChatState } from "./store";
-import { emptyChat } from "./store";
 
 export function selectedChat(
 	chats: Record<string, ChatState>,
 	selectedKey: SessionKey | null,
-): ChatState {
-	if (selectedKey === null) return emptyChat();
-	return chats[sessionKeyOf(selectedKey)] ?? emptyChat();
+): ChatState | null {
+	if (selectedKey === null) return null;
+	return chats[sessionKeyOf(selectedKey)] ?? null;
 }
 
-export function agentStatusOf(chat: ChatState): AgentStatus {
+export function isSessionBusy(chat: ChatState | null): boolean {
+	if (chat === null) return false;
+	return chat.working || chat.approval || chat.start.kind === "replaying";
+}
+
+/// The pill reflects live turn state only; every start phase maps to idle.
+export function agentStatusOf(chat: ChatState | null): AgentStatus {
+	if (chat === null) return "idle";
 	if (chat.approval) return "approval";
 	if (chat.working) return "working";
 	if (chat.failed) return "failed";

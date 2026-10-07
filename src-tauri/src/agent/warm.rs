@@ -112,6 +112,14 @@ mod tests {
     }
 
     #[test]
+    fn history_loses_to_warming_session() {
+        let mut state = State::default();
+        let key = key();
+        assert!(state.claim_warm(&key));
+        assert!(!state.claim_history(&key));
+    }
+
+    #[test]
     fn finished_needs_completed_or_cancelled_dir() {
         let dir = tempfile::tempdir().expect("tempdir");
         let key = key();
