@@ -61,6 +61,20 @@ pub fn update_kind(update: &SessionUpdate) -> Option<&'static str> {
     }
 }
 
+/// Merge a partial update onto the stored call. Partial updates only carry
+/// changed fields, so the label and body come from the merged call. A missing
+/// entry synthesizes from the update's title, then merges the rest. Pure.
+pub fn with_update(existing: Option<ToolCall>, update: &ToolCallUpdate) -> ToolCall {
+    let mut call = existing.unwrap_or_else(|| {
+        ToolCall::new(
+            update.tool_call_id.clone(),
+            update.fields.title.clone().unwrap_or_default(),
+        )
+    });
+    call.update(update.fields.clone());
+    call
+}
+
 /// Format one tool line. Rows stay single-line ellipsis via CSS; the hover
 /// tooltip reads the same text. The agent title renders verbatim after the
 /// label; ongoing statuses append ` …`. Pure.
@@ -73,23 +87,6 @@ pub fn format_tool_line(call: &ToolCall) -> ToolLineView {
             call.name.as_deref(),
             Some(call.kind),
             call.raw_input.as_ref(),
-            status,
-        ),
-        status,
-    }
-}
-
-/// Format a tool update line. Same `{label}: {body}` plus ` …` rule as tool
-/// lines. Pure.
-pub fn format_tool_update(update: &ToolCallUpdate) -> ToolLineView {
-    let status = update.fields.status.map(to_tool_status).unwrap_or_default();
-    ToolLineView {
-        id: update.tool_call_id.to_string(),
-        text: line_text(
-            update.fields.title.as_deref().unwrap_or(""),
-            update.fields.name.as_deref(),
-            update.fields.kind,
-            update.fields.raw_input.as_ref(),
             status,
         ),
         status,
@@ -323,44 +320,82 @@ mod tests {
     }
 
     #[test]
-    fn updates_match_lines() {
-        let finished = ToolCallUpdate::new(
+    fn status_only_update_keeps_label_and_drops_suffix() {
+        let existing = ToolCall::new("id-9", "")
+            .name("bash")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({"command": "git status"}))
+            .status(ToolCallStatus::InProgress);
+        assert_eq!(format_tool_line(&existing).text, "bash: git status …");
+        let update = ToolCallUpdate::new(
+            "id-9",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        );
+        let merged = with_update(Some(existing), &update);
+        assert_eq!(format_tool_line(&merged).text, "bash: git status");
+    }
+
+    #[test]
+    fn body_and_kind_deltas_merge() {
+        let existing = ToolCall::new("id-1", "old")
+            .name("read")
+            .kind(ToolKind::Read)
+            .status(ToolCallStatus::InProgress);
+        let body_delta = ToolCallUpdate::new("id-1", ToolCallUpdateFields::new().title("new"));
+        let merged = with_update(Some(existing), &body_delta);
+        assert_eq!(format_tool_line(&merged).text, "read: new …");
+
+        let existing = ToolCall::new("id-1", "file")
+            .kind(ToolKind::Read)
+            .status(ToolCallStatus::Completed);
+        let kind_delta =
+            ToolCallUpdate::new("id-1", ToolCallUpdateFields::new().kind(ToolKind::Edit));
+        let merged = with_update(Some(existing), &kind_delta);
+        assert_eq!(format_tool_line(&merged).text, "edit: file");
+    }
+
+    #[test]
+    fn missing_entry_synthesizes_then_merges() {
+        let update = ToolCallUpdate::new(
             "id-9",
             ToolCallUpdateFields::new()
                 .title("edit file.md")
                 .name("edit")
                 .status(ToolCallStatus::Completed),
         );
-        assert_eq!(format_tool_update(&finished).text, "edit: edit file.md");
+        let merged = with_update(None, &update);
+        assert_eq!(format_tool_line(&merged).text, "edit: edit file.md");
 
-        let ongoing = ToolCallUpdate::new(
+        let bare = ToolCallUpdate::new(
             "id-9",
             ToolCallUpdateFields::new()
-                .title("edit file.md")
-                .name("edit")
-                .status(ToolCallStatus::InProgress),
-        );
-        assert_eq!(format_tool_update(&ongoing).text, "edit: edit file.md …");
-
-        let skill = ToolCallUpdate::new(
-            "id-9",
-            ToolCallUpdateFields::new()
-                .title("Loaded skill: repo-news")
-                .name("skill")
+                .kind(ToolKind::Edit)
                 .status(ToolCallStatus::Completed),
         );
-        assert_eq!(format_tool_update(&skill).text, "skill: repo-news");
+        assert_eq!(format_tool_line(&with_update(None, &bare)).text, "edit");
+    }
 
-        let fetch = ToolCallUpdate::new(
-            "id-9",
-            ToolCallUpdateFields::new()
-                .title("https://opencode.ai/docs (text/html)")
-                .kind(ToolKind::Fetch)
-                .raw_input(serde_json::json!({"url": "https://opencode.ai/docs"}))
-                .status(ToolCallStatus::Completed),
+    #[test]
+    fn merged_skill_and_fetch_bodies_normalize() {
+        let skill = ToolCall::new("id-1", "Loaded skill: repo-news")
+            .name("skill")
+            .kind(ToolKind::Other)
+            .status(ToolCallStatus::InProgress);
+        let done = ToolCallUpdate::new(
+            "id-1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
         );
         assert_eq!(
-            format_tool_update(&fetch).text,
+            format_tool_line(&with_update(Some(skill), &done)).text,
+            "skill: repo-news"
+        );
+
+        let fetch = ToolCall::new("id-1", "https://opencode.ai/docs (text/html)")
+            .kind(ToolKind::Fetch)
+            .raw_input(serde_json::json!({"url": "https://opencode.ai/docs"}))
+            .status(ToolCallStatus::InProgress);
+        assert_eq!(
+            format_tool_line(&with_update(Some(fetch), &done)).text,
             "fetch: https://opencode.ai/docs"
         );
     }
@@ -392,14 +427,6 @@ mod tests {
                 .kind(kind)
                 .status(ToolCallStatus::Completed);
             assert_eq!(format_tool_line(&call).text, expected, "{kind:?}");
-
-            let update = ToolCallUpdate::new(
-                "id-9",
-                ToolCallUpdateFields::new()
-                    .kind(kind)
-                    .status(ToolCallStatus::Completed),
-            );
-            assert_eq!(format_tool_update(&update).text, expected, "{kind:?}");
         }
     }
 }

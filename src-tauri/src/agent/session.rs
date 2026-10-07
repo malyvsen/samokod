@@ -130,6 +130,7 @@ pub(crate) struct LiveSession {
     pub(crate) last_roles: crate::repo_state::RepoState,
     pub(crate) pending: HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>,
     pub(crate) todos: Vec<crate::types::TodoView>,
+    pub(crate) tool_calls: HashMap<String, crate::acp::ToolCall>,
     pub(crate) plan: ActivePlan,
 }
 
@@ -146,6 +147,7 @@ impl LiveSession {
             last_roles: roles,
             pending: HashMap::new(),
             todos: Vec::new(),
+            tool_calls: HashMap::new(),
             plan,
         }
     }
@@ -279,6 +281,7 @@ impl AgentManager {
                     last_roles: applied,
                     pending: HashMap::new(),
                     todos: Vec::new(),
+                    tool_calls: HashMap::new(),
                     plan,
                 },
             );
