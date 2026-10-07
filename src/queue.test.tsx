@@ -8,7 +8,11 @@ import {
 	testStatus,
 } from "./fixtures";
 import { clearPreviewCache } from "./sessions/preview";
-import { queueReducer, useSessionQueues } from "./sessions/queue";
+import {
+	drainCandidate,
+	queueReducer,
+	useSessionQueues,
+} from "./sessions/queue";
 import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
 import type { SessionKey } from "./types";
 
@@ -196,6 +200,107 @@ describe("message queue", () => {
 	});
 });
 
+describe("queued editing", () => {
+	test("click enters edit mode", async () => {
+		const user = await startWorking();
+		await user.keyboard("followup{Enter}");
+		await user.click(screen.getByText("followup"));
+		expect(
+			screen.getByRole("textbox", { name: "Edit queued message" }),
+		).toBeInTheDocument();
+	});
+
+	test("enter commits new text", async () => {
+		const user = await startWorking();
+		await user.keyboard("followup{Enter}");
+		await user.click(screen.getByText("followup"));
+		const editor = screen.getByRole("textbox", {
+			name: "Edit queued message",
+		});
+		expect(editor).toBeInTheDocument();
+		await user.keyboard(" edited{Enter}");
+		expect(
+			screen.queryByRole("textbox", { name: "Edit queued message" }),
+		).not.toBeInTheDocument();
+		expect(screen.getByText("followup edited")).toBeInTheDocument();
+		expect(api.sendPrompt).toHaveBeenCalledTimes(1);
+	});
+
+	test("escape reverts", async () => {
+		const user = await startWorking();
+		await user.keyboard("followup{Enter}");
+		await user.click(screen.getByText("followup"));
+		await user.keyboard(" edited{Escape}");
+		expect(
+			screen.queryByRole("textbox", { name: "Edit queued message" }),
+		).not.toBeInTheDocument();
+		expect(screen.getByText("followup")).toBeInTheDocument();
+		expect(screen.queryByText("followup edited")).not.toBeInTheDocument();
+	});
+
+	test("blur reverts", async () => {
+		const user = await startWorking();
+		await user.keyboard("followup{Enter}");
+		await user.click(screen.getByText("followup"));
+		await user.keyboard(" edited");
+		await user.click(
+			screen.getByRole("textbox", { name: "Queue a follow-up…" }),
+		);
+		expect(
+			screen.queryByRole("textbox", { name: "Edit queued message" }),
+		).not.toBeInTheDocument();
+		expect(screen.getByText("followup")).toBeInTheDocument();
+	});
+
+	test("enter on emptied text removes the item", async () => {
+		const user = await startWorking();
+		await user.keyboard("followup{Enter}");
+		await user.click(screen.getByText("followup"));
+		const editor = screen.getByRole("textbox", {
+			name: "Edit queued message",
+		});
+		editor.textContent = "";
+		await user.keyboard("{Enter}");
+		expect(screen.queryByText("QUEUED")).not.toBeInTheDocument();
+		expect(screen.queryByText("followup")).not.toBeInTheDocument();
+	});
+
+	test("editing the head holds the drain with yellow outline", async () => {
+		const user = await startWorking();
+		await user.keyboard("first{Enter}");
+		await user.keyboard("second{Enter}");
+		await user.click(screen.getByText("first"));
+		emitAppEvent(api, { type: "turn_done", session: testKey() });
+		await vi.waitFor(() =>
+			expect(document.querySelector(".queued.blocked")).not.toBeNull(),
+		);
+		expect(api.sendPrompt).toHaveBeenCalledTimes(1);
+		expect(screen.getAllByText("QUEUED")).toHaveLength(2);
+	});
+
+	test("editing a non-head item still drains", async () => {
+		const user = await startWorking();
+		await user.keyboard("first{Enter}");
+		await user.keyboard("second{Enter}");
+		await user.click(screen.getByText("second"));
+		emitAppEvent(api, { type: "turn_done", session: testKey() });
+		await vi.waitFor(() =>
+			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "first"),
+		);
+		expect(screen.getAllByText("QUEUED")).toHaveLength(1);
+	});
+
+	test("editing while working shows no yellow outline", async () => {
+		const user = await startWorking();
+		await user.keyboard("followup{Enter}");
+		await user.click(screen.getByText("followup"));
+		expect(document.querySelector(".queued.blocked")).toBeNull();
+		expect(
+			screen.getByRole("textbox", { name: "Edit queued message" }),
+		).toBeInTheDocument();
+	});
+});
+
 describe("queueReducer", () => {
 	test("enqueue appends per session", () => {
 		const next = queueReducer(
@@ -206,11 +311,14 @@ describe("queueReducer", () => {
 				message: { id: "1", text: "hello" },
 			},
 		);
-		expect(next.a).toEqual([{ id: "1", text: "hello" }]);
+		expect(next.a?.items).toEqual([{ id: "1", text: "hello" }]);
+		expect(next.a?.editingId).toBeNull();
 	});
 
 	test("remove drops the item", () => {
-		const start = { a: [{ id: "1", text: "hello" }] };
+		const start = {
+			a: { items: [{ id: "1", text: "hello" }], editingId: null },
+		};
 		const next = queueReducer(start, {
 			type: "remove",
 			sessionId: "a",
@@ -220,18 +328,55 @@ describe("queueReducer", () => {
 	});
 
 	test("setText rewrites the item", () => {
-		const start = { a: [{ id: "1", text: "hello" }] };
+		const start = {
+			a: { items: [{ id: "1", text: "hello" }], editingId: null },
+		};
 		const next = queueReducer(start, {
 			type: "setText",
 			sessionId: "a",
 			id: "1",
 			text: "world",
 		});
-		expect(next.a).toEqual([{ id: "1", text: "world" }]);
+		expect(next.a?.items).toEqual([{ id: "1", text: "world" }]);
+	});
+
+	test("setEditing tracks the edited item", () => {
+		const start = {
+			a: { items: [{ id: "1", text: "hello" }], editingId: null },
+		};
+		const next = queueReducer(start, {
+			type: "setEditing",
+			sessionId: "a",
+			id: "1",
+		});
+		expect(next.a?.editingId).toBe("1");
 	});
 
 	test("unknown session yields empty items", () => {
 		const { result } = renderHook(() => useSessionQueues(testKey()));
 		expect(result.current.items).toEqual([]);
+		expect(result.current.editingId).toBeNull();
+	});
+});
+
+describe("drainCandidate", () => {
+	const head = { id: "1", text: "first" };
+	const second = { id: "2", text: "second" };
+	test("idle with head and no edit drains", () => {
+		expect(drainCandidate([head], null, "idle")).toEqual(head);
+	});
+	test("idle empty never drains", () => {
+		expect(drainCandidate([], null, "idle")).toBeNull();
+	});
+	test("non-idle never drains", () => {
+		expect(drainCandidate([head], null, "working")).toBeNull();
+		expect(drainCandidate([head], null, "approval")).toBeNull();
+		expect(drainCandidate([head], null, "failed")).toBeNull();
+	});
+	test("editing head holds the drain", () => {
+		expect(drainCandidate([head, second], "1", "idle")).toBeNull();
+	});
+	test("editing non-head still drains", () => {
+		expect(drainCandidate([head, second], "2", "idle")).toEqual(head);
 	});
 });

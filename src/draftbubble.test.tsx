@@ -1,11 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
-import {
-	applyInitialText,
-	DraftBubble,
-	extractDraftText,
-} from "./components/DraftBubble";
+import { DraftBubble } from "./components/DraftBubble";
+import { applyInitialText, extractDraftText } from "./components/editableText";
 
 function bubble(
 	props: {

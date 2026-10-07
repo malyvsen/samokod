@@ -151,11 +151,11 @@ export function App() {
 
 	const maybeDrain = useCallback(
 		(key: SessionKey) => {
-			const head = queue.dequeueHead(key);
+			const head = queue.dequeueDrainCandidate(key, "idle");
 			if (head === null) return;
 			void sendNow(key, head.text);
 		},
-		[queue.dequeueHead, sendNow],
+		[queue.dequeueDrainCandidate, sendNow],
 	);
 
 	const handleEvent = useCallback(
@@ -215,6 +215,36 @@ export function App() {
 
 	const transcript = chat?.transcript ?? [];
 	const { scrollRef, onScroll } = usePinnedTranscript(selectedId, transcript);
+
+	function handleQueueEdit(id: string) {
+		const key = selectedRef.current;
+		if (key === null) return;
+		queue.setEditing(key, id);
+	}
+
+	function handleQueueCommit(id: string, text: string) {
+		const key = selectedRef.current;
+		if (key === null) return;
+		if (text === "") {
+			queue.remove(key, id);
+		} else {
+			queue.setText(key, id, text);
+		}
+		queue.setEditing(key, null);
+	}
+
+	function handleQueueCancel() {
+		const key = selectedRef.current;
+		if (key === null) return;
+		queue.setEditing(key, null);
+	}
+
+	const headId = queue.items[0]?.id ?? null;
+	const wouldDrain = status === "idle" && !busy && headId !== null;
+	const blockedId =
+		queue.editingId !== null && queue.editingId === headId && wouldDrain
+			? headId
+			: null;
 
 	useEffect(() => {
 		function onPointerMove(event: MouseEvent) {
@@ -536,7 +566,14 @@ export function App() {
 								>
 									{selectedId !== null && !readOnly && (
 										<>
-											<QueuedBubbleList items={queue.items} />
+											<QueuedBubbleList
+												items={queue.items}
+												editingId={queue.editingId}
+												blockedId={blockedId}
+												onEdit={handleQueueEdit}
+												onCommit={handleQueueCommit}
+												onCancel={handleQueueCancel}
+											/>
 											<DraftBubble
 												key={selectedId}
 												initialText={draft.initialText}
