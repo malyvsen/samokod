@@ -58,6 +58,17 @@ export function attentionTitle(kind: AttentionKind): string {
 	return ATTENTION_TITLES[kind];
 }
 
+export function openPathFor(
+	plan: PlanEntry,
+	role: SessionRole,
+): AttentionKind | "neutral" {
+	const attention = attentionFor(plan);
+	if (attention !== null && latestRole(plan) === role) {
+		return attention;
+	}
+	return "neutral";
+}
+
 const ROLE_LABELS: Record<SessionRole, string> = {
 	scoping: "Scoping",
 	executing: "Executing",
