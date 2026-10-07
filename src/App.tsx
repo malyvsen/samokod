@@ -29,6 +29,7 @@ import { toSelectorModel } from "./components/selectors";
 import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
 import { hasUserMessage, useSessionDrafts } from "./sessions/drafts";
+import { usePinnedTranscript } from "./sessions/scroll";
 import {
 	agentStatusOf,
 	isReadOnly,
@@ -74,7 +75,6 @@ export function App() {
 	});
 	const appRef = useRef<HTMLDivElement>(null);
 	const notifyEdit = useAuroraMotion(appRef);
-	const transcriptRef = useRef<HTMLDivElement>(null);
 	const configGeneration = useRef(0);
 
 	const selectedId = selectedKey === null ? null : sessionKeyOf(selectedKey);
@@ -158,13 +158,7 @@ export function App() {
 	}, [view.kind]);
 
 	const transcript = chat?.transcript ?? [];
-	// biome-ignore lint/correctness/useExhaustiveDependencies: re-scroll whenever the selected transcript identity changes
-	useEffect(() => {
-		const node = transcriptRef.current;
-		if (node !== null) {
-			node.scrollTop = node.scrollHeight;
-		}
-	}, [transcript]);
+	const { scrollRef, onScroll } = usePinnedTranscript(selectedId, transcript);
 
 	useEffect(() => {
 		function onPointerMove(event: MouseEvent) {
@@ -526,7 +520,7 @@ export function App() {
 							onBeginLanding={(key) => void handleBeginLanding(key)}
 						/>
 						<div className="chatcol">
-							<div className="transcript" ref={transcriptRef}>
+							<div className="transcript" ref={scrollRef} onScroll={onScroll}>
 								<Transcript
 									items={transcript}
 									start={chat?.start ?? null}
