@@ -1,44 +1,21 @@
-import { act, render, screen } from "@testing-library/react";
-import { userEvent } from "@testing-library/user-event";
+import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { App } from "./App";
 import { testDefaults, testEntry, testKey } from "./fixtures";
-import type { AppEvent } from "./types";
+import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("./api", async () => {
+	const { api } = await import("./testHarness");
+	return api;
+});
 
-const api = vi.hoisted(() => ({
-	getPrefs: vi.fn(),
-	validateRepo: vi.fn(),
-	openRepo: vi.fn(),
-	createPlan: vi.fn(),
-	executePlan: vi.fn(),
-	cancelPlan: vi.fn(),
-	selectPlan: vi.fn(),
-	sendPrompt: vi.fn(),
-	retryLast: vi.fn(),
-	cancelTurn: vi.fn(),
-	answerPermission: vi.fn(),
-	setConfigOption: vi.fn(),
-	setPlanMode: vi.fn(),
-	warmSession: vi.fn(),
-	loadHistory: vi.fn(),
-	scopingTemplate: vi.fn(),
-	onAppEvent: vi.fn(() => () => {}),
-}));
-vi.mock("./api", () => api);
+vi.mock("@tauri-apps/plugin-dialog", async () => {
+	const { dialog } = await import("./testHarness");
+	return dialog;
+});
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	Object.defineProperty(window, "matchMedia", {
-		configurable: true,
-		writable: true,
-		value: () => ({
-			matches: false,
-			addEventListener: () => {},
-			removeEventListener: () => {},
-		}),
-	});
+	stubMatchMedia();
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo" }],
 	});
@@ -55,36 +32,17 @@ beforeEach(() => {
 	api.scopingTemplate.mockResolvedValue(null);
 });
 
-function emit(event: AppEvent) {
-	const calls = api.onAppEvent.mock.calls as unknown as Array<
-		[(event: AppEvent) => void]
-	>;
-	const call = calls.at(-1);
-	if (call === undefined) throw new Error("no app event subscription");
-	act(() => {
-		call[0](event);
-	});
-}
-
-async function openChat() {
-	const user = userEvent.setup();
-	render(<App />);
-	await user.click(await screen.findByRole("button", { name: "open" }));
-	await screen.findByRole("button", { name: "New plan" });
-	return user;
-}
-
 describe("history", () => {
 	test("unknown session shows opening copy", async () => {
-		await openChat();
+		await openChat(api);
 		expect(screen.getByText(/opening session/)).toBeInTheDocument();
 		expect(screen.getByText("getting session ready")).toBeInTheDocument();
 	});
 
 	test("preparing shows fresh session without replay claim", async () => {
-		await openChat();
+		await openChat(api);
 		expect(api.loadHistory).toHaveBeenCalledWith(testKey());
-		emit({ type: "history_preparing", session: testKey() });
+		emitAppEvent(api, { type: "history_preparing", session: testKey() });
 		expect(screen.getByText("preparing session")).toBeInTheDocument();
 		expect(
 			screen.queryByText("replaying past messages"),
@@ -92,19 +50,19 @@ describe("history", () => {
 	});
 
 	test("loading hint shows while history streams", async () => {
-		await openChat();
-		emit({ type: "history_preparing", session: testKey() });
-		emit({ type: "history_begin", session: testKey() });
+		await openChat(api);
+		emitAppEvent(api, { type: "history_preparing", session: testKey() });
+		emitAppEvent(api, { type: "history_begin", session: testKey() });
 		expect(screen.getByText("replaying past messages")).toBeInTheDocument();
-		emit({ type: "history_done", session: testKey() });
+		emitAppEvent(api, { type: "history_done", session: testKey() });
 		expect(
 			screen.queryByText("replaying past messages"),
 		).not.toBeInTheDocument();
 	});
 
 	test("failed history shows retry and retry reloads", async () => {
-		const user = await openChat();
-		emit({
+		const user = await openChat(api);
+		emitAppEvent(api, {
 			type: "history_failed",
 			session: testKey(),
 			raw: "boom",
@@ -118,8 +76,8 @@ describe("history", () => {
 	});
 
 	test("non-retryable history hides retry", async () => {
-		await openChat();
-		emit({
+		await openChat(api);
+		emitAppEvent(api, {
 			type: "history_failed",
 			session: testKey(),
 			raw: "no saved session found for this plan - it predates session recording or its session was pruned",
@@ -137,12 +95,20 @@ describe("history", () => {
 	});
 
 	test("restored history renders in the transcript", async () => {
-		await openChat();
-		emit({ type: "history_preparing", session: testKey() });
-		emit({ type: "history_begin", session: testKey() });
-		emit({ type: "user_text", session: testKey(), chunk: "hello" });
-		emit({ type: "agent_text", session: testKey(), chunk: "hi there" });
-		emit({ type: "history_done", session: testKey() });
+		await openChat(api);
+		emitAppEvent(api, { type: "history_preparing", session: testKey() });
+		emitAppEvent(api, { type: "history_begin", session: testKey() });
+		emitAppEvent(api, {
+			type: "user_text",
+			session: testKey(),
+			chunk: "hello",
+		});
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: testKey(),
+			chunk: "hi there",
+		});
+		emitAppEvent(api, { type: "history_done", session: testKey() });
 		expect(screen.getByText("hello")).toBeInTheDocument();
 		expect(screen.getByText("hi there")).toBeInTheDocument();
 	});

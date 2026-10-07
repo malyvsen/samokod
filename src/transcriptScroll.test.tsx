@@ -1,43 +1,21 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { userEvent } from "@testing-library/user-event";
+import { fireEvent } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { App } from "./App";
 import { testDefaults, testEntry, testKey } from "./fixtures";
-import type { AppEvent } from "./types";
+import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("./api", async () => {
+	const { api } = await import("./testHarness");
+	return api;
+});
 
-const api = vi.hoisted(() => ({
-	getPrefs: vi.fn(),
-	validateRepo: vi.fn(),
-	openRepo: vi.fn(),
-	createPlan: vi.fn(),
-	cancelPlan: vi.fn(),
-	selectPlan: vi.fn(),
-	sendPrompt: vi.fn(),
-	retryLast: vi.fn(),
-	cancelTurn: vi.fn(),
-	answerPermission: vi.fn(),
-	setConfigOption: vi.fn(),
-	setPlanMode: vi.fn(),
-	warmSession: vi.fn(),
-	loadHistory: vi.fn(),
-	scopingTemplate: vi.fn(),
-	onAppEvent: vi.fn(() => () => {}),
-}));
-vi.mock("./api", () => api);
+vi.mock("@tauri-apps/plugin-dialog", async () => {
+	const { dialog } = await import("./testHarness");
+	return dialog;
+});
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	Object.defineProperty(window, "matchMedia", {
-		configurable: true,
-		writable: true,
-		value: () => ({
-			matches: false,
-			addEventListener: () => {},
-			removeEventListener: () => {},
-		}),
-	});
+	stubMatchMedia();
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo" }],
 	});
@@ -53,25 +31,6 @@ beforeEach(() => {
 	api.loadHistory.mockResolvedValue(undefined);
 	api.scopingTemplate.mockResolvedValue(null);
 });
-
-function emit(event: AppEvent) {
-	const calls = api.onAppEvent.mock.calls as unknown as Array<
-		[(event: AppEvent) => void]
-	>;
-	const call = calls.at(-1);
-	if (call === undefined) throw new Error("no app event subscription");
-	act(() => {
-		call[0](event);
-	});
-}
-
-async function openChat() {
-	const user = userEvent.setup();
-	render(<App />);
-	await user.click(await screen.findByRole("button", { name: "open" }));
-	await screen.findByRole("button", { name: "New plan" });
-	return user;
-}
 
 function transcriptNode() {
 	const node = document.querySelector(".transcript");
@@ -99,13 +58,17 @@ function mockScroll(
 
 describe("transcript scroll wiring", () => {
 	test("pinned transcript auto-scrolls on streaming chunks", async () => {
-		await openChat();
+		await openChat(api);
 		const node = transcriptNode();
 		mockScroll(node, { scrollHeight: 1000, clientHeight: 500, scrollTop: 500 });
 		fireEvent.scroll(node);
-		emit({ type: "agent_text", session: testKey(), chunk: "hello" });
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: testKey(),
+			chunk: "hello",
+		});
 		expect(node.scrollTop).toBe(1000);
-		emit({
+		emitAppEvent(api, {
 			type: "tool_line",
 			session: testKey(),
 			line: { id: "t1", text: "edit file.md", status: "completed" },
@@ -114,13 +77,17 @@ describe("transcript scroll wiring", () => {
 	});
 
 	test("unpinned transcript holds position on streaming chunks", async () => {
-		await openChat();
+		await openChat(api);
 		const node = transcriptNode();
 		mockScroll(node, { scrollHeight: 1000, clientHeight: 500, scrollTop: 0 });
 		fireEvent.scroll(node);
-		emit({ type: "agent_text", session: testKey(), chunk: "hello" });
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: testKey(),
+			chunk: "hello",
+		});
 		expect(node.scrollTop).toBe(0);
-		emit({
+		emitAppEvent(api, {
 			type: "tool_line",
 			session: testKey(),
 			line: { id: "t1", text: "edit file.md", status: "completed" },

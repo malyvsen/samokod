@@ -1,7 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { userEvent } from "@testing-library/user-event";
+import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { App } from "./App";
 import {
 	testDefaults,
 	testEntry,
@@ -10,51 +8,23 @@ import {
 	testStatus,
 } from "./fixtures";
 import { clearPreviewCache } from "./sessions/preview";
-import type { AppEvent, PlanEntry, SessionKey } from "./types";
+import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
+import type { SessionKey } from "./types";
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("./api", async () => {
+	const { api } = await import("./testHarness");
+	return api;
+});
 
-const api = vi.hoisted(() => ({
-	getPrefs: vi.fn(),
-	validateRepo: vi.fn(),
-	openRepo: vi.fn(),
-	createPlan: vi.fn(),
-	executePlan: vi.fn(),
-	cancelPlan: vi.fn(),
-	selectPlan: vi.fn(),
-	sendPrompt: vi.fn(),
-	retryLast: vi.fn(),
-	cancelTurn: vi.fn(),
-	answerPermission: vi.fn(),
-	setConfigOption: vi.fn(),
-	setPlanMode: vi.fn(),
-	warmSession: vi.fn(),
-	loadHistory: vi.fn(),
-	scopingTemplate: vi.fn(),
-	onAppEvent: vi.fn(() => () => {}),
-}));
-vi.mock("./api", () => api);
-
-function emit(event: AppEvent) {
-	type Handler = (event: AppEvent) => void;
-	const registrations = api.onAppEvent.mock.calls as unknown as Handler[][];
-	const handler = registrations[0]?.[0];
-	if (handler === undefined) throw new Error("no app event handler");
-	handler(event);
-}
+vi.mock("@tauri-apps/plugin-dialog", async () => {
+	const { dialog } = await import("./testHarness");
+	return dialog;
+});
 
 beforeEach(() => {
 	vi.clearAllMocks();
 	clearPreviewCache();
-	Object.defineProperty(window, "matchMedia", {
-		configurable: true,
-		writable: true,
-		value: () => ({
-			matches: false,
-			addEventListener: () => {},
-			removeEventListener: () => {},
-		}),
-	});
+	stubMatchMedia();
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo" }],
 	});
@@ -72,26 +42,9 @@ beforeEach(() => {
 	api.sendPrompt.mockResolvedValue(undefined);
 });
 
-async function openChat(plans?: PlanEntry[], selected?: SessionKey) {
-	if (plans !== undefined) {
-		api.openRepo.mockResolvedValue({
-			repo_root: "/repo",
-			branch: "feature",
-			plans,
-			selected: selected ?? testKey(plans[0]?.name ?? "a"),
-			config_defaults: testDefaults(),
-		});
-	}
-	const user = userEvent.setup();
-	render(<App />);
-	await user.click(await screen.findByRole("button", { name: "open" }));
-	await screen.findByRole("textbox", { name: "Ask for a change…" });
-	return user;
-}
-
 describe("draft bubble in chat", () => {
 	test("compose box opens empty", async () => {
-		await openChat();
+		await openChat(api);
 		const area = await screen.findByRole("textbox", {
 			name: "Ask for a change…",
 		});
@@ -100,7 +53,7 @@ describe("draft bubble in chat", () => {
 
 	test("fresh scoping session previews its template above the draft", async () => {
 		api.scopingTemplate.mockResolvedValue("TEMPLATE");
-		await openChat();
+		await openChat(api);
 		await screen.findByText("TEMPLATE");
 		const box = screen.getByRole("textbox", { name: "Ask for a change…" });
 		expect(box).toBeInTheDocument();
@@ -117,7 +70,7 @@ describe("draft bubble in chat", () => {
 
 	test("send with preview appends only the user bubble and sends pure text", async () => {
 		api.scopingTemplate.mockResolvedValue("TEMPLATE");
-		const user = await openChat();
+		const user = await openChat(api);
 		await screen.findByText("TEMPLATE");
 		await user.keyboard("hello{Enter}");
 		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello");
@@ -131,7 +84,7 @@ describe("draft bubble in chat", () => {
 
 	test("live send falls back to one bubble when template fetch fails", async () => {
 		api.scopingTemplate.mockRejectedValue(new Error("boom"));
-		const user = await openChat();
+		const user = await openChat(api);
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
 		await user.keyboard("hello{Enter}");
@@ -159,7 +112,10 @@ describe("draft bubble in chat", () => {
 			selected: session,
 			config_defaults: testDefaults(),
 		}));
-		const user = await openChat(plans, { plan: "aaa", role: "scoping" });
+		const user = await openChat(api, {
+			plans,
+			selected: { plan: "aaa", role: "scoping" },
+		});
 		await screen.findByText("AAA-TEMPLATE");
 		await user.click(
 			await screen.findByRole("button", {
@@ -179,12 +135,20 @@ describe("draft bubble in chat", () => {
 
 	test("replayed template never duplicates the preview", async () => {
 		api.scopingTemplate.mockResolvedValue(null);
-		await openChat();
-		emit({ type: "history_preparing", session: testKey() });
-		emit({ type: "history_begin", session: testKey() });
-		emit({ type: "user_text", session: testKey(), chunk: "TEMPLATE" });
-		emit({ type: "user_text", session: testKey(), chunk: "hello" });
-		emit({ type: "history_done", session: testKey() });
+		await openChat(api);
+		emitAppEvent(api, { type: "history_preparing", session: testKey() });
+		emitAppEvent(api, { type: "history_begin", session: testKey() });
+		emitAppEvent(api, {
+			type: "user_text",
+			session: testKey(),
+			chunk: "TEMPLATE",
+		});
+		emitAppEvent(api, {
+			type: "user_text",
+			session: testKey(),
+			chunk: "hello",
+		});
+		emitAppEvent(api, { type: "history_done", session: testKey() });
 		await screen.findByText("hello");
 		expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);
 		expect(screen.getAllByText("hello")).toHaveLength(1);
@@ -203,7 +167,10 @@ describe("draft bubble in chat", () => {
 			selected: session,
 			config_defaults: testDefaults(),
 		}));
-		const user = await openChat(plans, { plan: "aaa", role: "scoping" });
+		const user = await openChat(api, {
+			plans,
+			selected: { plan: "aaa", role: "scoping" },
+		});
 		expect(await screen.findByRole("textbox")).toHaveTextContent("");
 		await user.keyboard("hello");
 		await user.click(
@@ -222,12 +189,12 @@ describe("draft bubble in chat", () => {
 	});
 
 	test("hides while working and returns on turn done", async () => {
-		const user = await openChat();
+		const user = await openChat(api);
 		api.sendPrompt.mockReturnValue(new Promise(() => {}));
 		await user.keyboard("do it{Enter}");
 		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "STOP" })).toBeInTheDocument();
-		emit({ type: "turn_done", session: testKey() });
+		emitAppEvent(api, { type: "turn_done", session: testKey() });
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		expect(
 			screen.queryByRole("button", { name: "STOP" }),

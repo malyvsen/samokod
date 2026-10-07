@@ -1,44 +1,21 @@
-import { act, render, screen } from "@testing-library/react";
-import { userEvent } from "@testing-library/user-event";
+import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { App } from "./App";
 import { testDefaults, testEntry, testKey } from "./fixtures";
-import type { AppEvent } from "./types";
+import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("./api", async () => {
+	const { api } = await import("./testHarness");
+	return api;
+});
 
-const api = vi.hoisted(() => ({
-	getPrefs: vi.fn(),
-	validateRepo: vi.fn(),
-	openRepo: vi.fn(),
-	createPlan: vi.fn(),
-	executePlan: vi.fn(),
-	cancelPlan: vi.fn(),
-	selectPlan: vi.fn(),
-	sendPrompt: vi.fn(),
-	retryLast: vi.fn(),
-	cancelTurn: vi.fn(),
-	answerPermission: vi.fn(),
-	setConfigOption: vi.fn(),
-	setPlanMode: vi.fn(),
-	warmSession: vi.fn(),
-	loadHistory: vi.fn(),
-	scopingTemplate: vi.fn(),
-	onAppEvent: vi.fn(() => () => {}),
-}));
-vi.mock("./api", () => api);
+vi.mock("@tauri-apps/plugin-dialog", async () => {
+	const { dialog } = await import("./testHarness");
+	return dialog;
+});
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	Object.defineProperty(window, "matchMedia", {
-		configurable: true,
-		writable: true,
-		value: () => ({
-			matches: false,
-			addEventListener: () => {},
-			removeEventListener: () => {},
-		}),
-	});
+	stubMatchMedia();
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo" }],
 	});
@@ -55,36 +32,17 @@ beforeEach(() => {
 	api.scopingTemplate.mockResolvedValue(null);
 });
 
-function emit(event: AppEvent) {
-	const calls = api.onAppEvent.mock.calls as unknown as Array<
-		[(event: AppEvent) => void]
-	>;
-	const call = calls.at(-1);
-	if (call === undefined) throw new Error("no app event subscription");
-	act(() => {
-		call[0](event);
-	});
-}
-
-async function openChat() {
-	const user = userEvent.setup();
-	render(<App />);
-	await user.click(await screen.findByRole("button", { name: "open" }));
-	await screen.findByRole("button", { name: "New plan" });
-	return user;
-}
-
 describe("plan", () => {
 	test("session_reset keeps the selected plan", async () => {
-		await openChat();
-		emit({ type: "session_reset", session: testKey() });
+		await openChat(api);
+		emitAppEvent(api, { type: "session_reset", session: testKey() });
 		expect(screen.getByText("Parallel sessions")).toBeInTheDocument();
 		expect(screen.getByText("Scoping")).toBeInTheDocument();
 	});
 
 	test("plans_changed lists both rows of an approved plan", async () => {
-		await openChat();
-		emit({
+		await openChat(api);
+		emitAppEvent(api, {
 			type: "plans_changed",
 			plans: [
 				testEntry("2026-09-25.10-54-59.slug", "executing", "Shiny", true),
@@ -118,7 +76,7 @@ describe("plan", () => {
 			selected: { plan: "2026-09-25.10-54-59", role: "executing" },
 			config_defaults: testDefaults(),
 		});
-		const user = await openChat();
+		const user = await openChat(api);
 		await user.click(
 			await screen.findByRole("button", {
 				name: "Send Parallel sessions to execution",
@@ -129,7 +87,7 @@ describe("plan", () => {
 			role: "scoping",
 		});
 		expect(api.sendPrompt).not.toHaveBeenCalled();
-		emit({
+		emitAppEvent(api, {
 			type: "user_text",
 			session: { plan: "2026-09-25.10-54-59", role: "executing" },
 			chunk: "EXECUTING-PROMPT",
@@ -148,7 +106,7 @@ describe("plan", () => {
 			config_defaults: testDefaults(),
 		});
 		api.executePlan.mockRejectedValue(new Error("nope"));
-		const user = await openChat();
+		const user = await openChat(api);
 		await user.click(
 			await screen.findByRole("button", {
 				name: "Send Parallel sessions to execution",
@@ -171,10 +129,14 @@ describe("plan", () => {
 			config_defaults: testDefaults(),
 		});
 		api.sendPrompt.mockResolvedValue(undefined);
-		const user = await openChat();
+		const user = await openChat(api);
 		await user.keyboard("old question{Enter}");
-		emit({ type: "agent_text", session: testKey(), chunk: "old chat" });
-		emit({ type: "turn_done", session: testKey() });
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: testKey(),
+			chunk: "old chat",
+		});
+		emitAppEvent(api, { type: "turn_done", session: testKey() });
 		await user.click(
 			await screen.findByRole("button", {
 				name: "Cancel Parallel sessions",
@@ -192,9 +154,13 @@ describe("plan", () => {
 			selected: { plan: "bbb", role: "scoping" },
 			config_defaults: testDefaults(),
 		});
-		const user = await openChat();
-		emit({ type: "agent_text", session: testKey(), chunk: "ephemeral" });
-		emit({ type: "turn_done", session: testKey() });
+		const user = await openChat(api);
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: testKey(),
+			chunk: "ephemeral",
+		});
+		emitAppEvent(api, { type: "turn_done", session: testKey() });
 		expect(screen.getByText("ephemeral")).toBeInTheDocument();
 		await user.click(
 			await screen.findByRole("button", {
@@ -209,20 +175,20 @@ describe("plan", () => {
 
 	test("first send appends the user bubble", async () => {
 		api.sendPrompt.mockResolvedValue(undefined);
-		const user = await openChat();
+		const user = await openChat(api);
 		await user.keyboard("hello plan{Enter}");
 		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello plan");
 		expect(screen.getByText("hello plan")).toBeInTheDocument();
 	});
 
 	test("background sessions update silently", async () => {
-		await openChat();
-		emit({
+		await openChat(api);
+		emitAppEvent(api, {
 			type: "agent_text",
 			session: { plan: "other-plan", role: "scoping" },
 			chunk: "background chat",
 		});
-		emit({
+		emitAppEvent(api, {
 			type: "turn_done",
 			session: { plan: "other-plan", role: "scoping" },
 		});
@@ -252,21 +218,26 @@ describe("plan", () => {
 			config_defaults: testDefaults(),
 		}));
 		api.sendPrompt.mockResolvedValue(undefined);
-		const user = await openChat();
+		const user = await openChat(api);
 		const aaa = { plan: "aaa", role: "scoping" } as const;
 		const bbb = { plan: "bbb", role: "scoping" } as const;
 		await user.keyboard("aaa question{Enter}");
-		emit({ type: "agent_text", session: aaa, chunk: "aaa chat" });
-		emit({ type: "turn_done", session: aaa });
-		emit({ type: "agent_text", session: bbb, chunk: "bbb chat" });
-		emit({ type: "turn_done", session: bbb });
-		emit({
+		emitAppEvent(api, { type: "agent_text", session: aaa, chunk: "aaa chat" });
+		emitAppEvent(api, { type: "turn_done", session: aaa });
+		emitAppEvent(api, { type: "agent_text", session: bbb, chunk: "bbb chat" });
+		emitAppEvent(api, { type: "turn_done", session: bbb });
+		emitAppEvent(api, {
 			type: "todos_changed",
 			session: bbb,
 			todos: [{ content: "Beta todo", status: "pending" }],
 			changes: [],
 		});
-		emit({ type: "spend_tick", session: bbb, cost: 1.5, ctx_pct: 10 });
+		emitAppEvent(api, {
+			type: "spend_tick",
+			session: bbb,
+			cost: 1.5,
+			ctx_pct: 10,
+		});
 		expect(screen.getByText("aaa chat")).toBeInTheDocument();
 		await user.click(
 			screen.getByRole("button", { name: "Beta, scoping, opens Scoping" }),
@@ -302,10 +273,14 @@ describe("plan", () => {
 			selected: { plan: "bbb", role: "scoping" },
 			config_defaults: testDefaults(),
 		});
-		const user = await openChat();
+		const user = await openChat(api);
 		const aaa = { plan: "aaa", role: "scoping" } as const;
-		emit({ type: "agent_text", session: aaa, chunk: "aaa ephemeral" });
-		emit({ type: "turn_done", session: aaa });
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: aaa,
+			chunk: "aaa ephemeral",
+		});
+		emitAppEvent(api, { type: "turn_done", session: aaa });
 		expect(screen.getByText("aaa ephemeral")).toBeInTheDocument();
 		await user.click(
 			screen.getByRole("button", { name: "Beta, scoping, opens Scoping" }),
@@ -329,9 +304,13 @@ describe("plan", () => {
 			selected: { plan: "2026-09-25.11-00-00", role: "scoping" },
 			config_defaults: testDefaults(),
 		});
-		const user = await openChat();
-		emit({ type: "agent_text", session: testKey(), chunk: "old chat" });
-		emit({ type: "turn_done", session: testKey() });
+		const user = await openChat(api);
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: testKey(),
+			chunk: "old chat",
+		});
+		emitAppEvent(api, { type: "turn_done", session: testKey() });
 		await user.click(screen.getByRole("button", { name: "New plan" }));
 		expect(api.createPlan).toHaveBeenCalledTimes(1);
 		expect(screen.queryByText("old chat")).not.toBeInTheDocument();
@@ -342,8 +321,8 @@ describe("plan", () => {
 
 	test("failed turns show a red pill and retry resends", async () => {
 		api.retryLast.mockResolvedValue(true);
-		const user = await openChat();
-		emit({
+		const user = await openChat(api);
+		emitAppEvent(api, {
 			type: "turn_failed",
 			session: testKey(),
 			raw: "boom",
@@ -370,7 +349,7 @@ describe("plan", () => {
 			config_defaults: testDefaults(),
 		});
 		api.selectPlan.mockRejectedValue(new Error("gone"));
-		const user = await openChat();
+		const user = await openChat(api);
 		await user.click(
 			screen.getByRole("button", { name: "Beta, scoping, opens Scoping" }),
 		);
@@ -386,7 +365,7 @@ describe("plan", () => {
 
 	test("failed create surfaces its own hint without retry", async () => {
 		api.createPlan.mockRejectedValue(new Error("denied"));
-		const user = await openChat();
+		const user = await openChat(api);
 		await user.click(screen.getByRole("button", { name: "New plan" }));
 		expect(
 			await screen.findByText("couldn't create plan - try again"),
@@ -398,9 +377,13 @@ describe("plan", () => {
 
 	test("failed cancel surfaces its own hint without retry", async () => {
 		api.cancelPlan.mockRejectedValue(new Error("denied"));
-		const user = await openChat();
-		emit({ type: "agent_text", session: testKey(), chunk: "old chat" });
-		emit({ type: "turn_done", session: testKey() });
+		const user = await openChat(api);
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: testKey(),
+			chunk: "old chat",
+		});
+		emitAppEvent(api, { type: "turn_done", session: testKey() });
 		await user.click(
 			await screen.findByRole("button", {
 				name: "Cancel Parallel sessions",
@@ -429,7 +412,7 @@ describe("plan", () => {
 			selected: testKey(),
 			config_defaults: testDefaults(),
 		});
-		const user = await openChat();
+		const user = await openChat(api);
 		await user.click(
 			await screen.findByRole("button", { name: "Switch to manual" }),
 		);
@@ -450,7 +433,7 @@ describe("plan", () => {
 			config_defaults: testDefaults(),
 		});
 		api.setPlanMode.mockRejectedValue(new Error("denied"));
-		const user = await openChat();
+		const user = await openChat(api);
 		await user.click(
 			await screen.findByRole("button", { name: "Switch to manual" }),
 		);

@@ -1,32 +1,18 @@
-import { act, render, screen } from "@testing-library/react";
-import { userEvent } from "@testing-library/user-event";
+import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { App } from "./App";
 import { testDefaults, testEntry, testKey } from "./fixtures";
-import type { AppEvent, ConfigOptionView } from "./types";
+import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
+import type { ConfigOptionView } from "./types";
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("./api", async () => {
+	const { api } = await import("./testHarness");
+	return api;
+});
 
-const api = vi.hoisted(() => ({
-	getPrefs: vi.fn(),
-	validateRepo: vi.fn(),
-	openRepo: vi.fn(),
-	createPlan: vi.fn(),
-	executePlan: vi.fn(),
-	cancelPlan: vi.fn(),
-	selectPlan: vi.fn(),
-	sendPrompt: vi.fn(),
-	retryLast: vi.fn(),
-	cancelTurn: vi.fn(),
-	answerPermission: vi.fn(),
-	setConfigOption: vi.fn(),
-	setPlanMode: vi.fn(),
-	warmSession: vi.fn(),
-	loadHistory: vi.fn(),
-	scopingTemplate: vi.fn(),
-	onAppEvent: vi.fn(() => () => {}),
-}));
-vi.mock("./api", () => api);
+vi.mock("@tauri-apps/plugin-dialog", async () => {
+	const { dialog } = await import("./testHarness");
+	return dialog;
+});
 
 function modelOption(currentValue: string): ConfigOptionView {
 	return {
@@ -76,15 +62,7 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
-	Object.defineProperty(window, "matchMedia", {
-		configurable: true,
-		writable: true,
-		value: () => ({
-			matches: false,
-			addEventListener: () => {},
-			removeEventListener: () => {},
-		}),
-	});
+	stubMatchMedia();
 	api.getPrefs.mockResolvedValue({ recent: [] });
 	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "feature" });
 	api.setConfigOption.mockReset();
@@ -104,19 +82,11 @@ async function openChatWith(options: ConfigOptionView[]) {
 		selected: testKey(),
 		config_defaults: testDefaults(),
 	});
-	const user = userEvent.setup();
-	render(<App />);
-	await user.click(await screen.findByRole("button", { name: "open" }));
-	await screen.findByRole("textbox", { name: "Ask for a change…" });
-	act(() => {
-		const calls = api.onAppEvent.mock.calls as unknown as Array<
-			[(event: AppEvent) => void]
-		>;
-		calls.at(-1)?.[0]({
-			type: "config_options",
-			session: testKey(),
-			options,
-		});
+	const user = await openChat(api);
+	emitAppEvent(api, {
+		type: "config_options",
+		session: testKey(),
+		options,
 	});
 	return user;
 }
