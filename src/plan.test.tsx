@@ -1,15 +1,8 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
-import {
-	testDefaults,
-	testEntry,
-	testEntryWith,
-	testKey,
-	testStatus,
-	testWorktree,
-} from "./fixtures";
+import { testDefaults, testEntry, testKey } from "./fixtures";
 import type { AppEvent } from "./types";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -19,9 +12,6 @@ const api = vi.hoisted(() => ({
 	validateRepo: vi.fn(),
 	openRepo: vi.fn(),
 	createPlan: vi.fn(),
-	executePlan: vi.fn(),
-	finishLanding: vi.fn(),
-	beginLanding: vi.fn(),
 	cancelPlan: vi.fn(),
 	selectPlan: vi.fn(),
 	sendPrompt: vi.fn(),
@@ -29,6 +19,7 @@ const api = vi.hoisted(() => ({
 	cancelTurn: vi.fn(),
 	answerPermission: vi.fn(),
 	setConfigOption: vi.fn(),
+	setPlanMode: vi.fn(),
 	warmSession: vi.fn(),
 	loadHistory: vi.fn(),
 	scopingTemplate: vi.fn(),
@@ -104,53 +95,7 @@ describe("plan", () => {
 		expect(screen.getByText("Executing")).toBeInTheDocument();
 	});
 
-	test("row done button completes and keeps the transcript", async () => {
-		api.finishLanding.mockResolvedValue({
-			plans: [
-				testEntry("2026-09-25.10-54-59.slug", "completed", "Shiny feature"),
-			],
-			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
-			config_defaults: testDefaults(),
-		});
-		await openChat();
-		emit({
-			type: "plans_changed",
-			plans: [
-				testEntryWith(
-					"2026-09-25.10-54-59.slug",
-					"executing",
-					"Shiny",
-					true,
-					[testStatus("scoping"), testStatus("executing")],
-					testWorktree(),
-				),
-			],
-			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
-		});
-		emit({
-			type: "agent_text",
-			session: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
-			chunk: "executing chat",
-		});
-		emit({
-			type: "turn_done",
-			session: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
-		});
-		const executing = screen.getByRole("button", {
-			name: "Shiny Executing",
-		});
-		const row = executing.closest(".sbody");
-		if (row === null) throw new Error("executing row missing");
-		await within(row as HTMLElement)
-			.findByRole("button", {
-				name: "Land 2026-09-25.10-54-59.slug onto feature",
-			})
-			.then((button) => button.click());
-		expect(api.finishLanding).toHaveBeenCalledTimes(1);
-		expect(screen.getByText("executing chat")).toBeInTheDocument();
-	});
-
-	test("row cancel button cancels and keeps the transcript", async () => {
+	test("header cancel cancels and keeps the transcript", async () => {
 		api.cancelPlan.mockResolvedValue({
 			plans: [
 				testEntry("2026-09-25.10-54-59.draft-idea", "cancelled", "Draft idea"),
@@ -163,15 +108,11 @@ describe("plan", () => {
 		await user.keyboard("old question{Enter}");
 		emit({ type: "agent_text", session: testKey(), chunk: "old chat" });
 		emit({ type: "turn_done", session: testKey() });
-		const scoping = screen.getByRole("button", {
-			name: "Parallel sessions Scoping",
-		});
-		const row = scoping.closest(".sbody");
-		if (row === null) throw new Error("scoping row missing");
-		const button = await within(row as HTMLElement).findByRole("button", {
-			name: "Cancel 2026-09-25.10-54-59",
-		});
-		await user.click(button);
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Cancel Parallel sessions",
+			}),
+		);
 		expect(api.cancelPlan).toHaveBeenCalledTimes(1);
 		await screen.findByText("Draft idea");
 		expect(screen.getByText("old chat")).toBeInTheDocument();
@@ -188,15 +129,11 @@ describe("plan", () => {
 		emit({ type: "agent_text", session: testKey(), chunk: "ephemeral" });
 		emit({ type: "turn_done", session: testKey() });
 		expect(screen.getByText("ephemeral")).toBeInTheDocument();
-		const scoping = screen.getByRole("button", {
-			name: "Parallel sessions Scoping",
-		});
-		const row = scoping.closest(".sbody");
-		if (row === null) throw new Error("scoping row missing");
-		const button = await within(row as HTMLElement).findByRole("button", {
-			name: "Cancel 2026-09-25.10-54-59",
-		});
-		await user.click(button);
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Cancel Parallel sessions",
+			}),
+		);
 		expect(api.cancelPlan).toHaveBeenCalledTimes(1);
 		await vi.waitFor(() =>
 			expect(screen.queryByText("ephemeral")).not.toBeInTheDocument(),
@@ -392,46 +329,16 @@ describe("plan", () => {
 		).not.toBeInTheDocument();
 	});
 
-	test("failed execute surfaces its own hint without retry", async () => {
-		const entry = testEntryWith("aaa", "scoping", "First", true, [
-			testStatus("scoping"),
-		]);
-		api.openRepo.mockResolvedValue({
-			repo_root: "/repo",
-			branch: "feature",
-			plans: [entry],
-			selected: { plan: "aaa", role: "scoping" },
-			config_defaults: testDefaults(),
-		});
-		api.executePlan.mockRejectedValue(new Error("nope"));
-		const user = await openChat();
-		await user.click(
-			await screen.findByRole("button", {
-				name: "Send aaa to execution",
-			}),
-		);
-		expect(
-			await screen.findByText("couldn't start execution - try again"),
-		).toBeInTheDocument();
-		expect(
-			screen.queryByRole("button", { name: "retry" }),
-		).not.toBeInTheDocument();
-	});
-
 	test("failed cancel surfaces its own hint without retry", async () => {
 		api.cancelPlan.mockRejectedValue(new Error("denied"));
 		const user = await openChat();
 		emit({ type: "agent_text", session: testKey(), chunk: "old chat" });
 		emit({ type: "turn_done", session: testKey() });
-		const scoping = screen.getByRole("button", {
-			name: "Parallel sessions Scoping",
-		});
-		const row = scoping.closest(".sbody");
-		if (row === null) throw new Error("scoping row missing");
-		const button = await within(row as HTMLElement).findByRole("button", {
-			name: "Cancel 2026-09-25.10-54-59",
-		});
-		await user.click(button);
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Cancel Parallel sessions",
+			}),
+		);
 		expect(
 			await screen.findByText("couldn't cancel plan - try again"),
 		).toBeInTheDocument();
@@ -440,70 +347,27 @@ describe("plan", () => {
 		).not.toBeInTheDocument();
 	});
 
-	test("failed begin landing surfaces its own hint without retry", async () => {
-		api.beginLanding.mockRejectedValue(new Error("denied"));
-		await openChat();
-		emit({
-			type: "plans_changed",
-			plans: [
-				testEntryWith(
-					"2026-09-25.10-54-59.slug",
-					"executing",
-					"Shiny",
-					true,
-					[testStatus("scoping"), testStatus("executing")],
-					testWorktree({ ffable: false }),
-				),
-			],
-			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
+	test("mode switch flips the plan to manual", async () => {
+		api.setPlanMode.mockResolvedValue({
+			plans: [testEntry()],
+			selected: testKey(),
+			config_defaults: testDefaults(),
 		});
-		const executing = screen.getByRole("button", {
-			name: "Shiny Executing",
-		});
-		const row = executing.closest(".sbody");
-		if (row === null) throw new Error("executing row missing");
-		await within(row as HTMLElement)
-			.findByRole("button", {
-				name: "Start landing 2026-09-25.10-54-59.slug onto feature",
-			})
-			.then((button) => button.click());
-		expect(
-			await screen.findByText("couldn't start landing - try again"),
-		).toBeInTheDocument();
-		expect(
-			screen.queryByRole("button", { name: "retry" }),
-		).not.toBeInTheDocument();
+		const user = await openChat();
+		await user.click(
+			await screen.findByRole("button", { name: "Switch to manual" }),
+		);
+		expect(api.setPlanMode).toHaveBeenCalledWith("2026-09-25.10-54-59", true);
 	});
 
-	test("failed finish surfaces its own hint without retry", async () => {
-		api.finishLanding.mockRejectedValue(new Error("denied"));
-		await openChat();
-		emit({
-			type: "plans_changed",
-			plans: [
-				testEntryWith(
-					"2026-09-25.10-54-59.slug",
-					"executing",
-					"Shiny",
-					true,
-					[testStatus("scoping"), testStatus("executing")],
-					testWorktree(),
-				),
-			],
-			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
-		});
-		const executing = screen.getByRole("button", {
-			name: "Shiny Executing",
-		});
-		const row = executing.closest(".sbody");
-		if (row === null) throw new Error("executing row missing");
-		await within(row as HTMLElement)
-			.findByRole("button", {
-				name: "Land 2026-09-25.10-54-59.slug onto feature",
-			})
-			.then((button) => button.click());
+	test("failed mode switch surfaces its own hint without retry", async () => {
+		api.setPlanMode.mockRejectedValue(new Error("denied"));
+		const user = await openChat();
+		await user.click(
+			await screen.findByRole("button", { name: "Switch to manual" }),
+		);
 		expect(
-			await screen.findByText("couldn't finish landing - try again"),
+			await screen.findByText("couldn't switch plan mode - try again"),
 		).toBeInTheDocument();
 		expect(
 			screen.queryByRole("button", { name: "retry" }),

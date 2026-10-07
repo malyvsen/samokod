@@ -420,9 +420,9 @@ impl AgentManager {
         let mut plan = ActivePlan::for_session(key);
         // A known session keeps its prefix state across transport deaths;
         // anything without an entry starts with the caller's flag.
-        // Eager executing sessions bypass this path: `execute_plan` marks their
-        // prefixed flag, since their role already went out as the full
-        // first turn.
+        // Eager executing sessions bypass this path: the transition core
+        // marks their prefixed flag, since their role already went out as
+        // the full first turn.
         plan.prefixed = stored_prefixed.unwrap_or(plan.prefixed);
         let agent = opencode::agent_for(plan.phase);
         let (connection, session_id, _) =

@@ -19,8 +19,6 @@ const api = vi.hoisted(() => ({
 	validateRepo: vi.fn(),
 	openRepo: vi.fn(),
 	createPlan: vi.fn(),
-	executePlan: vi.fn(),
-	finishLanding: vi.fn(),
 	cancelPlan: vi.fn(),
 	selectPlan: vi.fn(),
 	sendPrompt: vi.fn(),
@@ -28,6 +26,7 @@ const api = vi.hoisted(() => ({
 	cancelTurn: vi.fn(),
 	answerPermission: vi.fn(),
 	setConfigOption: vi.fn(),
+	setPlanMode: vi.fn(),
 	warmSession: vi.fn(),
 	loadHistory: vi.fn(),
 	scopingTemplate: vi.fn(),
@@ -219,34 +218,6 @@ describe("draft bubble in chat", () => {
 			}),
 		);
 		expect(await screen.findByRole("textbox")).toHaveTextContent("hello");
-	});
-
-	test("execute shows the live first prompt without sending", async () => {
-		const entry = testEntryWith("aaa", "scoping", "First", true, [
-			testStatus("scoping"),
-		]);
-		api.executePlan.mockResolvedValue({
-			plans: [entry],
-			selected: { plan: "aaa", role: "executing" },
-			config_defaults: testDefaults(),
-		});
-		const user = await openChat([entry], { plan: "aaa", role: "scoping" });
-		await user.click(
-			await screen.findByRole("button", {
-				name: "Send aaa to execution",
-			}),
-		);
-		expect(api.executePlan).toHaveBeenCalledWith({
-			plan: "aaa",
-			role: "scoping",
-		});
-		expect(api.sendPrompt).not.toHaveBeenCalled();
-		emit({
-			type: "user_text",
-			session: { plan: "aaa", role: "executing" },
-			chunk: "EXECUTING-PROMPT",
-		});
-		await screen.findByText("EXECUTING-PROMPT");
 	});
 
 	test("hides while working and returns on turn done", async () => {

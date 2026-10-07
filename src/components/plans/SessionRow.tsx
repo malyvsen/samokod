@@ -1,45 +1,25 @@
-import type {
-	PlanPhase,
-	SessionKey,
-	SessionStatusView,
-	WorktreeStatus,
-} from "../../types";
-import { type AttentionKind, roleLabel } from "./planDisplay";
-import { actionKind, RowActions } from "./RowActions";
+import type { SessionKey, SessionStatusView } from "../../types";
+import type { AttentionKind } from "./planDisplay";
+import { roleLabel } from "./planDisplay";
 
 export function SessionRow({
 	planName,
 	planTitle,
-	phase,
-	hasPlanMd,
-	worktree,
 	status,
 	openPath,
 	trail,
 	position,
 	onSelect,
-	onExecute,
-	onCancel,
-	onFinishLanding,
-	onBeginLanding,
 }: {
 	planName: string;
 	planTitle: string;
-	phase: PlanPhase;
-	hasPlanMd: boolean;
-	worktree: WorktreeStatus | null;
 	status: SessionStatusView;
 	openPath: AttentionKind | "sel";
 	trail: "before" | "open" | "after";
 	position: "single" | "last" | "middle";
 	onSelect: (session: SessionKey) => void;
-	onExecute: (session: SessionKey) => void;
-	onCancel: (session: SessionKey) => void;
-	onFinishLanding: (session: SessionKey) => void;
-	onBeginLanding: (session: SessionKey) => void;
 }) {
 	const key: SessionKey = { plan: planName, role: status.role };
-	const kind = actionKind(phase, status.role);
 	return (
 		<>
 			<span className={gutterClass(position)} aria-hidden="true">
@@ -56,37 +36,6 @@ export function SessionRow({
 				>
 					<span className="slabel">{roleLabel(status.role)}</span>
 				</button>
-				{kind === "scoping" ? (
-					<RowActions
-						kind={kind}
-						planName={planName}
-						hasPlanMd={hasPlanMd}
-						running={status.working}
-						onExecute={() => onExecute(key)}
-						onCancel={() => onCancel(key)}
-					/>
-				) : kind === "executing" ? (
-					<RowActions
-						kind={kind}
-						planName={planName}
-						running={status.working}
-						worktree={worktree}
-						onCancel={() => onCancel(key)}
-						onFinishLanding={() => onFinishLanding(key)}
-						onBeginLanding={() => onBeginLanding(key)}
-					/>
-				) : kind === "landing" ? (
-					<RowActions
-						kind={kind}
-						planName={planName}
-						running={status.working}
-						dirty={worktree?.dirty ?? false}
-						onCancel={() => onCancel(key)}
-						onFinishLanding={() => onFinishLanding(key)}
-					/>
-				) : (
-					<RowActions kind={kind} planName={planName} />
-				)}
 			</div>
 		</>
 	);

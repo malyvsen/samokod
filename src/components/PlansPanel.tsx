@@ -16,20 +16,14 @@ export function PlansPanel({
 	selected,
 	onSelect,
 	onNewPlan,
-	onExecute,
 	onCancel,
-	onFinishLanding,
-	onBeginLanding,
 	onSetMode,
 }: {
 	plans: PlanEntry[];
 	selected: SessionKey | null;
 	onSelect: (session: SessionKey) => void;
 	onNewPlan: () => void;
-	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
-	onFinishLanding: (session: SessionKey) => void;
-	onBeginLanding: (session: SessionKey) => void;
 	onSetMode: (plan: string, manual: boolean) => void;
 }) {
 	const byPhase = groupByPhase(plans);
@@ -56,10 +50,7 @@ export function PlansPanel({
 							plan={plan}
 							selected={selected}
 							onSelect={onSelect}
-							onExecute={onExecute}
 							onCancel={onCancel}
-							onFinishLanding={onFinishLanding}
-							onBeginLanding={onBeginLanding}
 							onSetMode={onSetMode}
 						/>
 					))}
@@ -73,19 +64,13 @@ function PlanGroup({
 	plan,
 	selected,
 	onSelect,
-	onExecute,
 	onCancel,
-	onFinishLanding,
-	onBeginLanding,
 	onSetMode,
 }: {
 	plan: PlanEntry;
 	selected: SessionKey | null;
 	onSelect: (session: SessionKey) => void;
-	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
-	onFinishLanding: (session: SessionKey) => void;
-	onBeginLanding: (session: SessionKey) => void;
 	onSetMode: (plan: string, manual: boolean) => void;
 }) {
 	const target = headerKey(plan);
@@ -159,18 +144,11 @@ function PlanGroup({
 							key={status.role}
 							planName={plan.name}
 							planTitle={plan.title}
-							phase={plan.phase}
-							hasPlanMd={plan.has_plan_md}
-							worktree={plan.worktree}
 							status={status}
 							openPath={openPath}
 							trail={trailFor(index, openIdx)}
 							position={positionFor(index, plan.sessions.length)}
 							onSelect={onSelect}
-							onExecute={onExecute}
-							onCancel={onCancel}
-							onFinishLanding={onFinishLanding}
-							onBeginLanding={onBeginLanding}
 						/>
 					))
 				: null}

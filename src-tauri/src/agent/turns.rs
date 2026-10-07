@@ -128,6 +128,7 @@ impl AgentManager {
         let app = self.app.clone();
         let push_state = Arc::clone(&self.state);
         let push_app = self.app.clone();
+        let pump_manager = self.clone();
         tauri::async_runtime::spawn(async move {
             let prompt = acp::PromptRequest::new(
                 acp::SessionId::new(session_id),
@@ -144,6 +145,9 @@ impl AgentManager {
                         },
                     );
                     push_sorted(&push_state, &push_app);
+                    // Automatic plans advance once the turn ends clean.
+                    drop(connection);
+                    pump_manager.spawn_pump();
                 }
                 Err(error) => {
                     let raw = error.to_string();

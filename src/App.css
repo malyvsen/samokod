@@ -1320,9 +1320,6 @@ body {
 	);
 }
 
-.plans .sbody:hover .sbtn,
-.plans .sbody.selected .sbtn,
-.plans .sbody:focus-within .sbtn,
 .plans .sect-head:hover .sbtn,
 .plans .sect-head:focus-within .sbtn,
 .plans .plan-group:hover .hact .sbtn,
@@ -1353,15 +1350,6 @@ body {
 
 .sbtn.cancel:hover {
 	background: rgba(255, 107, 107, 0.14);
-}
-
-.sbtn.promote {
-	color: #7dffc4;
-	border-color: rgba(125, 255, 196, 0.4);
-}
-
-.sbtn.promote:hover {
-	background: rgba(125, 255, 196, 0.1);
 }
 
 .sbtn.mode {

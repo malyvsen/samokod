@@ -2,12 +2,9 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	answerPermission,
-	beginLanding,
 	cancelPlan,
 	cancelTurn,
 	createPlan,
-	executePlan,
-	finishLanding,
 	getPrefs,
 	loadHistory,
 	onAppEvent,
@@ -378,44 +375,6 @@ export function App() {
 		}
 	}
 
-	async function handleExecute(key: SessionKey) {
-		updateChat(key, (chat) => ({ ...chat, working: true }));
-		try {
-			const update = await executePlan(key);
-			setChats((current) => carryChats(current, key, update, true));
-			applyPlans(update);
-		} catch (error) {
-			updateChat(key, (chat) => ({ ...chat, working: false }));
-			appendError(
-				key,
-				error instanceof Error ? error.message : String(error),
-				"couldn't start execution - try again",
-				false,
-			);
-		}
-	}
-
-	async function handleFinishLanding(key: SessionKey) {
-		await runPlansAction(key, (session) => finishLanding(session));
-	}
-
-	async function handleBeginLanding(key: SessionKey) {
-		updateChat(key, (chat) => ({ ...chat, working: true }));
-		try {
-			const update = await beginLanding(key);
-			setChats((current) => carryChats(current, key, update, true));
-			applyPlans(update);
-		} catch (error) {
-			updateChat(key, (chat) => ({ ...chat, working: false }));
-			appendError(
-				key,
-				error instanceof Error ? error.message : String(error),
-				"couldn't start landing - try again",
-				false,
-			);
-		}
-	}
-
 	async function handleCancel(key: SessionKey) {
 		const wasEmpty = key.role === "scoping" && !hasUserMessage(chats, key);
 		updateChat(key, (chat) => ({ ...chat, working: true }));
@@ -456,26 +415,6 @@ export function App() {
 					false,
 				);
 			}
-		}
-	}
-
-	async function runPlansAction(
-		key: SessionKey,
-		action: (session: SessionKey) => Promise<PlansUpdate>,
-	) {
-		updateChat(key, (chat) => ({ ...chat, working: true }));
-		try {
-			const update = await action(key);
-			setChats((current) => carryChats(current, key, update, false));
-			applyPlans(update);
-		} catch (error) {
-			updateChat(key, (chat) => ({ ...chat, working: false }));
-			appendError(
-				key,
-				error instanceof Error ? error.message : String(error),
-				"couldn't finish landing - try again",
-				false,
-			);
 		}
 	}
 
@@ -522,10 +461,7 @@ export function App() {
 							selected={selectedKey}
 							onSelect={handleSelect}
 							onNewPlan={() => void handleNewPlan()}
-							onExecute={(key) => void handleExecute(key)}
 							onCancel={(key) => void handleCancel(key)}
-							onFinishLanding={(key) => void handleFinishLanding(key)}
-							onBeginLanding={(key) => void handleBeginLanding(key)}
 							onSetMode={(plan, manual) => void handleSetMode(plan, manual)}
 						/>
 						<div className="chatcol">

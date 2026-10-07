@@ -30,18 +30,6 @@ export function createPlan(): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("create_plan");
 }
 
-export function executePlan(session: SessionKey): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("execute_plan", { session });
-}
-
-export function finishLanding(session: SessionKey): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("finish_landing", { session });
-}
-
-export function beginLanding(session: SessionKey): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("begin_landing", { session });
-}
-
 export function cancelPlan(session: SessionKey): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("cancel_plan", { session });
 }

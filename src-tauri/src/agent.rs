@@ -11,6 +11,7 @@ use crate::opencode;
 use crate::plans;
 use crate::types::{AgentError, AppEvent, OpenRepoResult, PlansUpdate, SessionKey, SessionRole};
 
+mod advance;
 mod config;
 mod permissions;
 mod plans_list;
@@ -20,7 +21,7 @@ mod start;
 mod turns;
 mod warm;
 
-pub(crate) use session::{ActivePlan, LiveSession};
+pub(crate) use session::LiveSession;
 
 #[derive(Default)]
 pub(crate) struct State {
@@ -188,6 +189,7 @@ pub(crate) fn reserve_scoping_name(repo_root: &Path, pending: Option<&str>) -> S
     plans::unique_name(&plans::timestamp_now(), &taken)
 }
 
+#[derive(Clone)]
 pub struct AgentManager {
     state: Arc<Mutex<State>>,
     app: AppHandle,
@@ -203,10 +205,10 @@ impl AgentManager {
 
     /// Open a repository: ensure the plan structure, prune stale worktree
     /// metadata, re-register surviving worktrees, rescan every plan, and
-    /// select the most-recent session. Spawns no agents: each session
-    /// starts lazily on its first prompt, with transcripts and TODOs kept
-    /// run-local. With zero scoping dirs, reserves a pending session
-    /// without touching disk.
+    /// select the most-recent session. Lazy sessions still start on their
+    /// first prompt, with transcripts and TODOs kept run-local; automatic
+    /// plans that are already ready advance at once via the pump. With zero
+    /// scoping dirs, reserves a pending session without touching disk.
     pub async fn open_repo(&self, repo_root: PathBuf) -> Result<OpenRepoResult, AgentError> {
         plans::ensure_structure(&repo_root)?;
         crate::worktrees::prune(&repo_root)?;
@@ -248,6 +250,7 @@ impl AgentManager {
             }
         }
         self.watch_branch(&repo_root);
+        self.pump().await;
         Ok(self.open_result())
     }
 
@@ -291,6 +294,8 @@ impl AgentManager {
     }
 
     /// Re-check the branch for the open repo. Failures keep the last value.
+    /// A moved target re-resolves `ffable` and may unblock finishes or
+    /// re-run a landing rebase, so a move pumps at once.
     pub async fn refresh_branch(&self) -> Result<String, AgentError> {
         let repo_root = lock_state(&self.state)
             .and_then(|state| state.repo_root.clone())
@@ -299,12 +304,14 @@ impl AgentManager {
             })?;
         let branch =
             crate::branch::current_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string());
-        self.set_branch(branch.clone());
+        if self.set_branch(branch.clone()) {
+            self.pump().await;
+        }
         Ok(branch)
     }
 
     /// Set the held branch and emit it, then refresh the plans list so
-    /// `ffable` and button copy recompute against the new live target.
+    /// `ffable` recomputes against the new live target.
     /// Returns true when it moved.
     fn set_branch(&self, branch: String) -> bool {
         let moved = match self.state.lock() {
@@ -331,13 +338,15 @@ impl AgentManager {
     /// Watch `.git/HEAD` for the open repo, refreshing
     /// `state.checkout_branch` per event so execute/retry snapshots go
     /// fresh free. Branch moves also push a refreshed plans list so
-    /// `ffable` and button copy recompute against the new live target.
+    /// `ffable` recomputes against the new live target, then pump so a
+    /// moved target unblocks finishes or re-runs a landing rebase.
     fn watch_branch(&self, repo_root: &Path) {
         let root = repo_root.to_path_buf();
         let state = Arc::clone(&self.state);
         let app = self.app.clone();
         let push_state = Arc::clone(&self.state);
         let push_app = self.app.clone();
+        let pump_manager = self.clone();
         let watcher = crate::branch::watch_branch(root.clone(), move |branch| {
             let moved = match state.lock() {
                 Ok(mut guard) => {
@@ -356,6 +365,7 @@ impl AgentManager {
             if moved {
                 emit_event(&app, AppEvent::BranchChanged { branch });
                 plans_list::push_sorted(&push_state, &push_app);
+                pump_manager.spawn_pump();
             }
         });
         match self.state.lock() {
@@ -368,147 +378,45 @@ impl AgentManager {
         }
     }
 
-    /// Approve the scoping plan: snapshot the commit, create
-    /// the worktree on a fresh branch, move the plan to executing, and
-    /// start the executing agent inside the worktree with the absolute plan path.
-    /// The first prompt shows as a YOU bubble, the chat opens working.
-    /// The selection follows the new executing session.
+    /// Approve the scoping plan: move it to executing and start the
+    /// executing agent. Thin over the shared transition core; the pump
+    /// drives the same core automatically.
     pub async fn execute_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
-        ensure_idle(&self.state, &session)?;
-        let (repo_root, branch) = self
-            .reopen_snapshot()
-            .ok_or_else(|| AgentError::NoSession {
-                raw: "open a repository first".to_string(),
-            })?;
-        let base = crate::worktrees::head_commit(&repo_root)?;
-        let from = plans::PlanRef {
-            name: session.plan.clone(),
-            phase: plans::Phase::Scoping,
-        };
-        if session.role != SessionRole::Scoping || !from.path(&repo_root).is_dir() {
+        if session.role != SessionRole::Scoping {
             return Err(AgentError::RequestFailed {
                 raw: "no scoping plan to execute".to_string(),
             });
         }
-        let next = plans::execute(&repo_root, &from)?;
-        let record = crate::worktrees::create(&repo_root, &next.name, &base)?;
-        match self.state.lock() {
-            Ok(mut state) => {
-                state.worktrees.insert(next.name.clone(), record);
-            }
-            Err(error) => {
-                log::warn!("failed to record worktree: {error}");
-            }
-        }
-        self.drop_live(&session).await;
-        self.carry_prompted(&from.name, &next.name);
-        let mut plan = ActivePlan::executing(next.name.clone());
-        // The role goes out as the full first turn below, so later turns
-        // never prefix again.
-        plan.prefixed = true;
-        let agent = opencode::agent_for(plan.phase);
-        let (connection, session_id, key) =
-            self.spawn_session(&repo_root, &branch, plan, agent).await?;
-        let plan_dir_abs = next.path(&repo_root).to_string_lossy().to_string();
-        let text = opencode::executing_first_message(&plan_dir_abs);
-        self.mark_prompted(&next.name);
-        self.start_turn(connection, session_id, key.clone(), text.clone())
-            .await?;
-        self.announce_first_prompt(&key, &text);
-        Ok(self.plans_update())
+        self.transition(advance::Transition::Execute { plan: session.plan })
+            .await
     }
 
-    /// Finish a plan. A clean fast-forwardable executing plan completes
-    /// directly with no agent and no LANDING row: fast-forward, remove the
-    /// worktree, delete the branch. A clean landing plan finishes the same
-    /// way once it lands. Dirty worktrees refuse, diverged branches
-    /// land first. The selection stays on the finished session; fresh
-    /// plans come from `+ NEW PLAN`.
+    /// Finish a plan via the shared transition core: a clean
+    /// fast-forwardable executing plan completes directly, a clean landing
+    /// plan finishes the same way once it lands.
     pub async fn finish_landing(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
-        ensure_idle(&self.state, &session)?;
-        let (repo_root, _) = self
-            .reopen_snapshot()
-            .ok_or_else(|| AgentError::NoSession {
-                raw: "open a repository first".to_string(),
-            })?;
-        let phase = match session.role {
-            SessionRole::Executing => plans::Phase::Executing,
-            SessionRole::Landing => plans::Phase::Landing,
+        let action = match session.role {
+            SessionRole::Executing => advance::Transition::FinishExecuting { plan: session.plan },
+            SessionRole::Landing => advance::Transition::FinishLanding { plan: session.plan },
             SessionRole::Scoping => {
                 return Err(AgentError::RequestFailed {
                     raw: "no executing plan to complete".to_string(),
                 });
             }
         };
-        let from = plans::PlanRef {
-            name: session.plan.clone(),
-            phase,
-        };
-        if !from.path(&repo_root).is_dir() {
-            return Err(AgentError::RequestFailed {
-                raw: "no active plan to complete".to_string(),
-            });
-        }
-        let status = self.worktree_status_for(&repo_root, &from.name)?;
-        gate_landing(status.dirty, status.ffable, LandingStep::Finish)?;
-        crate::worktrees::fast_forward(&repo_root, &status.target_branch, &status.worktree_branch)?;
-        self.remove_worktree(&repo_root, &from.name, false)?;
-        let next = match phase {
-            plans::Phase::Executing => plans::complete(&repo_root, &from)?,
-            plans::Phase::Landing => plans::finish_landing(&repo_root, &from)?,
-            _ => unreachable!("gated on executing or landing above"),
-        };
-        self.drop_plan_lives(&from.name).await;
-        self.carry_prompted(&from.name, &next.name);
-        self.select_key(SessionKey {
-            plan: next.name,
-            role: session.role,
-        });
-        Ok(self.plans_update())
+        self.transition(action).await
     }
 
-    /// Move a clean diverged executing plan to landing and start the landing
-    /// agent in the worktree. Clean fast-forwardable plans finish directly
-    /// instead; dirty worktrees refuse without spawning an agent.
+    /// Move a clean diverged executing plan to landing via the shared core.
+    /// Thin over `transition`; the pump drives the same core automatically.
     pub async fn begin_landing(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
-        ensure_idle(&self.state, &session)?;
-        let (repo_root, branch) = self
-            .reopen_snapshot()
-            .ok_or_else(|| AgentError::NoSession {
-                raw: "open a repository first".to_string(),
-            })?;
-        let from = plans::PlanRef {
-            name: session.plan.clone(),
-            phase: plans::Phase::Executing,
-        };
-        if session.role != SessionRole::Executing || !from.path(&repo_root).is_dir() {
+        if session.role != SessionRole::Executing {
             return Err(AgentError::RequestFailed {
                 raw: "no executing plan to land".to_string(),
             });
         }
-        let status = self.worktree_status_for(&repo_root, &from.name)?;
-        gate_landing(status.dirty, status.ffable, LandingStep::Begin)?;
-        let next = plans::begin_landing(&repo_root, &from)?;
-        self.drop_live(&session).await;
-        let mut plan = ActivePlan::landing(next.name.clone());
-        // The role goes out as the full first turn below, so later turns
-        // never prefix again.
-        plan.prefixed = true;
-        let agent = opencode::agent_for(plan.phase);
-        let (connection, session_id, key) =
-            self.spawn_session(&repo_root, &branch, plan, agent).await?;
-        let plan_md_abs = next.plan_md(&repo_root).to_string_lossy().to_string();
-        let text = opencode::landing_first_message(
-            &status.worktree_branch,
-            &status.target_branch,
-            &status.path.to_string_lossy(),
-            &plan_md_abs,
-        );
-        self.mark_prompted(&next.name);
-        self.start_turn(connection, session_id, key.clone(), text.clone())
-            .await?;
-        self.announce_first_prompt(&key, &text);
-        Ok(self.plans_update())
+        self.transition(advance::Transition::BeginLanding { plan: session.plan })
+            .await
     }
 
     /// Cancel an active plan. An empty scoping session vanishes without a
@@ -590,7 +498,8 @@ impl AgentManager {
 
     /// Flip one plan between automatic and manual mode. Persists `manual`
     /// into `state.json` and returns the refreshed list. Never touches live
-    /// sessions: flipping modes never kills a running turn.
+    /// sessions: flipping modes never kills a running turn. Flipping back
+    /// to A pumps at once so a held plan joins the flow immediately.
     pub async fn set_plan_mode(
         &self,
         plan: String,
@@ -609,6 +518,9 @@ impl AgentManager {
         let mut state = plans::load_state(&plan_dir);
         state.manual = manual;
         plans::store_state(&plan_dir, &state);
+        if !manual {
+            self.pump().await;
+        }
         Ok(self.plans_update())
     }
 
@@ -886,6 +798,7 @@ fn map_startup_error(raw: &str) -> AgentError {
 mod tests {
     use super::config::config_views;
     use super::plans_list::{most_recent_key, sorted_entries};
+    use super::session::ActivePlan;
     use super::*;
     use crate::acp::{
         self, AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, SessionConfigOption,

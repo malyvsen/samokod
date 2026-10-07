@@ -20,10 +20,7 @@ function panelProps(
 		selected,
 		onSelect: vi.fn(),
 		onNewPlan: vi.fn(),
-		onExecute: vi.fn(),
 		onCancel: vi.fn(),
-		onFinishLanding: vi.fn(),
-		onBeginLanding: vi.fn(),
 		onSetMode: vi.fn(),
 	};
 }
@@ -64,14 +61,6 @@ function sectionHeaders() {
 	return screen
 		.getAllByText(/^(SCOPING|EXECUTING|LANDING|COMPLETED|CANCELLED)$/)
 		.map((node) => node.textContent);
-}
-
-function sessionRow(buttonName: string) {
-	const row = screen
-		.getByRole("button", { name: buttonName })
-		.closest(".sbody");
-	if (row === null) throw new Error("row missing");
-	return within(row as HTMLElement);
 }
 
 function planGroup(headerName: string) {
@@ -287,9 +276,9 @@ describe("plans panel", () => {
 			expect(screen.getByText("Executing")).toBeInTheDocument();
 		});
 
-		test("expanded landing plans list three sessions with cancel and finish", () => {
+		test("expanded landing plans list three sessions without buttons", () => {
 			const plan = landingPlan();
-			render(
+			const { container } = render(
 				<PlansPanel
 					{...panelProps([plan], { plan: plan.name, role: "landing" })}
 				/>,
@@ -297,17 +286,7 @@ describe("plans panel", () => {
 			expect(screen.getByText("Scoping")).toBeInTheDocument();
 			expect(screen.getByText("Executing")).toBeInTheDocument();
 			expect(screen.getByText("Landing")).toBeInTheDocument();
-			const buttons = sessionRow("Shiny Landing");
-			expect(
-				buttons.getByRole("button", {
-					name: "Cancel landing and delete branch",
-				}),
-			).toBeInTheDocument();
-			expect(
-				buttons.getByRole("button", {
-					name: `Finish landing ${plan.name}`,
-				}),
-			).toBeInTheDocument();
+			expect(container.querySelectorAll(".sbody .sbtn").length).toBe(0);
 		});
 
 		test("shows session rows only on the expanded plan", () => {
@@ -324,7 +303,7 @@ describe("plans panel", () => {
 			expect(
 				within(
 					planGroup("Parallel sessions, scoping, opens Scoping"),
-				).queryByRole("button", { name: /Send|Land/i }),
+				).queryByText("Scoping"),
 			).toBeNull();
 			expect(
 				within(
@@ -457,119 +436,18 @@ describe("plans panel", () => {
 	});
 
 	describe("session rows", () => {
-		test("scoping rows offer cancel and execute", () => {
-			const plan = scopingPlan();
-			render(
-				<PlansPanel
-					{...panelProps([plan], { plan: plan.name, role: "scoping" })}
-				/>,
-			);
-			const buttons = sessionRow("Parallel sessions Scoping");
-			expect(
-				buttons.getByRole("button", { name: `Cancel ${plan.name}` }),
-			).toBeInTheDocument();
-			expect(
-				buttons.getByRole("button", {
-					name: `Send ${plan.name} to execution`,
-				}),
-			).toBeInTheDocument();
-		});
-
-		test("executing rows offer cancel and done", () => {
+		test("rows select without offering step buttons", () => {
 			const plan = executingPlan();
-			render(
+			const { container } = render(
 				<PlansPanel
 					{...panelProps([plan], { plan: plan.name, role: "executing" })}
 				/>,
 			);
-			const buttons = sessionRow("Shiny Executing");
+			expect(screen.getByText("Scoping")).toBeInTheDocument();
+			expect(screen.getByText("Executing")).toBeInTheDocument();
+			expect(container.querySelectorAll(".sbody .sbtn").length).toBe(0);
 			expect(
-				buttons.getByRole("button", {
-					name: `Cancel ${plan.name} and delete branch`,
-				}),
-			).toBeInTheDocument();
-			expect(
-				buttons.getByRole("button", {
-					name: `Land ${plan.name} onto feature`,
-				}),
-			).toBeInTheDocument();
-		});
-
-		test("diverged executing rows offer landing instead of done", () => {
-			const diverged = testEntryWith(
-				"2026-09-25.10-54-59.slug",
-				"executing",
-				"Shiny",
-				true,
-				[testStatus("scoping"), testStatus("executing")],
-				testWorktree({ ffable: false }),
-			);
-			render(
-				<PlansPanel
-					{...panelProps([diverged], {
-						plan: diverged.name,
-						role: "executing",
-					})}
-				/>,
-			);
-			expect(
-				screen.getByRole("button", {
-					name: `Start landing ${diverged.name} onto feature`,
-				}),
-			).toBeInTheDocument();
-			expect(
-				screen.queryByRole("button", {
-					name: `Land ${diverged.name} onto feature`,
-				}),
-			).toBeNull();
-		});
-
-		test("dirty executing rows disable landing with a tooltip", () => {
-			const dirty = testEntryWith(
-				"2026-09-25.10-54-59.slug",
-				"executing",
-				"Shiny",
-				true,
-				[testStatus("scoping"), testStatus("executing")],
-				testWorktree({ dirty: true }),
-			);
-			render(
-				<PlansPanel
-					{...panelProps([dirty], { plan: dirty.name, role: "executing" })}
-				/>,
-			);
-			const land = screen.getByRole("button", {
-				name: `Land ${dirty.name} onto feature`,
-			});
-			expect(land).toBeDisabled();
-			expect(land.getAttribute("title")).toBe(
-				"Commit or discard worktree changes first",
-			);
-		});
-
-		test("inactive rows have no buttons", () => {
-			const active = executingPlan();
-			render(
-				<PlansPanel
-					{...panelProps(
-						[
-							active,
-							testEntryWith("done", "completed", "Done", true, [
-								testStatus("scoping"),
-								testStatus("executing"),
-							]),
-							testEntryWith("drop", "cancelled", "Drop", false, [
-								testStatus("scoping"),
-							]),
-						],
-						{ plan: active.name, role: "executing" },
-					)}
-				/>,
-			);
-			expect(
-				sessionRow("Shiny Scoping").queryByRole("button", {
-					name: /Cancel|Send|Mark/,
-				}),
+				screen.queryByRole("button", { name: /Send|Land|Start landing/i }),
 			).toBeNull();
 		});
 
@@ -593,98 +471,23 @@ describe("plans panel", () => {
 			).toBe(0);
 			expect(container.querySelectorAll(".sbtn").length).toBe(1);
 		});
-
-		test("execute stays disabled without plan.md", () => {
-			render(
-				<PlansPanel
-					{...panelProps(
-						[
-							testEntryWith("bare", "scoping", "Bare", false, [
-								testStatus("scoping"),
-							]),
-						],
-						{ plan: "bare", role: "scoping" },
-					)}
-				/>,
-			);
-			expect(
-				screen.getByRole("button", { name: "Send bare to execution" }),
-			).toBeDisabled();
-		});
 	});
 
 	describe("actions", () => {
-		test("row actions call back with the session key", async () => {
-			const plan = scopingPlan();
+		test("header cancel calls back with the latest session", async () => {
+			const plan = executingPlan();
 			const props = panelProps([plan], {
 				plan: plan.name,
-				role: "scoping",
+				role: "executing",
 			});
 			const user = userEvent.setup();
 			render(<PlansPanel {...props} />);
-			await user.click(
-				screen.getByRole("button", {
-					name: `Send ${plan.name} to execution`,
-				}),
-			);
-			expect(props.onExecute).toHaveBeenCalledWith({
-				plan: plan.name,
-				role: "scoping",
-			});
-			await user.click(
-				screen.getByRole("button", { name: `Cancel ${plan.name}` }),
-			);
+			await user.click(screen.getByRole("button", { name: "Cancel Shiny" }));
 			expect(props.onCancel).toHaveBeenCalledWith({
 				plan: plan.name,
-				role: "scoping",
-			});
-		});
-
-		test("row actions never act on the wrong session", async () => {
-			const active = executingPlan();
-			const props = panelProps([scopingPlan(), active], {
-				plan: active.name,
 				role: "executing",
 			});
-			const user = userEvent.setup();
-			render(<PlansPanel {...props} />);
-			await user.click(
-				screen.getByRole("button", {
-					name: `Land ${active.name} onto feature`,
-				}),
-			);
-			expect(props.onFinishLanding).toHaveBeenCalledWith({
-				plan: active.name,
-				role: "executing",
-			});
-			expect(props.onCancel).not.toHaveBeenCalled();
-		});
-
-		test("landing actions call back with the executing session", async () => {
-			const diverged = testEntryWith(
-				"2026-09-25.10-54-59.slug",
-				"executing",
-				"Shiny",
-				true,
-				[testStatus("scoping"), testStatus("executing")],
-				testWorktree({ ffable: false }),
-			);
-			const props = panelProps([diverged], {
-				plan: diverged.name,
-				role: "executing",
-			});
-			const user = userEvent.setup();
-			render(<PlansPanel {...props} />);
-			await user.click(
-				screen.getByRole("button", {
-					name: `Start landing ${diverged.name} onto feature`,
-				}),
-			);
-			expect(props.onBeginLanding).toHaveBeenCalledWith({
-				plan: diverged.name,
-				role: "executing",
-			});
-			expect(props.onFinishLanding).not.toHaveBeenCalled();
+			expect(props.onSetMode).not.toHaveBeenCalled();
 		});
 
 		test("selecting a row marks it selected", async () => {
@@ -716,8 +519,6 @@ describe("plans panel", () => {
 				expect(button.getAttribute("title")).toBeNull();
 				expect(
 					button.textContent === "✕" ||
-						button.textContent === ">" ||
-						button.textContent === "✓" ||
 						button.textContent === "A" ||
 						button.textContent === "M" ||
 						button.textContent === "+",
@@ -755,14 +556,15 @@ describe("plans panel", () => {
 			expect(row).toContain("align-self: stretch");
 		});
 
-		test("action buttons stay hover-only on the open row", () => {
+		test("action buttons stay hover-only except on the selected plan", () => {
 			const css = appCss();
 			expect(css).not.toContain(".session");
 			expect(css).not.toContain(".newplan");
+			expect(css).not.toContain(".sbtn.promote");
 			const hidden = /\.plans\s+\.sbtn\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(hidden).toContain("opacity: 0");
 			const shown =
-				/\.plans\s+\.sbody[^{]*\.sbtn[^{]*\{[^}]*\}/.exec(css)?.[0] ?? "";
+				/\.plans\s+\.plan-group[^{]*\.sbtn[^{]*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(shown).toContain("opacity: 1");
 		});
 

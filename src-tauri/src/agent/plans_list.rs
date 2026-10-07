@@ -234,10 +234,10 @@ fn defaults_for(repo_root: &Path) -> RepoDefaults {
 }
 
 /// Live worktree state for one executing or landing plan. Missing
-/// checkouts fail safe: dirty blocks either landing button, and the backend
-/// refuses the transition the same way. Git errors fail safe the same
-/// way with a warn-log, per the preserve-evidence rule. The target branch
-/// is the live value passed in, echoed so rows can name it.
+/// checkouts fail safe: dirty holds the plan, and the backend refuses the
+/// transition the same way. Git errors fail safe the same way with a
+/// warn-log, per the preserve-evidence rule. The target branch is the live
+/// value passed in, echoed so the pump decides against the current target.
 fn worktree_status(
     repo_root: &Path,
     worktrees: &HashMap<String, crate::worktrees::WorktreeRecord>,

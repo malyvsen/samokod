@@ -204,6 +204,7 @@ impl Drop for HistoryGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::session::ActivePlan;
     use crate::types::SessionRole;
 
     fn key() -> SessionKey {
@@ -246,7 +247,7 @@ mod tests {
         state.sessions.insert(
             key.clone(),
             crate::agent::LiveSession::fresh(
-                crate::agent::ActivePlan::scoping(key.plan.clone()),
+                ActivePlan::scoping(key.plan.clone()),
                 crate::repo_state::RepoState::default(),
             ),
         );
