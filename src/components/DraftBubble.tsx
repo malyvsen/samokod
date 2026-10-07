@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef } from "react";
 
-const LABEL = "Ask for a change…";
-
 export function DraftBubble({
 	initialText,
+	placeholder = "Ask for a change…",
 	onSend,
 	onEdit,
 	onInput,
 }: {
 	initialText?: string | undefined;
+	placeholder?: string;
 	onSend: (text: string) => void;
 	onEdit: () => void;
 	onInput?: ((text: string) => void) | undefined;
@@ -53,8 +53,8 @@ export function DraftBubble({
 				contentEditable
 				tabIndex={0}
 				role="textbox"
-				aria-label={LABEL}
-				data-placeholder={LABEL}
+				aria-label={placeholder}
+				data-placeholder={placeholder}
 				onInput={handleInput}
 				onKeyDown={(event) => {
 					if (event.key !== "Enter") return;

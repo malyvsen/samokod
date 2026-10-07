@@ -1,3 +1,4 @@
+import { assertNever } from "../assert";
 import type {
 	AppEvent,
 	ConfigOptionView,
@@ -99,10 +100,6 @@ function beginStart(
 		start,
 		transcript: chat.start.kind === "failed" ? [] : chat.transcript,
 	};
-}
-
-function assertNever(value: never): never {
-	throw new Error(`unexpected value: ${String(value)}`);
 }
 
 /// Pure per-session event reducer. Session-keyed events route into their own

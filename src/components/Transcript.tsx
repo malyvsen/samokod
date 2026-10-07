@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { assertNever } from "../assert";
 import type { SessionStart } from "../sessions/store";
 import { todoMark, todoRowClass } from "../todos";
 import type {
@@ -10,10 +11,6 @@ import type {
 	TranscriptItem,
 } from "../types";
 import { AgentMarkdown } from "./AgentMarkdown";
-
-function assertNever(value: never): never {
-	throw new Error(`unexpected value: ${String(value)}`);
-}
 
 export function Transcript({
 	items,

@@ -188,11 +188,11 @@ describe("draft bubble in chat", () => {
 		expect(await screen.findByRole("textbox")).toHaveTextContent("hello");
 	});
 
-	test("hides while working and returns on turn done", async () => {
+	test("stays visible with queue placeholder while working", async () => {
 		const user = await openChat(api);
 		api.sendPrompt.mockReturnValue(new Promise(() => {}));
 		await user.keyboard("do it{Enter}");
-		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+		await screen.findByRole("textbox", { name: "Queue a follow-up…" });
 		expect(screen.getByRole("button", { name: "STOP" })).toBeInTheDocument();
 		emitAppEvent(api, { type: "turn_done", session: testKey() });
 		await screen.findByRole("textbox", { name: "Ask for a change…" });

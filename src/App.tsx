@@ -21,6 +21,7 @@ import {
 import { reducedMotion, useAuroraMotion } from "./auroraMotion";
 import { DraftBubble } from "./components/DraftBubble";
 import { PlansPanel } from "./components/PlansPanel";
+import { QueuedBubbleList } from "./components/QueuedBubble";
 import { RepoPicker } from "./components/RepoPicker";
 import { SidePanel } from "./components/SidePanel";
 import { toSelectorModel } from "./components/selectors";
@@ -28,6 +29,7 @@ import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
 import { hasUserMessage, useSessionDrafts } from "./sessions/drafts";
 import { previewPromiseFor, useScopingPreview } from "./sessions/preview";
+import { useSessionQueues } from "./sessions/queue";
 import { usePinnedTranscript } from "./sessions/scroll";
 import {
 	agentStatusOf,
@@ -79,6 +81,7 @@ export function App() {
 	const selectedId = selectedKey === null ? null : sessionKeyOf(selectedKey);
 	const chat: ChatState | null = selectedChat(chats, selectedKey);
 	const draft = useSessionDrafts(selectedKey);
+	const queue = useSessionQueues(selectedKey);
 
 	const status = agentStatusOf(chat);
 	const busy = isSessionBusy(chat);
@@ -110,6 +113,72 @@ export function App() {
 				? { kind: "live" as const, options: chat.configOptions }
 				: toSelectorModel(chat.configOptions, configDefaults);
 
+	const sendNow = useCallback(
+		async (key: SessionKey, text: string) => {
+			const template = await previewPromiseFor(key);
+			updateChat(key, (chat) => ({
+				...chat,
+				scopingPreview: template ?? chat.scopingPreview,
+				transcript: [
+					...chat.transcript,
+					{
+						kind: "user",
+						id: crypto.randomUUID(),
+						text,
+					} satisfies TranscriptItem,
+				],
+			}));
+			updateChat(key, (chat) => ({ ...chat, working: true, failed: false }));
+			try {
+				await sendPrompt(key, text);
+			} catch (error) {
+				updateChat(key, (chat) => ({ ...chat, working: false }));
+				updateChat(key, (chat) => ({
+					...chat,
+					transcript: [
+						...chat.transcript,
+						errorItem(
+							error instanceof Error ? error.message : String(error),
+							"retry the turn",
+							true,
+						),
+					],
+				}));
+			}
+		},
+		[updateChat],
+	);
+
+	const maybeDrain = useCallback(
+		(key: SessionKey) => {
+			const head = queue.dequeueHead(key);
+			if (head === null) return;
+			void sendNow(key, head.text);
+		},
+		[queue.dequeueHead, sendNow],
+	);
+
+	const handleEvent = useCallback(
+		(event: AppEvent) => {
+			if (event.type === "plans_changed") {
+				setPlans(event.plans);
+				setSelectedKey(event.selected);
+				return;
+			}
+			if (event.type === "branch_changed") {
+				setBranch(event.branch);
+				return;
+			}
+			setChats((current) => applySessionEvent(current, event));
+			if (event.type === "turn_done") {
+				const selected = selectedRef.current;
+				if (selected === null || !sameSession(selected, event.session)) return;
+				maybeDrain(event.session);
+			}
+		},
+		[maybeDrain],
+	);
+
 	useEffect(() => {
 		let cancelled = false;
 		getPrefs()
@@ -123,19 +192,6 @@ export function App() {
 		return () => {
 			cancelled = true;
 		};
-	}, []);
-
-	const handleEvent = useCallback((event: AppEvent) => {
-		if (event.type === "plans_changed") {
-			setPlans(event.plans);
-			setSelectedKey(event.selected);
-			return;
-		}
-		if (event.type === "branch_changed") {
-			setBranch(event.branch);
-			return;
-		}
-		setChats((current) => applySessionEvent(current, event));
 	}, []);
 
 	useEffect(() => onAppEvent(handleEvent), [handleEvent]);
@@ -221,39 +277,15 @@ export function App() {
 		}));
 	}
 
-	async function runTurn(key: SessionKey, text: string) {
-		updateChat(key, (chat) => ({ ...chat, working: true, failed: false }));
-		try {
-			await sendPrompt(key, text);
-		} catch (error) {
-			updateChat(key, (chat) => ({ ...chat, working: false }));
-			appendError(
-				key,
-				error instanceof Error ? error.message : String(error),
-				"retry the turn",
-				true,
-			);
-		}
-	}
-
 	async function handleSend(text: string) {
 		const key = selectedRef.current;
-		if (text === "" || busy || readOnly || key === null) return;
+		if (text === "" || readOnly || key === null) return;
 		draft.onDraftSent();
-		const template = await previewPromiseFor(key);
-		updateChat(key, (chat) => ({
-			...chat,
-			scopingPreview: template ?? chat.scopingPreview,
-			transcript: [
-				...chat.transcript,
-				{
-					kind: "user",
-					id: crypto.randomUUID(),
-					text,
-				} satisfies TranscriptItem,
-			],
-		}));
-		await runTurn(key, text);
+		if (busy) {
+			queue.enqueue(key, text);
+			return;
+		}
+		await sendNow(key, text);
 	}
 
 	async function handleStop() {
@@ -268,6 +300,10 @@ export function App() {
 				approval: false,
 			}));
 		}
+		const current = chats[sessionKeyOf(key)] ?? null;
+		if (current?.failed) return;
+		if (current?.start.kind === "replaying") return;
+		maybeDrain(key);
 	}
 
 	async function handleSelect(key: SessionKey) {
@@ -498,14 +534,20 @@ export function App() {
 											: null
 									}
 								>
-									{selectedId !== null && !readOnly && !busy && (
-										<DraftBubble
-											key={selectedId}
-											initialText={draft.initialText}
-											onSend={handleSend}
-											onEdit={notifyEdit}
-											onInput={draft.onDraftInput}
-										/>
+									{selectedId !== null && !readOnly && (
+										<>
+											<QueuedBubbleList items={queue.items} />
+											<DraftBubble
+												key={selectedId}
+												initialText={draft.initialText}
+												placeholder={
+													busy ? "Queue a follow-up…" : "Ask for a change…"
+												}
+												onSend={handleSend}
+												onEdit={notifyEdit}
+												onInput={draft.onDraftInput}
+											/>
+										</>
 									)}
 									{readOnly && (
 										<div className="ro-note">
