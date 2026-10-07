@@ -128,9 +128,16 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 		case "user_text": {
 			const key = event.session;
 			const chunk = event.chunk;
+			// Each replayed user message is its own bubble. The scoping
+			// split emits template and user text as two events so replay
+			// renders the same two bubbles as live; merging would collapse
+			// them into one.
 			return updateEntry(chats, key, (chat) => ({
 				...chat,
-				transcript: appendText(chat.transcript, "user", chunk),
+				transcript: [
+					...chat.transcript,
+					{ kind: "user", id: crypto.randomUUID(), text: chunk },
+				],
 			}));
 		}
 		case "tool_line": {

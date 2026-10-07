@@ -14,6 +14,7 @@ import {
 	openRepo,
 	refreshBranch,
 	retryLast,
+	scopingDraft,
 	selectPlan,
 	sendPrompt,
 	setConfigOption,
@@ -243,14 +244,36 @@ export function App() {
 	async function handleSend(text: string) {
 		const key = selectedRef.current;
 		if (text === "" || busy || readOnly || key === null) return;
+		// The scoping template never prefills the box. It travels on the
+		// wire via the server-side prefix and renders as its own bubble.
+		let template: string | null = null;
+		if (key.role === "scoping") {
+			try {
+				template = await scopingDraft(key);
+			} catch (error) {
+				console.warn("scoping_draft failed", error);
+				template = null;
+			}
+		}
 		draft.onDraftSent();
-		updateChat(key, (chat) => ({
-			...chat,
-			transcript: [
-				...chat.transcript,
-				{ kind: "user", id: crypto.randomUUID(), text },
-			],
-		}));
+		if (template !== null) {
+			updateChat(key, (chat) => ({
+				...chat,
+				transcript: [
+					...chat.transcript,
+					{ kind: "user", id: crypto.randomUUID(), text: template },
+					{ kind: "user", id: crypto.randomUUID(), text },
+				],
+			}));
+		} else {
+			updateChat(key, (chat) => ({
+				...chat,
+				transcript: [
+					...chat.transcript,
+					{ kind: "user", id: crypto.randomUUID(), text },
+				],
+			}));
+		}
 		await runTurn(key, text);
 	}
 

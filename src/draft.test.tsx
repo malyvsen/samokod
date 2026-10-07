@@ -65,7 +65,7 @@ beforeEach(() => {
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
-	api.scopingDraft.mockResolvedValue(null);
+	api.scopingDraft.mockResolvedValue("TEMPLATE");
 	api.sendPrompt.mockResolvedValue(undefined);
 });
 
@@ -87,85 +87,36 @@ async function openChat(plans?: PlanEntry[], selected?: SessionKey) {
 }
 
 describe("draft bubble in chat", () => {
-	test("bubble renders immediately before draft resolves", async () => {
-		let resolveDraft!: (value: string | null) => void;
-		api.scopingDraft.mockReturnValue(
-			new Promise<string | null>((resolve) => {
-				resolveDraft = resolve;
-			}),
-		);
-		const user = userEvent.setup();
-		render(<App />);
-		await user.click(await screen.findByRole("button", { name: "open" }));
+	test("compose box opens empty without template prefill", async () => {
+		await openChat();
 		const area = await screen.findByRole("textbox", {
 			name: "Ask for a change…",
 		});
 		expect(area.textContent).toBe("");
-		resolveDraft("LATE TEMPLATE");
-		expect(await screen.findByText("LATE TEMPLATE")).toBeInTheDocument();
 	});
 
-	test("late template never clobbers typed text", async () => {
-		let resolveDraft!: (value: string | null) => void;
-		api.scopingDraft.mockReturnValue(
-			new Promise<string | null>((resolve) => {
-				resolveDraft = resolve;
-			}),
-		);
-		const user = userEvent.setup();
-		render(<App />);
-		await user.click(await screen.findByRole("button", { name: "open" }));
-		const area = await screen.findByRole("textbox", {
-			name: "Ask for a change…",
-		});
-		await user.keyboard("typed");
-		resolveDraft("LATE TEMPLATE");
-		await vi.waitFor(() =>
-			expect(api.scopingDraft).toHaveBeenCalledWith(testKey()),
-		);
-		expect(area.textContent).toContain("typed");
-		expect(area.textContent).not.toContain("LATE TEMPLATE");
-	});
-
-	test("sends prefilled editable draft verbatim", async () => {
-		api.scopingDraft.mockResolvedValue("Help me scope things");
-		const user = await openChat();
-		expect(await screen.findByText("Help me scope things")).toBeInTheDocument();
-		const area = await screen.findByRole("textbox", {
-			name: "Ask for a change…",
-		});
-		expect(area.textContent).toBe("Help me scope things");
-		expect(api.scopingDraft).toHaveBeenCalledWith(testKey());
-		await user.keyboard("{Enter}");
-		expect(api.sendPrompt).toHaveBeenCalledWith(
-			testKey(),
-			"Help me scope things",
-		);
-		await screen.findByText("Help me scope things");
-	});
-
-	test("edited template sends as edited", async () => {
+	test("live send shows template and user bubbles and sends pure text", async () => {
 		api.scopingDraft.mockResolvedValue("TEMPLATE");
 		const user = await openChat();
-		expect(await screen.findByText("TEMPLATE")).toBeInTheDocument();
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
-		await user.keyboard(" more{Enter}");
-		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "TEMPLATE more");
+		await user.keyboard("hello{Enter}");
+		expect(api.scopingDraft).toHaveBeenCalledWith(testKey());
+		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello");
+		await screen.findByText("TEMPLATE");
+		await screen.findByText("hello");
 	});
 
-	test("no prefill for non-fresh sessions", async () => {
-		api.scopingDraft.mockResolvedValue(null);
+	test("live send falls back to one bubble when template fetch fails", async () => {
+		api.scopingDraft.mockRejectedValue(new Error("boom"));
 		const user = await openChat();
-		const area = await screen.findByRole("textbox", {
-			name: "Ask for a change…",
-		});
-		expect(area.textContent).toBe("");
-		expect(api.scopingDraft).toHaveBeenCalledWith(testKey());
+		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		await user.keyboard("hello{Enter}");
 		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello");
+		await screen.findByText("hello");
+		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
 	});
 
-	test("preserves per-session drafts across switches", async () => {
+	test("preserves per-session user drafts across switches", async () => {
 		const first = testEntryWith("aaa", "scoping", "First", false, [
 			testStatus("scoping"),
 		]);
@@ -173,34 +124,27 @@ describe("draft bubble in chat", () => {
 			testStatus("scoping"),
 		]);
 		const plans = [first, second];
-		api.scopingDraft.mockImplementation(async (session: SessionKey) =>
-			session.plan === "aaa" ? "DRAFT-A" : "DRAFT-B",
-		);
 		api.selectPlan.mockImplementation(async (session: SessionKey) => ({
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
 		}));
 		const user = await openChat(plans, { plan: "aaa", role: "scoping" });
-		expect(await screen.findByText("DRAFT-A")).toBeInTheDocument();
-		expect(screen.getByRole("textbox")).toHaveTextContent("DRAFT-A");
-		await user.keyboard("!");
+		expect(await screen.findByRole("textbox")).toHaveTextContent("");
+		await user.keyboard("hello");
 		await user.click(
 			await screen.findByRole("button", {
 				name: "Second, scoping, opens Scoping",
 			}),
 		);
-		expect(await screen.findByText("DRAFT-B")).toBeInTheDocument();
-		expect(screen.getByRole("textbox")).toHaveTextContent("DRAFT-B");
-		await user.keyboard("?");
+		expect(await screen.findByRole("textbox")).toHaveTextContent("");
+		await user.keyboard("world");
 		await user.click(
 			await screen.findByRole("button", {
 				name: "First, scoping, opens Scoping",
 			}),
 		);
-		expect(await screen.findByText("DRAFT-A!")).toBeInTheDocument();
-		expect(screen.getByRole("textbox")).toHaveTextContent("DRAFT-A!");
-		expect(api.scopingDraft).toHaveBeenCalledTimes(2);
+		expect(await screen.findByRole("textbox")).toHaveTextContent("hello");
 	});
 
 	test("execute sends hidden role without a prompt", async () => {

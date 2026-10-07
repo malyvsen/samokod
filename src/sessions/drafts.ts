@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { scopingDraft } from "../api";
+import { useCallback, useState } from "react";
 import { type SessionKey, sessionKeyOf } from "../types";
 import type { Chats } from "./store";
 
@@ -10,46 +9,19 @@ export function hasUserMessage(chats: Chats, key: SessionKey): boolean {
 	);
 }
 
+// Per-session compose drafts for user-typed text only. The compose box
+// mounts empty; the scoping template never prefills and is instead fetched
+// lazily at send time for display.
 export function useSessionDrafts(
 	selectedKey: SessionKey | null,
-	chats: Chats,
+	_chats: Chats,
 ): {
 	initialText: string | undefined;
 	onDraftInput: (text: string) => void;
 	onDraftSent: () => void;
 } {
 	const [drafts, setDrafts] = useState<Record<string, string>>({});
-	const attempted = useRef<Set<string>>(new Set());
 	const selectedId = selectedKey === null ? null : sessionKeyOf(selectedKey);
-
-	useEffect(() => {
-		if (selectedKey === null) return;
-		const id = sessionKeyOf(selectedKey);
-		if (
-			!attempted.current.has(id) &&
-			selectedKey.role === "scoping" &&
-			!hasUserMessage(chats, selectedKey)
-		) {
-			attempted.current.add(id);
-			let cancelled = false;
-			scopingDraft(selectedKey)
-				.then((draft) => {
-					if (cancelled) return;
-					if (draft !== null) {
-						setDrafts((current) =>
-							current[id] === undefined ? { ...current, [id]: draft } : current,
-						);
-					}
-				})
-				.catch((error: unknown) => {
-					console.warn("scoping_draft failed", error);
-				});
-			return () => {
-				cancelled = true;
-			};
-		}
-		attempted.current.add(id);
-	}, [selectedKey, chats]);
 
 	const onDraftInput = useCallback(
 		(text: string) => {

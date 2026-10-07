@@ -162,7 +162,7 @@ describe("history events", () => {
 });
 
 describe("replayed updates", () => {
-	test("user chunks merge without touching working", () => {
+	test("user messages stay as separate bubbles without touching working", () => {
 		let chats = eventFor({ type: "history_preparing", session: testKey() });
 		chats = applySessionEvent(chats, {
 			type: "history_begin",
@@ -179,8 +179,9 @@ describe("replayed updates", () => {
 			chunk: "lo",
 		});
 		const chat = chatOf(chats);
-		expect(chat.transcript).toHaveLength(1);
-		expect(chat.transcript[0]).toMatchObject({ kind: "user", text: "hello" });
+		expect(chat.transcript).toHaveLength(2);
+		expect(chat.transcript[0]).toMatchObject({ kind: "user", text: "hel" });
+		expect(chat.transcript[1]).toMatchObject({ kind: "user", text: "lo" });
 		expect(chat.working).toBe(false);
 	});
 

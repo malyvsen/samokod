@@ -1348,8 +1348,8 @@ mod tests {
     }
 
     #[test]
-    fn scoping_starts_prefixed() {
-        assert!(ActivePlan::scoping("n".to_string()).prefixed);
+    fn scoping_starts_unprefixed() {
+        assert!(!ActivePlan::scoping("n".to_string()).prefixed);
     }
 
     #[test]

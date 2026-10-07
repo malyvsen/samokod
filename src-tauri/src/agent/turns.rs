@@ -37,8 +37,8 @@ impl AgentManager {
 
     /// Send one plain-text prompt, spawning the session lazily on its
     /// first message. Streams arrive as events; the turn end arrives as
-    /// done or failed. Scoping text goes through verbatim: the draft bubble
-    /// prefills the template as editable user content. A reserved
+    /// done or failed. The scoping first turn sends pure user text prefixed
+    /// server-side with the template as one message. A reserved
     /// pending scoping session materializes its directory here, before
     /// the `ensure_live` path.
     pub async fn send_prompt(&self, session: SessionKey, text: String) -> Result<(), AgentError> {
@@ -197,9 +197,9 @@ impl AgentManager {
 
     /// Claim the one-time role prefix for the first message of one ACP
     /// conversation. One locked check-and-mark, so a retried turn never
-    /// prefixes twice. Executing and landing prefix; scoping goes through
-    /// verbatim. Paths are absolute into the main checkout, since both
-    /// roles run with the worktree as their working directory.
+    /// prefixes twice. Every active role prefixes; scoping uses the
+    /// repo-relative display path since it runs with cwd at the repo root,
+    /// while executing and landing use absolute paths into the checkout.
     fn claim_role_prefix(&self, key: &SessionKey, user_text: &str) -> Option<String> {
         let mut state = lock_state(&self.state)?;
         let repo_root = state.repo_root.clone()?;
@@ -209,6 +209,10 @@ impl AgentManager {
         }
         let plan = live.plan.clone();
         let text = match plan.phase {
+            plans::Phase::Scoping => {
+                let display = opencode::plan_display(&plan.plan_ref());
+                scoping_prefix_text(&display, user_text)
+            }
             plans::Phase::Executing => {
                 let plan_dir_abs = plan
                     .plan_ref()
@@ -271,19 +275,56 @@ pub(crate) fn handle_notification(
     }
     // Replayed user messages only exist while history replays. Live turns
     // append the user bubble optimistically, so mapping them outside a
-    // replay would double-add every prompt.
+    // replay would double-add every prompt. Scoping replays split the
+    // server-prefixed first prompt into its template and user parts so
+    // replay renders the same two bubbles as live; edited-template history
+    // falls back to one bubble.
     if let Some(chunk) = crate::updates::user_text_of(&notification.update)
         && lock_state(state)
             .map(|guard| guard.is_history_loading(key))
             .unwrap_or(false)
     {
-        emit_event(
-            app,
-            AppEvent::UserText {
-                session: key.clone(),
-                chunk,
-            },
-        );
+        if key.role == SessionRole::Scoping {
+            let plan_ref = plans::PlanRef {
+                name: key.plan.clone(),
+                phase: plans::Phase::Scoping,
+            };
+            let template = opencode::scoping_draft(&opencode::plan_display(&plan_ref));
+            if let Some((first, second)) = split_scoping_replay(&template, &chunk) {
+                emit_event(
+                    app,
+                    AppEvent::UserText {
+                        session: key.clone(),
+                        chunk: first,
+                    },
+                );
+                if !second.is_empty() {
+                    emit_event(
+                        app,
+                        AppEvent::UserText {
+                            session: key.clone(),
+                            chunk: second,
+                        },
+                    );
+                }
+            } else {
+                emit_event(
+                    app,
+                    AppEvent::UserText {
+                        session: key.clone(),
+                        chunk,
+                    },
+                );
+            }
+        } else {
+            emit_event(
+                app,
+                AppEvent::UserText {
+                    session: key.clone(),
+                    chunk,
+                },
+            );
+        }
     }
     match &notification.update {
         acp::SessionUpdate::ToolCall(call) => {
@@ -378,6 +419,25 @@ pub(crate) fn handle_notification(
     }
 }
 
+/// Scoping template for the first message of one ACP conversation.
+/// Pure. Uses the repo-relative display path since scoping runs with cwd
+/// at the repo root.
+fn scoping_prefix_text(display: &str, user_text: &str) -> String {
+    format!(
+        "{}\n\n{}",
+        opencode::scoping_draft(display),
+        user_text.trim()
+    )
+}
+
+/// Split a replayed scoping prompt into its template and user parts.
+/// Returns `None` when the text is not a server-prefixed prompt (e.g.
+/// pre-change sessions whose template was user-edited). Pure.
+fn split_scoping_replay(template: &str, text: &str) -> Option<(String, String)> {
+    let remainder = text.strip_prefix(template)?.strip_prefix("\n\n")?;
+    Some((template.to_string(), remainder.to_string()))
+}
+
 /// Executing role template for the first message of one ACP
 /// conversation. Pure.
 fn executing_prefix_text(display: &str, user_text: &str) -> String {
@@ -457,5 +517,34 @@ mod tests {
         );
         assert!(text.contains("samokod/shiny"));
         assert!(text.contains("keep going"));
+    }
+
+    #[test]
+    fn scoping_prefix_combines_template_and_user_text() {
+        let display = ".samokod/plans/scoping/ts";
+        let template = opencode::scoping_draft(display);
+        let text = scoping_prefix_text(display, "  do things  ");
+        assert!(text.starts_with(&template));
+        assert!(text.contains("do things"));
+        assert_eq!(text, format!("{template}\n\ndo things"));
+    }
+
+    #[test]
+    fn scoping_replay_splits_prefixed_message() {
+        let display = ".samokod/plans/scoping/ts";
+        let template = opencode::scoping_draft(display);
+        let full = format!("{template}\n\ndo things");
+        let (first, second) =
+            split_scoping_replay(&template, &full).expect("splits prefixed message");
+        assert_eq!(first, template);
+        assert_eq!(second, "do things");
+    }
+
+    #[test]
+    fn scoping_replay_keeps_edited_template_whole() {
+        let display = ".samokod/plans/scoping/ts";
+        let template = opencode::scoping_draft(display);
+        assert!(split_scoping_replay(&template, "edited template text").is_none());
+        assert!(split_scoping_replay(&template, &template).is_none());
     }
 }

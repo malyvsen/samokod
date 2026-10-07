@@ -41,10 +41,9 @@ pub(crate) fn role_phase(role: SessionRole) -> plans::Phase {
 pub(crate) struct ActivePlan {
     pub(crate) name: String,
     pub(crate) phase: plans::Phase,
-    /// Role already delivered for this ACP conversation. Scoping never
-    /// sends one (the draft bubble holds the template as editable text);
-    /// executing sends once, hidden on approval or prefixed to the first
-    /// prompt otherwise.
+    /// Role already delivered for this ACP conversation. Executing and
+    /// landing send once, hidden or prefixed to the first prompt;
+    /// scoping prefixes its template server-side to the first prompt.
     pub(crate) prefixed: bool,
 }
 
@@ -53,7 +52,7 @@ impl ActivePlan {
         ActivePlan {
             name,
             phase: plans::Phase::Scoping,
-            prefixed: true,
+            prefixed: false,
         }
     }
 
