@@ -9,13 +9,9 @@ export function hasUserMessage(chats: Chats, key: SessionKey): boolean {
 	);
 }
 
-// Per-session compose drafts for user-typed text only. The compose box
-// mounts empty; the scoping template never prefills and is instead fetched
-// lazily at send time for display.
-export function useSessionDrafts(
-	selectedKey: SessionKey | null,
-	_chats: Chats,
-): {
+// Per-session compose-box drafts: unsent text kept per session so
+// switching sessions never loses what was typed.
+export function useSessionDrafts(selectedKey: SessionKey | null): {
 	initialText: string | undefined;
 	onDraftInput: (text: string) => void;
 	onDraftSent: () => void;

@@ -25,7 +25,7 @@ const api = vi.hoisted(() => ({
 	setConfigOption: vi.fn(),
 	warmSession: vi.fn(),
 	loadHistory: vi.fn(),
-	scopingDraft: vi.fn(),
+	scopingTemplate: vi.fn(),
 	onAppEvent: vi.fn(() => () => {}),
 }));
 vi.mock("./api", () => api);
@@ -54,7 +54,7 @@ beforeEach(() => {
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
-	api.scopingDraft.mockResolvedValue(null);
+	api.scopingTemplate.mockResolvedValue(null);
 });
 
 function emit(event: AppEvent) {

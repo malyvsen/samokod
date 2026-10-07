@@ -180,12 +180,12 @@ async fn set_config_option(
 }
 
 #[tauri::command]
-async fn scoping_draft(
+async fn scoping_template(
     state: State<'_, AgentManager>,
     session: SessionKey,
 ) -> Result<Option<String>, String> {
     state
-        .scoping_draft(session)
+        .scoping_template(session)
         .map_err(|error| error.to_string())
 }
 
@@ -253,7 +253,7 @@ pub fn run() {
             cancel_plan,
             select_plan,
             send_prompt,
-            scoping_draft,
+            scoping_template,
             retry_last,
             cancel_turn,
             answer_permission,

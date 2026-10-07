@@ -138,10 +138,9 @@ pub fn plan_display(plan: &PlanRef) -> String {
     format!(".samokod/plans/{}/{}", plan.phase.dir_name(), plan.name)
 }
 
-/// Scoping draft: the scoping template with its plan dir filled in.
-/// Prefilled into the first message box as ordinary editable user content.
-/// Pure.
-pub fn scoping_draft(plan_dir: &str) -> String {
+/// Scoping template with its plan dir filled in. Rendered as its own
+/// bubble; the first scoping prompt carries it on the wire. Pure.
+pub fn scoping_template(plan_dir: &str) -> String {
     SCOPING_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
@@ -448,8 +447,8 @@ mod tests {
     }
 
     #[test]
-    fn scoping_draft_names_plan_path() {
-        let draft = scoping_draft(".samokod/plans/scoping/ts");
+    fn scoping_template_names_plan_path() {
+        let draft = scoping_template(".samokod/plans/scoping/ts");
         assert!(draft.contains(".samokod/plans/scoping/ts/plan.md"));
         assert!(!draft.contains("{{PLAN_DIR}}"));
     }

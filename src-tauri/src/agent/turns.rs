@@ -37,8 +37,8 @@ impl AgentManager {
 
     /// Send one plain-text prompt, spawning the session lazily on its
     /// first message. Streams arrive as events; the turn end arrives as
-    /// done or failed. The scoping first turn sends pure user text prefixed
-    /// server-side with the template as one message. A reserved
+    /// done or failed. The scoping first turn takes the user's text and
+    /// prefixes the template server-side as one message. A reserved
     /// pending scoping session materializes its directory here, before
     /// the `ensure_live` path.
     pub async fn send_prompt(&self, session: SessionKey, text: String) -> Result<(), AgentError> {
@@ -49,7 +49,7 @@ impl AgentManager {
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "open a repository first".to_string(),
                 })?;
-            // Working title from pure user text before the server prefix.
+            // Working title from the user's text before the server prefix.
             // Set-once; headings win; empty stays `Untitled`.
             store_working_title(&self.state, &repo_root, &session.plan, &text);
             let pending_match = match self.state.lock() {
@@ -215,7 +215,7 @@ impl AgentManager {
         let text = match plan.phase {
             plans::Phase::Scoping => {
                 let display = opencode::plan_display(&plan.plan_ref());
-                scoping_prefix_text(&display, user_text)
+                prefixed_first_message(&opencode::scoping_template(&display), user_text)
             }
             plans::Phase::Executing => {
                 let plan_dir_abs = plan
@@ -223,7 +223,7 @@ impl AgentManager {
                     .path(&repo_root)
                     .to_string_lossy()
                     .to_string();
-                executing_prefix_text(&plan_dir_abs, user_text)
+                prefixed_first_message(&opencode::executing_first_message(&plan_dir_abs), user_text)
             }
             plans::Phase::Landing => {
                 let path = match state.worktrees.get(&plan.name) {
@@ -237,11 +237,13 @@ impl AgentManager {
                     .plan_md(&repo_root)
                     .to_string_lossy()
                     .to_string();
-                landing_prefix_text(
-                    &worktree_branch,
-                    &target_branch,
-                    &path.to_string_lossy(),
-                    &plan_md_abs,
+                prefixed_first_message(
+                    &opencode::landing_first_message(
+                        &worktree_branch,
+                        &target_branch,
+                        &path.to_string_lossy(),
+                        &plan_md_abs,
+                    ),
                     user_text,
                 )
             }
@@ -279,53 +281,18 @@ pub(crate) fn handle_notification(
     }
     // Replayed user messages only exist while history replays. Live turns
     // append the user bubble optimistically, so mapping them outside a
-    // replay would double-add every prompt. Scoping replays split the
-    // server-prefixed first prompt into its template and user parts so
-    // replay renders the same two bubbles as live; edited-template history
-    // falls back to one bubble.
+    // replay would double-add every prompt.
     if let Some(chunk) = crate::updates::user_text_of(&notification.update)
         && lock_state(state)
             .map(|guard| guard.is_history_loading(key))
             .unwrap_or(false)
     {
-        if key.role == SessionRole::Scoping {
-            let plan_ref = plans::PlanRef {
-                name: key.plan.clone(),
-                phase: plans::Phase::Scoping,
-            };
-            let template = opencode::scoping_draft(&opencode::plan_display(&plan_ref));
-            if let Some((first, second)) = split_scoping_replay(&template, &chunk) {
-                emit_event(
-                    app,
-                    AppEvent::UserText {
-                        session: key.clone(),
-                        chunk: first,
-                    },
-                );
-                if !second.is_empty() {
-                    emit_event(
-                        app,
-                        AppEvent::UserText {
-                            session: key.clone(),
-                            chunk: second,
-                        },
-                    );
-                }
-            } else {
-                emit_event(
-                    app,
-                    AppEvent::UserText {
-                        session: key.clone(),
-                        chunk,
-                    },
-                );
-            }
-        } else {
+        for bubble in replay_bubbles(key, &chunk) {
             emit_event(
                 app,
                 AppEvent::UserText {
                     session: key.clone(),
-                    chunk,
+                    chunk: bubble,
                 },
             );
         }
@@ -423,7 +390,7 @@ pub(crate) fn handle_notification(
     }
 }
 
-/// Store a working title from pure scoping user text. Set-once: skips
+/// Store a working title from the scoping message text. Set-once: skips
 /// when a `plan.md` heading exists or a title is already stored (disk or
 /// pending map). Stores to disk when materialized, to the pending map
 /// otherwise. Empty prompts stay `Untitled` via extractor `None`.
@@ -437,14 +404,15 @@ fn store_working_title(
         name: plan_name.to_string(),
         phase: plans::Phase::Scoping,
     };
+    let plan_dir = plan_ref.path(repo_root);
     if plan_ref.has_plan_md(repo_root) {
         let text = std::fs::read_to_string(plan_ref.plan_md(repo_root)).unwrap_or_default();
         if plans::extract_title(&text).is_some() {
             return;
         }
     }
-    if plan_ref.path(repo_root).is_dir() {
-        let stored = plans::load_state(&plan_ref.path(repo_root));
+    if plan_dir.is_dir() {
+        let stored = plans::load_state(&plan_dir);
         if stored.working_title.is_some() {
             return;
         }
@@ -458,11 +426,11 @@ fn store_working_title(
     let Some(title) = crate::working_title::extract_working_title(user_text) else {
         return;
     };
-    if plan_ref.path(repo_root).is_dir() {
-        let mut stored = plans::load_state(&plan_ref.path(repo_root));
+    if plan_dir.is_dir() {
+        let mut stored = plans::load_state(&plan_dir);
         if stored.working_title.is_none() {
             stored.working_title = Some(title);
-            plans::store_state(&plan_ref.path(repo_root), &stored);
+            plans::store_state(&plan_dir, &stored);
         }
     } else if let Some(mut guard) = lock_state(state) {
         guard.pending_titles.insert(plan_name.to_string(), title);
@@ -493,54 +461,37 @@ fn carry_pending_title(state: &Mutex<State>, repo_root: &std::path::Path, plan_n
     }
 }
 
-/// Scoping template for the first message of one ACP conversation.
-/// Pure. Uses the repo-relative display path since scoping runs with cwd
-/// at the repo root.
-fn scoping_prefix_text(display: &str, user_text: &str) -> String {
-    format!(
-        "{}\n\n{}",
-        opencode::scoping_draft(display),
-        user_text.trim()
-    )
+/// First message of one ACP conversation: the role template plus the
+/// user's text. Pure.
+fn prefixed_first_message(template: &str, user_text: &str) -> String {
+    format!("{}\n\n{}", template, user_text.trim())
 }
 
-/// Split a replayed scoping prompt into its template and user parts.
-/// Returns `None` when the text is not a server-prefixed prompt (e.g.
-/// pre-change sessions whose template was user-edited). Pure.
+/// Replayed user text as display bubbles: a scoping first prompt carries
+/// its template, so it splits back into template and message; anything
+/// else is one bubble. Pure.
+fn replay_bubbles(key: &SessionKey, chunk: &str) -> Vec<String> {
+    if key.role != SessionRole::Scoping {
+        return vec![chunk.to_string()];
+    }
+    let plan_ref = plans::PlanRef {
+        name: key.plan.clone(),
+        phase: plans::Phase::Scoping,
+    };
+    let template = opencode::scoping_template(&opencode::plan_display(&plan_ref));
+    match split_scoping_replay(&template, chunk) {
+        Some((first, second)) if !second.is_empty() => vec![first, second],
+        Some((first, _)) => vec![first],
+        None => vec![chunk.to_string()],
+    }
+}
+
+/// Split a scoping first prompt into its template and message parts.
+/// Returns `None` when the text carries no template (e.g. a manually
+/// edited template). Pure.
 fn split_scoping_replay(template: &str, text: &str) -> Option<(String, String)> {
     let remainder = text.strip_prefix(template)?.strip_prefix("\n\n")?;
     Some((template.to_string(), remainder.to_string()))
-}
-
-/// Executing role template for the first message of one ACP
-/// conversation. Pure.
-fn executing_prefix_text(display: &str, user_text: &str) -> String {
-    format!(
-        "{}\n\n{}",
-        opencode::executing_first_message(display),
-        user_text.trim()
-    )
-}
-
-/// Landing role template for the first message of one ACP conversation.
-/// Pure.
-fn landing_prefix_text(
-    worktree_branch: &str,
-    target_branch: &str,
-    worktree_path: &str,
-    plan_md_abs_path: &str,
-    user_text: &str,
-) -> String {
-    format!(
-        "{}\n\n{}",
-        opencode::landing_first_message(
-            worktree_branch,
-            target_branch,
-            worktree_path,
-            plan_md_abs_path
-        ),
-        user_text.trim()
-    )
 }
 
 /// Replace the held list with a fresh todo list and emit when it moved.
@@ -573,41 +524,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn executing_prefix_combines_role_and_user_text() {
-        let display = ".samokod/plans/executing/ts.slug";
-        let text = executing_prefix_text(display, "  do things  ");
-        assert!(text.contains(&opencode::executing_first_message(display)));
-        assert!(text.contains("do things"));
-    }
-
-    #[test]
-    fn landing_prefix_combines_role_and_user_text() {
-        let text = landing_prefix_text(
-            "samokod/shiny",
-            "feature",
-            "/repo/.samokod/worktrees/plan",
-            "/repo/.samokod/plans/landing/plan/plan.md",
-            "  keep going  ",
-        );
-        assert!(text.contains("samokod/shiny"));
-        assert!(text.contains("keep going"));
-    }
-
-    #[test]
-    fn scoping_prefix_combines_template_and_user_text() {
-        let display = ".samokod/plans/scoping/ts";
-        let template = opencode::scoping_draft(display);
-        let text = scoping_prefix_text(display, "  do things  ");
-        assert!(text.starts_with(&template));
-        assert!(text.contains("do things"));
+    fn prefixed_message_combines_template_and_user_text() {
+        let template = "ROLE TEMPLATE";
+        let text = prefixed_first_message(template, "  do things  ");
         assert_eq!(text, format!("{template}\n\ndo things"));
     }
 
     #[test]
     fn scoping_replay_splits_prefixed_message() {
         let display = ".samokod/plans/scoping/ts";
-        let template = opencode::scoping_draft(display);
+        let template = opencode::scoping_template(display);
         let full = format!("{template}\n\ndo things");
+        let key = SessionKey {
+            plan: "ts".to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert_eq!(
+            replay_bubbles(&key, &full),
+            vec![template.clone(), "do things".to_string()]
+        );
         let (first, second) =
             split_scoping_replay(&template, &full).expect("splits prefixed message");
         assert_eq!(first, template);
@@ -617,7 +552,7 @@ mod tests {
     #[test]
     fn scoping_replay_keeps_edited_template_whole() {
         let display = ".samokod/plans/scoping/ts";
-        let template = opencode::scoping_draft(display);
+        let template = opencode::scoping_template(display);
         assert!(split_scoping_replay(&template, "edited template text").is_none());
         assert!(split_scoping_replay(&template, &template).is_none());
     }

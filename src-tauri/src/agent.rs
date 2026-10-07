@@ -192,11 +192,11 @@ pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str) {
     }
 }
 
-/// Prefilled scoping draft for one session. Returns the rendered
-/// template only while the session is fresh under `is_empty_scoping`,
-/// `None` for non-fresh or non-scoping sessions, and an error when the
-/// plan is gone. Reads the locked state plus disk.
-pub(crate) fn scoping_draft_for(
+/// Scoping template for one session. Returns the rendered template
+/// only while the session is fresh under `is_empty_scoping`, `None` for
+/// non-fresh or non-scoping sessions, and an error when the plan is
+/// gone. Reads the locked state plus disk.
+pub(crate) fn scoping_template_for(
     state: &State,
     repo_root: &Path,
     session: &SessionKey,
@@ -218,7 +218,7 @@ pub(crate) fn scoping_draft_for(
         return Ok(None);
     }
     let display = opencode::plan_display(&plan_ref);
-    Ok(Some(opencode::scoping_draft(&display)))
+    Ok(Some(opencode::scoping_template(&display)))
 }
 
 /// Reserved timestamp name for a lazy scoping session: collision-proof
@@ -672,12 +672,12 @@ impl AgentManager {
         Ok(self.plans_update())
     }
 
-    /// Prefilled scoping draft: the scoping template with its plan dir
-    /// filled in, returned only while the session is fresh under the
+    /// Scoping template: the template with its plan dir filled in,
+    /// returned only while the session is fresh under the
     /// `is_empty_scoping` gate. Non-fresh and non-scoping sessions get
     /// `None`; missing repos and gone plans are errors, never silent
     /// fallbacks.
-    pub fn scoping_draft(&self, session: SessionKey) -> Result<Option<String>, AgentError> {
+    pub fn scoping_template(&self, session: SessionKey) -> Result<Option<String>, AgentError> {
         let Some(state_guard) = lock_state(&self.state) else {
             return Err(AgentError::RequestFailed {
                 raw: "agent state unavailable".to_string(),
@@ -688,7 +688,7 @@ impl AgentManager {
                 raw: "open a repository first".to_string(),
             });
         };
-        scoping_draft_for(&state_guard, &repo_root, &session)
+        scoping_template_for(&state_guard, &repo_root, &session)
     }
 
     /// Live worktree coordinates plus landing state for one plan. The
@@ -1431,7 +1431,7 @@ mod tests {
     }
 
     #[test]
-    fn draft_returns_template_only_while_fresh() {
+    fn template_returns_only_while_fresh() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
@@ -1444,11 +1444,11 @@ mod tests {
             pending_scoping: Some(name.to_string()),
             ..Default::default()
         };
-        let draft = scoping_draft_for(&state, root, &key)
-            .expect("draft")
-            .expect("fresh prefills");
-        assert!(draft.contains(".samokod/plans/scoping/2026-09-26.08-41-03"));
-        assert!(!draft.contains("{{PLAN_DIR}}"));
+        let template = scoping_template_for(&state, root, &key)
+            .expect("template")
+            .expect("fresh session renders");
+        assert!(template.contains(".samokod/plans/scoping/2026-09-26.08-41-03"));
+        assert!(!template.contains("{{PLAN_DIR}}"));
 
         let state = State::default();
         plans::materialize_scoping(root, name).expect("materialize");
@@ -1457,7 +1457,10 @@ mod tests {
             "# T\n",
         )
         .expect("write");
-        assert_eq!(scoping_draft_for(&state, root, &key).expect("gate"), None);
+        assert_eq!(
+            scoping_template_for(&state, root, &key).expect("gate"),
+            None
+        );
 
         let mut state = State::default();
         plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("materialize");
@@ -1466,7 +1469,10 @@ mod tests {
             role: SessionRole::Scoping,
         };
         state.prompted.insert(other.plan.clone());
-        assert_eq!(scoping_draft_for(&state, root, &other).expect("gate"), None);
+        assert_eq!(
+            scoping_template_for(&state, root, &other).expect("gate"),
+            None
+        );
 
         let mut state = State::default();
         plans::materialize_scoping(root, "2026-09-26.08-41-05").expect("materialize");
@@ -1482,7 +1488,10 @@ mod tests {
             ),
         );
         state.sessions.get_mut(&sent).expect("live").last_prompt = Some("hi".to_string());
-        assert_eq!(scoping_draft_for(&state, root, &sent).expect("gate"), None);
+        assert_eq!(
+            scoping_template_for(&state, root, &sent).expect("gate"),
+            None
+        );
 
         let state = State::default();
         let executing = SessionKey {
@@ -1490,7 +1499,7 @@ mod tests {
             role: SessionRole::Executing,
         };
         assert_eq!(
-            scoping_draft_for(&state, root, &executing).expect("gate"),
+            scoping_template_for(&state, root, &executing).expect("gate"),
             None
         );
 
@@ -1499,7 +1508,7 @@ mod tests {
             plan: "2026-09-26.08-41-99".to_string(),
             role: SessionRole::Scoping,
         };
-        assert!(scoping_draft_for(&state, root, &gone).is_err());
+        assert!(scoping_template_for(&state, root, &gone).is_err());
     }
 
     #[test]

@@ -54,8 +54,8 @@ export function sendPrompt(session: SessionKey, text: string): Promise<void> {
 	return invoke("send_prompt", { session, text });
 }
 
-export function scopingDraft(session: SessionKey): Promise<string | null> {
-	return invoke<string | null>("scoping_draft", { session });
+export function scopingTemplate(session: SessionKey): Promise<string | null> {
+	return invoke<string | null>("scoping_template", { session });
 }
 
 export function retryLast(session: SessionKey): Promise<boolean> {

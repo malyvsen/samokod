@@ -63,18 +63,11 @@ export function errorItem(
 
 function appendText(
 	transcript: TranscriptItem[],
-	kind: "user" | "agent",
 	chunk: string,
 ): TranscriptItem[] {
 	const last = transcript[transcript.length - 1];
-	if (last !== undefined && last.kind === kind) {
+	if (last !== undefined && last.kind === "agent") {
 		return [...transcript.slice(0, -1), { ...last, text: last.text + chunk }];
-	}
-	if (kind === "user") {
-		return [
-			...transcript,
-			{ kind: "user", id: crypto.randomUUID(), text: chunk },
-		];
 	}
 	return [
 		...transcript,
@@ -122,16 +115,13 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 			const key = event.session;
 			const chunk = event.chunk;
 			return updateEntry(chats, key, (chat) =>
-				withTranscript(chat, appendText(chat.transcript, "agent", chunk)),
+				withTranscript(chat, appendText(chat.transcript, chunk)),
 			);
 		}
 		case "user_text": {
 			const key = event.session;
 			const chunk = event.chunk;
-			// Each replayed user message is its own bubble. The scoping
-			// split emits template and user text as two events so replay
-			// renders the same two bubbles as live; merging would collapse
-			// them into one.
+			// Each user message is its own bubble.
 			return updateEntry(chats, key, (chat) => ({
 				...chat,
 				transcript: [

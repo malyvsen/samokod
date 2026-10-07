@@ -30,7 +30,7 @@ pub(crate) fn resolve(repo_root: &Path, session: &SessionKey) -> Option<String> 
 }
 
 /// Record one role's session ID inside its plan directory, preserving the
-/// other roles and `entered_at`. Best-effort: missing directories
+/// rest of the state. Best-effort: missing directories
 /// (a warmed pending session spawns before its directory exists) skip
 /// quietly, failures log and the live session continues, and an unchanged
 /// ID skips the rewrite. The next prompt heals anything skipped here.

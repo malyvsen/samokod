@@ -261,9 +261,9 @@ pub(crate) fn store_state(plan_dir: &Path, state: &PlanState) {
     }
 }
 
-/// Stamp `entered_at` for one plan directory, preserving session
-/// IDs. Best-effort: a missing directory skips, failures log and the
-/// move stands.
+/// Stamp `entered_at` for one plan directory, preserving the rest of
+/// the state. Best-effort: a missing directory skips, failures log and
+/// the move stands.
 fn stamp_entered_at(plan_dir: &Path) {
     if !plan_dir.is_dir() {
         return;

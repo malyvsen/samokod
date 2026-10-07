@@ -14,7 +14,7 @@ import {
 	openRepo,
 	refreshBranch,
 	retryLast,
-	scopingDraft,
+	scopingTemplate,
 	selectPlan,
 	sendPrompt,
 	setConfigOption,
@@ -52,6 +52,7 @@ import type {
 	RecentRepo,
 	RepoDefaults,
 	SessionKey,
+	TranscriptItem,
 } from "./types";
 import { sameSession, sessionKeyOf } from "./types";
 import "./App.css";
@@ -78,7 +79,7 @@ export function App() {
 
 	const selectedId = selectedKey === null ? null : sessionKeyOf(selectedKey);
 	const chat: ChatState | null = selectedChat(chats, selectedKey);
-	const draft = useSessionDrafts(selectedKey, chats);
+	const draft = useSessionDrafts(selectedKey);
 
 	const status = agentStatusOf(chat);
 	const busy = isSessionBusy(chat);
@@ -244,36 +245,31 @@ export function App() {
 	async function handleSend(text: string) {
 		const key = selectedRef.current;
 		if (text === "" || busy || readOnly || key === null) return;
-		// The scoping template never prefills the box. It travels on the
-		// wire via the server-side prefix and renders as its own bubble.
+		// Scoping renders its template as a separate bubble above the message.
 		let template: string | null = null;
 		if (key.role === "scoping") {
 			try {
-				template = await scopingDraft(key);
+				template = await scopingTemplate(key);
 			} catch (error) {
-				console.warn("scoping_draft failed", error);
+				console.warn("scoping_template failed", error);
 				template = null;
 			}
 		}
 		draft.onDraftSent();
-		if (template !== null) {
-			updateChat(key, (chat) => ({
-				...chat,
-				transcript: [
-					...chat.transcript,
-					{ kind: "user", id: crypto.randomUUID(), text: template },
-					{ kind: "user", id: crypto.randomUUID(), text },
-				],
-			}));
-		} else {
-			updateChat(key, (chat) => ({
-				...chat,
-				transcript: [
-					...chat.transcript,
-					{ kind: "user", id: crypto.randomUUID(), text },
-				],
-			}));
-		}
+		const bubbles = template === null ? [text] : [template, text];
+		updateChat(key, (chat) => ({
+			...chat,
+			transcript: [
+				...chat.transcript,
+				...bubbles.map(
+					(bubble): TranscriptItem => ({
+						kind: "user",
+						id: crypto.randomUUID(),
+						text: bubble,
+					}),
+				),
+			],
+		}));
 		await runTurn(key, text);
 	}
 

@@ -29,7 +29,7 @@ const api = vi.hoisted(() => ({
 	setConfigOption: vi.fn(),
 	warmSession: vi.fn(),
 	loadHistory: vi.fn(),
-	scopingDraft: vi.fn(),
+	scopingTemplate: vi.fn(),
 	onAppEvent: vi.fn(() => () => {}),
 }));
 vi.mock("./api", () => api);
@@ -65,7 +65,7 @@ beforeEach(() => {
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
-	api.scopingDraft.mockResolvedValue("TEMPLATE");
+	api.scopingTemplate.mockResolvedValue("TEMPLATE");
 	api.sendPrompt.mockResolvedValue(undefined);
 });
 
@@ -87,7 +87,7 @@ async function openChat(plans?: PlanEntry[], selected?: SessionKey) {
 }
 
 describe("draft bubble in chat", () => {
-	test("compose box opens empty without template prefill", async () => {
+	test("compose box opens empty", async () => {
 		await openChat();
 		const area = await screen.findByRole("textbox", {
 			name: "Ask for a change…",
@@ -96,18 +96,18 @@ describe("draft bubble in chat", () => {
 	});
 
 	test("live send shows template and user bubbles and sends pure text", async () => {
-		api.scopingDraft.mockResolvedValue("TEMPLATE");
+		api.scopingTemplate.mockResolvedValue("TEMPLATE");
 		const user = await openChat();
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		await user.keyboard("hello{Enter}");
-		expect(api.scopingDraft).toHaveBeenCalledWith(testKey());
+		expect(api.scopingTemplate).toHaveBeenCalledWith(testKey());
 		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello");
 		await screen.findByText("TEMPLATE");
 		await screen.findByText("hello");
 	});
 
 	test("live send falls back to one bubble when template fetch fails", async () => {
-		api.scopingDraft.mockRejectedValue(new Error("boom"));
+		api.scopingTemplate.mockRejectedValue(new Error("boom"));
 		const user = await openChat();
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		await user.keyboard("hello{Enter}");

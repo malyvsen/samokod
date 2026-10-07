@@ -1,5 +1,5 @@
 // Working titles for untitled scoping plans: language-agnostic
-// statistical extractor from the user's pure first prompt.
+// statistical extractor from the user's first scoping message.
 // Luhn-style sentence extraction (dense windows of frequent words).
 // No stopword lists, no stemmers, no spellcheck dictionaries by design;
 // typos are frequency-1 noise and cannot outscore real content.
@@ -9,19 +9,19 @@ use std::collections::HashMap;
 /// Max title length in chars. Truncation lands on a word boundary.
 const MAX_LEN: usize = 60;
 
-/// Gap of non-significant words that still keeps one Luhn cluster.
+/// Maximum distance between significant words in one Luhn cluster.
 const CLUSTER_GAP: usize = 4;
 
-/// Extract a readable working title from pure user text. `None` when
-/// nothing survives (the caller falls back to `Untitled`). Pure.
+/// Extract a readable working title from the user's first scoping
+/// message. `None` when nothing survives (the caller falls back to
+/// `Untitled`). Pure.
 pub fn extract_working_title(text: &str) -> Option<String> {
     let cleaned = strip_markdown(text);
-    let sentences = split_sentences(&cleaned);
-    let sentences: Vec<&str> = sentences
+    let candidates: Vec<&str> = split_sentences(&cleaned)
         .into_iter()
         .filter(|sentence| tokenize(sentence).len() >= 2)
         .collect();
-    if let Some(title) = luhn_title(&sentences) {
+    if let Some(title) = luhn_title(&candidates) {
         return Some(title);
     }
     fallback_title(&cleaned)
@@ -49,47 +49,36 @@ fn luhn_title(sentences: &[&str]) -> Option<String> {
     Some(truncate_title(&clean_sentence(sentences[index])))
 }
 
-/// Best dense-window score inside one tokenized sentence. Pure.
+/// Best dense-window score inside one tokenized sentence. Significant
+/// words within `CLUSTER_GAP` of each other form one cluster; each
+/// cluster scores significant-words-squared over cluster length. Pure.
 fn cluster_score(tokens: &[String], frequencies: &HashMap<String, usize>) -> f64 {
-    let significant: Vec<bool> = tokens
-        .iter()
-        .map(|token| frequencies.get(token).is_some_and(|count| *count >= 2))
-        .collect();
-    if !significant.contains(&true) {
+    let mut significant = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if frequencies.get(token).is_some_and(|count| *count >= 2) {
+            significant.push(index);
+        }
+    }
+    if significant.is_empty() {
         return 0.0;
     }
-    let mut best = 0.0;
-    let mut start: Option<usize> = None;
-    let mut sig_count = 0usize;
-    let mut last_sig: Option<usize> = None;
-    for (index, is_sig) in significant.iter().enumerate() {
-        if *is_sig {
-            if start.is_none() {
-                start = Some(index);
-            } else if let Some(last) = last_sig
-                && index - last > CLUSTER_GAP
-            {
-                let end = last;
-                let total = end - start.expect("cluster started") + 1;
-                let score = (sig_count * sig_count) as f64 / total as f64;
-                if score > best {
-                    best = score;
-                }
-                start = Some(index);
-                sig_count = 0;
-            }
-            sig_count += 1;
-            last_sig = Some(index);
+    let mut best: f64 = 0.0;
+    let mut run_start = 0;
+    for (index, window) in significant.windows(2).enumerate() {
+        if window[1] - window[0] > CLUSTER_GAP {
+            best = best.max(run_score(&significant[run_start..=index]));
+            run_start = index + 1;
         }
     }
-    if let (Some(begin), Some(end)) = (start, last_sig) {
-        let total = end - begin + 1;
-        let score = (sig_count * sig_count) as f64 / total as f64;
-        if score > best {
-            best = score;
-        }
-    }
-    best
+    best.max(run_score(&significant[run_start..]))
+}
+
+/// Score one cluster run of significant-word positions: significant
+/// count squared over the token span from first to last. Pure.
+fn run_score(run: &[usize]) -> f64 {
+    let count = run.len() as f64;
+    let span = (run[run.len() - 1] - run[0] + 1) as f64;
+    count * count / span
 }
 
 /// Fallback when no sentence survives: up to 5 most frequent content

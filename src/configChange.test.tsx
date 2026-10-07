@@ -23,7 +23,7 @@ const api = vi.hoisted(() => ({
 	setConfigOption: vi.fn(),
 	warmSession: vi.fn(),
 	loadHistory: vi.fn(),
-	scopingDraft: vi.fn(),
+	scopingTemplate: vi.fn(),
 	onAppEvent: vi.fn(() => () => {}),
 }));
 vi.mock("./api", () => api);
@@ -90,7 +90,7 @@ beforeEach(() => {
 	api.setConfigOption.mockReset();
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
-	api.scopingDraft.mockResolvedValue(null);
+	api.scopingTemplate.mockResolvedValue(null);
 });
 
 async function openChatWith(options: ConfigOptionView[]) {
