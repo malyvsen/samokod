@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { QueuedMessage } from "../sessions/queue";
 import {
-	extractDraftText,
+	extractText,
 	insertPlainText,
 	moveCaretToEnd,
 	shouldCommitEnter,
@@ -10,14 +10,14 @@ import {
 export function QueuedBubbleList({
 	items,
 	editingId,
-	blockedId,
+	editingBlocked,
 	onEdit,
 	onCommit,
 	onCancel,
 }: {
 	items: QueuedMessage[];
 	editingId: string | null;
-	blockedId: string | null;
+	editingBlocked: boolean;
 	onEdit: (id: string) => void;
 	onCommit: (id: string, text: string) => void;
 	onCancel: () => void;
@@ -30,7 +30,7 @@ export function QueuedBubbleList({
 					<QueuedBubbleEditor
 						key={item.id}
 						text={item.text}
-						blocked={item.id === blockedId}
+						blocked={editingBlocked}
 						onCommit={(text) => onCommit(item.id, text)}
 						onCancel={onCancel}
 					/>
@@ -50,7 +50,7 @@ function QueuedBubble({ text, onEdit }: { text: string; onEdit: () => void }) {
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: queued edit is click-to-edit like the draft - a button element would bring native button metrics.
 		<div
-			className="queued"
+			className="msg user queued"
 			title="Click to edit"
 			role="button"
 			tabIndex={0}
@@ -61,7 +61,7 @@ function QueuedBubble({ text, onEdit }: { text: string; onEdit: () => void }) {
 				onEdit();
 			}}
 		>
-			<div className="who-line">QUEUED</div>
+			<div className="who">QUEUED</div>
 			{text}
 		</div>
 	);
@@ -94,12 +94,15 @@ function QueuedBubbleEditor({
 			onCancel();
 			return;
 		}
-		onCommit(extractDraftText(node));
+		onCommit(extractText(node));
 	}
 
 	return (
-		<div className={blocked ? "queued blocked" : "queued"} title="Editing">
-			<div className="who-line">QUEUED</div>
+		<div
+			className={blocked ? "msg user queued blocked" : "msg user queued"}
+			title="Editing"
+		>
+			<div className="who">QUEUED</div>
 			{/* biome-ignore lint/a11y/useSemanticElements: contenteditable is the design - a textarea cannot size like a sent message without measuring code. */}
 			<div
 				ref={ref}

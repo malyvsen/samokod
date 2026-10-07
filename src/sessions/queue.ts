@@ -1,6 +1,7 @@
 import { useCallback, useReducer, useRef } from "react";
 import { assertNever } from "../assert";
-import { type AgentStatus, type SessionKey, sessionKeyOf } from "../types";
+import type { AgentStatus, SessionKey } from "../types";
+import { sessionKeyOf } from "../types";
 
 export interface QueuedMessage {
 	id: string;
@@ -14,10 +15,7 @@ export function useSessionQueues(selectedKey: SessionKey | null): {
 	remove: (key: SessionKey, id: string) => void;
 	setText: (key: SessionKey, id: string, text: string) => void;
 	setEditing: (key: SessionKey, id: string | null) => void;
-	dequeueDrainCandidate: (
-		key: SessionKey,
-		status: AgentStatus,
-	) => QueuedMessage | null;
+	takeNext: (key: SessionKey) => QueuedMessage | null;
 } {
 	const [queues, dispatch] = useReducer(queueReducer, {});
 	const queuesRef = useRef(queues);
@@ -48,22 +46,19 @@ export function useSessionQueues(selectedKey: SessionKey | null): {
 		dispatch({ type: "setEditing", sessionId: sessionKeyOf(key), id });
 	}, []);
 
-	const dequeueDrainCandidate = useCallback(
-		(key: SessionKey, status: AgentStatus) => {
-			const sessionId = sessionKeyOf(key);
-			const current = queuesRef.current[sessionId];
-			const candidate = drainCandidate(
-				current?.items ?? EMPTY,
-				current?.editingId ?? null,
-				status,
-			);
-			if (candidate !== null) {
-				dispatch({ type: "remove", sessionId, id: candidate.id });
-			}
-			return candidate;
-		},
-		[],
-	);
+	const takeNext = useCallback((key: SessionKey) => {
+		const sessionId = sessionKeyOf(key);
+		const current = queuesRef.current[sessionId];
+		const candidate = drainCandidate(
+			current?.items ?? EMPTY,
+			current?.editingId ?? null,
+			"idle",
+		);
+		if (candidate !== null) {
+			dispatch({ type: "remove", sessionId, id: candidate.id });
+		}
+		return candidate;
+	}, []);
 
 	return {
 		items,
@@ -72,7 +67,7 @@ export function useSessionQueues(selectedKey: SessionKey | null): {
 		remove,
 		setText,
 		setEditing,
-		dequeueDrainCandidate,
+		takeNext,
 	};
 }
 

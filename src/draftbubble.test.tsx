@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { DraftBubble } from "./components/DraftBubble";
-import { applyInitialText, extractDraftText } from "./components/editableText";
+import { applyInitialText, extractText } from "./components/editableText";
 
 function bubble(
 	props: {
@@ -186,7 +186,7 @@ describe("applyInitialText", () => {
 	});
 });
 
-describe("extractDraftText", () => {
+describe("extractText", () => {
 	function root(html: string) {
 		const node = document.createElement("div");
 		node.innerHTML = html;
@@ -194,37 +194,35 @@ describe("extractDraftText", () => {
 	}
 
 	test("keeps internal newlines, trims the ends", () => {
-		expect(extractDraftText(root("a\nb"))).toBe("a\nb");
-		expect(extractDraftText(root("\n  a\nb  \n"))).toBe("a\nb");
+		expect(extractText(root("a\nb"))).toBe("a\nb");
+		expect(extractText(root("\n  a\nb  \n"))).toBe("a\nb");
 	});
 
 	test("turns pasted blocks into lines", () => {
-		expect(extractDraftText(root("<div>a</div><div>b</div>"))).toBe("a\nb");
-		expect(extractDraftText(root("a<br>b"))).toBe("a\nb");
-		expect(extractDraftText(root("a<br>"))).toBe("a");
+		expect(extractText(root("<div>a</div><div>b</div>"))).toBe("a\nb");
+		expect(extractText(root("a<br>b"))).toBe("a\nb");
+		expect(extractText(root("a<br>"))).toBe("a");
 	});
 
 	test("blank edits read as empty", () => {
-		expect(extractDraftText(root(""))).toBe("");
-		expect(extractDraftText(root("<br>"))).toBe("");
-		expect(extractDraftText(root("<div><br></div>"))).toBe("");
+		expect(extractText(root(""))).toBe("");
+		expect(extractText(root("<br>"))).toBe("");
+		expect(extractText(root("<div><br></div>"))).toBe("");
 	});
 
 	test("does not glue bare text to blocks (firstsecond bug)", () => {
-		expect(
-			extractDraftText(root("first<div>second</div><div>third</div>")),
-		).toBe("first\nsecond\nthird");
+		expect(extractText(root("first<div>second</div><div>third</div>"))).toBe(
+			"first\nsecond\nthird",
+		);
 	});
 
 	test("keeps nested breaks after bare text (firstsecond bug)", () => {
-		expect(extractDraftText(root("first<div>second<br>third</div>"))).toBe(
+		expect(extractText(root("first<div>second<br>third</div>"))).toBe(
 			"first\nsecond\nthird",
 		);
 	});
 
 	test("preserves blank lines between blocks (no collapsing)", () => {
-		expect(extractDraftText(root("a<div><br></div><div>b</div>"))).toBe(
-			"a\n\nb",
-		);
+		expect(extractText(root("a<div><br></div><div>b</div>"))).toBe("a\n\nb");
 	});
 });

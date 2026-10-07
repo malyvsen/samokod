@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import {
 	applyInitialText,
-	extractDraftText,
+	extractText,
 	insertPlainText,
 	shouldCommitEnter,
 } from "./editableText";
@@ -34,7 +34,7 @@ export function DraftBubble({
 	function send(): void {
 		const node = ref.current;
 		if (node === null) return;
-		const text = extractDraftText(node);
+		const text = extractText(node);
 		if (text === "") return;
 		node.textContent = "";
 		onSend(text);
@@ -44,7 +44,7 @@ export function DraftBubble({
 		const node = ref.current;
 		if (node !== null) {
 			edited.current = true;
-			onInput?.(extractDraftText(node));
+			onInput?.(extractText(node));
 		}
 		onEdit();
 	}

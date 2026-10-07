@@ -53,7 +53,7 @@ export function stubMatchMedia(): void {
 }
 
 export async function openChat(
-	apiMock: typeof api = api,
+	apiMock: typeof api,
 	overrides: { plans?: PlanEntry[]; selected?: SessionKey } = {},
 ): Promise<UserEvent> {
 	if (overrides.plans !== undefined) {

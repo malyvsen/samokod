@@ -1,4 +1,4 @@
-export function extractDraftText(root: HTMLElement): string {
+export function extractText(root: HTMLElement): string {
 	return collect(root).trim();
 }
 

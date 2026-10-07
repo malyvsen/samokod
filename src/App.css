@@ -499,22 +499,7 @@ body {
 }
 
 .queued {
-	align-self: flex-end;
-	border: 1px solid rgba(255, 255, 255, 0.28);
-	background: rgba(255, 255, 255, 0.06);
-	padding: 10px 12px;
-	white-space: pre-wrap;
-	max-width: 880px;
-	min-width: 0;
-	overflow-wrap: anywhere;
 	cursor: text;
-}
-
-.queued .who-line {
-	font-size: 11px;
-	letter-spacing: 0.14em;
-	color: #8f8c85;
-	margin-bottom: 6px;
 }
 
 /* biome-ignore lint/style/noDescendingSpecificity: queued and draft edits live in disjoint subtrees, order is irrelevant */

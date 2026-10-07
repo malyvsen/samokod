@@ -151,11 +151,11 @@ export function App() {
 
 	const maybeDrain = useCallback(
 		(key: SessionKey) => {
-			const head = queue.dequeueDrainCandidate(key, "idle");
+			const head = queue.takeNext(key);
 			if (head === null) return;
 			void sendNow(key, head.text);
 		},
-		[queue.dequeueDrainCandidate, sendNow],
+		[queue.takeNext, sendNow],
 	);
 
 	const handleEvent = useCallback(
@@ -240,11 +240,11 @@ export function App() {
 	}
 
 	const headId = queue.items[0]?.id ?? null;
-	const wouldDrain = status === "idle" && !busy && headId !== null;
-	const blockedId =
-		queue.editingId !== null && queue.editingId === headId && wouldDrain
-			? headId
-			: null;
+	const editingBlocked =
+		queue.editingId !== null &&
+		queue.editingId === headId &&
+		status === "idle" &&
+		!busy;
 
 	useEffect(() => {
 		function onPointerMove(event: MouseEvent) {
@@ -330,7 +330,7 @@ export function App() {
 				approval: false,
 			}));
 		}
-		const current = chats[sessionKeyOf(key)] ?? null;
+		const current = selectedChat(chats, key);
 		if (current?.failed) return;
 		if (current?.start.kind === "replaying") return;
 		maybeDrain(key);
@@ -569,7 +569,7 @@ export function App() {
 											<QueuedBubbleList
 												items={queue.items}
 												editingId={queue.editingId}
-												blockedId={blockedId}
+												editingBlocked={editingBlocked}
 												onEdit={handleQueueEdit}
 												onCommit={handleQueueCommit}
 												onCancel={handleQueueCancel}
