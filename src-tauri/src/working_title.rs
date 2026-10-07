@@ -4,10 +4,6 @@
 // No stopword lists, no stemmers, no spellcheck dictionaries by design;
 // typos are frequency-1 noise and cannot outscore real content.
 // Pure functions only, no I/O.
-// Step 3 wires `extract_working_title` into the plan lifecycle; until
-// then the module is test-only.
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 
 /// Max title length in chars. Truncation lands on a word boundary.

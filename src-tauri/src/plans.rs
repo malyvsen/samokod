@@ -86,6 +86,11 @@ pub struct PlanState {
     pub landing: Option<String>,
     #[serde(default)]
     pub entered_at: Option<i64>,
+    /// Working title derived from the first scoping prompt. Set once,
+    /// travels with renames inside `state.json`, and loses to the
+    /// `plan.md` heading once written.
+    #[serde(default)]
+    pub working_title: Option<String>,
 }
 
 impl PlanState {
@@ -375,13 +380,6 @@ pub fn roles_for(repo_root: &Path, plan: &PlanRef) -> Vec<SessionRole> {
     }
 }
 
-/// Display title: first markdown heading of `plan.md`, `Untitled` without
-/// one. Missing and unreadable files also yield `Untitled`.
-pub fn plan_title(repo_root: &Path, plan: &PlanRef) -> String {
-    let text = std::fs::read_to_string(plan.plan_md(repo_root)).unwrap_or_default();
-    extract_title(&text).unwrap_or_else(|| "Untitled".to_string())
-}
-
 /// Every plan directory across all five phases. Missing phase dirs yield
 /// no rows; callers run `ensure_structure` first on open.
 pub fn scan_plans(repo_root: &Path) -> Vec<PlanRef> {
@@ -591,32 +589,6 @@ mod tests {
     fn extract_title_rejects_hash_without_space() {
         assert_eq!(extract_title("#hashtag\n").as_deref(), None);
         assert_eq!(extract_title("no headings\n").as_deref(), None);
-    }
-
-    #[test]
-    fn title_reads_first_heading() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        ensure_structure(root).expect("ensure");
-        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
-        std::fs::write(scoping.plan_md(root), "intro\n\n# Real title\n").expect("write");
-        assert_eq!(plan_title(root, &scoping), "Real title");
-    }
-
-    #[test]
-    fn title_falls_back_to_untitled() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        ensure_structure(root).expect("ensure");
-        let bare = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
-        assert_eq!(plan_title(root, &bare), "Untitled");
-        std::fs::write(bare.plan_md(root), "no heading here\n").expect("write");
-        assert_eq!(plan_title(root, &bare), "Untitled");
-        let missing = PlanRef {
-            name: "gone".to_string(),
-            phase: Phase::Scoping,
-        };
-        assert_eq!(plan_title(root, &missing), "Untitled");
     }
 
     #[test]

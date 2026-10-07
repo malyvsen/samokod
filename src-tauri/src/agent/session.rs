@@ -589,6 +589,7 @@ impl AgentManager {
                 state.current = None;
                 state.awake = None;
                 state.pending_scoping = None;
+                state.pending_titles.clear();
                 state.worktrees.clear();
                 state.history_loading.clear();
                 state.history_loaded.clear();

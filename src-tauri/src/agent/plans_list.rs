@@ -26,6 +26,7 @@ impl AgentManager {
             &repo_root,
             &state.sessions,
             state.pending_scoping.as_deref(),
+            &state.pending_titles,
             &state.worktrees,
             &state.checkout_branch,
         );
@@ -55,6 +56,7 @@ impl AgentManager {
             &repo_root,
             &state.sessions,
             state.pending_scoping.as_deref(),
+            &state.pending_titles,
             &state.worktrees,
             &state.checkout_branch,
         );
@@ -124,6 +126,7 @@ pub(crate) fn sorted_entries(
     repo_root: &Path,
     sessions: &HashMap<SessionKey, LiveSession>,
     pending: Option<&str>,
+    pending_titles: &HashMap<String, String>,
     worktrees: &HashMap<String, crate::worktrees::WorktreeRecord>,
     target_branch: &str,
 ) -> Vec<PlanEntry> {
@@ -152,12 +155,35 @@ pub(crate) fn sorted_entries(
         .map(|plan| PlanEntry {
             name: plan.name.clone(),
             phase: plan.phase,
-            title: plans::plan_title(repo_root, plan),
+            title: entry_title(repo_root, plan, pending_titles),
             has_plan_md: plan.has_plan_md(repo_root),
             sessions: session_statuses(repo_root, plan, sessions),
             worktree: worktree_status(repo_root, worktrees, target_branch, plan),
         })
         .collect()
+}
+
+/// Display title: `plan.md` heading first, else stored working title
+/// (disk or pending map), else `Untitled`. Pure except the reads.
+fn entry_title(
+    repo_root: &Path,
+    plan: &plans::PlanRef,
+    pending_titles: &HashMap<String, String>,
+) -> String {
+    let text = std::fs::read_to_string(plan.plan_md(repo_root)).unwrap_or_default();
+    if let Some(heading) = plans::extract_title(&text) {
+        return heading;
+    }
+    if plan.path(repo_root).is_dir() {
+        let stored = plans::load_state(&plan.path(repo_root));
+        if let Some(title) = stored.working_title {
+            return title;
+        }
+    }
+    if let Some(title) = pending_titles.get(&plan.name) {
+        return title.clone();
+    }
+    "Untitled".to_string()
 }
 
 /// One status row per session a plan owns, from `roles_for`: scoping
@@ -284,6 +310,7 @@ pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
                 &repo_root,
                 &guard.sessions,
                 guard.pending_scoping.as_deref(),
+                &guard.pending_titles,
                 &guard.worktrees,
                 &guard.checkout_branch,
             );
@@ -327,5 +354,54 @@ mod tests {
                 effort: Some("high".to_string()),
             }
         );
+    }
+
+    #[test]
+    fn heading_beats_working_title_beats_untitled() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let empty = HashMap::new();
+        let bare = plans::materialize_scoping(root, "2026-09-26.08-41-03").expect("bare");
+        assert_eq!(entry_title(root, &bare, &empty), "Untitled");
+        let mut stored = plans::load_state(&bare.path(root));
+        stored.working_title = Some("Login flow fixes".to_string());
+        plans::store_state(&bare.path(root), &stored);
+        assert_eq!(entry_title(root, &bare, &empty), "Login flow fixes");
+        std::fs::write(bare.plan_md(root), "# Real heading\n").expect("write");
+        assert_eq!(entry_title(root, &bare, &empty), "Real heading");
+    }
+
+    #[test]
+    fn pending_title_shows_until_materialized() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let pending = plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Scoping,
+        };
+        let empty = HashMap::new();
+        assert_eq!(entry_title(root, &pending, &empty), "Untitled");
+        let titled = HashMap::from([(name.to_string(), "Login flow fixes".to_string())]);
+        assert_eq!(entry_title(root, &pending, &titled), "Login flow fixes");
+    }
+
+    #[test]
+    fn working_title_travels_through_rename() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let scoping = plans::materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
+        let mut stored = plans::load_state(&scoping.path(root));
+        stored.working_title = Some("Login flow fixes".to_string());
+        plans::store_state(&scoping.path(root), &stored);
+        std::fs::write(scoping.plan_md(root), "# Real heading\n").expect("write");
+        let executing = plans::execute(root, &scoping).expect("execute");
+        let kept = plans::load_state(&executing.path(root));
+        assert_eq!(kept.working_title.as_deref(), Some("Login flow fixes"));
+        let empty = HashMap::new();
+        assert_eq!(entry_title(root, &executing, &empty), "Real heading");
     }
 }

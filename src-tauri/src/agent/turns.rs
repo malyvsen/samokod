@@ -49,6 +49,9 @@ impl AgentManager {
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "open a repository first".to_string(),
                 })?;
+            // Working title from pure user text before the server prefix.
+            // Set-once; headings win; empty stays `Untitled`.
+            store_working_title(&self.state, &repo_root, &session.plan, &text);
             let pending_match = match self.state.lock() {
                 Ok(state) => state.pending_scoping.as_deref() == Some(session.plan.as_str()),
                 Err(error) => {
@@ -58,6 +61,7 @@ impl AgentManager {
             };
             if pending_match {
                 plans::materialize_scoping(&repo_root, &session.plan)?;
+                carry_pending_title(&self.state, &repo_root, &session.plan);
                 match self.state.lock() {
                     Ok(mut state) => {
                         if state.pending_scoping.as_deref() == Some(session.plan.as_str()) {
@@ -419,6 +423,76 @@ pub(crate) fn handle_notification(
     }
 }
 
+/// Store a working title from pure scoping user text. Set-once: skips
+/// when a `plan.md` heading exists or a title is already stored (disk or
+/// pending map). Stores to disk when materialized, to the pending map
+/// otherwise. Empty prompts stay `Untitled` via extractor `None`.
+fn store_working_title(
+    state: &Mutex<State>,
+    repo_root: &std::path::Path,
+    plan_name: &str,
+    user_text: &str,
+) {
+    let plan_ref = plans::PlanRef {
+        name: plan_name.to_string(),
+        phase: plans::Phase::Scoping,
+    };
+    if plan_ref.has_plan_md(repo_root) {
+        let text = std::fs::read_to_string(plan_ref.plan_md(repo_root)).unwrap_or_default();
+        if plans::extract_title(&text).is_some() {
+            return;
+        }
+    }
+    if plan_ref.path(repo_root).is_dir() {
+        let stored = plans::load_state(&plan_ref.path(repo_root));
+        if stored.working_title.is_some() {
+            return;
+        }
+    }
+    if lock_state(state)
+        .map(|guard| guard.pending_titles.contains_key(plan_name))
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let Some(title) = crate::working_title::extract_working_title(user_text) else {
+        return;
+    };
+    if plan_ref.path(repo_root).is_dir() {
+        let mut stored = plans::load_state(&plan_ref.path(repo_root));
+        if stored.working_title.is_none() {
+            stored.working_title = Some(title);
+            plans::store_state(&plan_ref.path(repo_root), &stored);
+        }
+    } else if let Some(mut guard) = lock_state(state) {
+        guard.pending_titles.insert(plan_name.to_string(), title);
+    }
+}
+
+/// Move a pending working title into `state.json` at materialize time.
+/// Set-once: never overwrites a disk title.
+fn carry_pending_title(state: &Mutex<State>, repo_root: &std::path::Path, plan_name: &str) {
+    let title = lock_state(state).and_then(|mut guard| guard.pending_titles.remove(plan_name));
+    let Some(title) = title else {
+        return;
+    };
+    let plan_ref = plans::PlanRef {
+        name: plan_name.to_string(),
+        phase: plans::Phase::Scoping,
+    };
+    if !plan_ref.path(repo_root).is_dir() {
+        if let Some(mut guard) = lock_state(state) {
+            guard.pending_titles.insert(plan_name.to_string(), title);
+        }
+        return;
+    }
+    let mut stored = plans::load_state(&plan_ref.path(repo_root));
+    if stored.working_title.is_none() {
+        stored.working_title = Some(title);
+        plans::store_state(&plan_ref.path(repo_root), &stored);
+    }
+}
+
 /// Scoping template for the first message of one ACP conversation.
 /// Pure. Uses the repo-relative display path since scoping runs with cwd
 /// at the repo root.
@@ -546,5 +620,97 @@ mod tests {
         let template = opencode::scoping_draft(display);
         assert!(split_scoping_replay(&template, "edited template text").is_none());
         assert!(split_scoping_replay(&template, &template).is_none());
+    }
+
+    #[test]
+    fn working_title_set_once_across_two_prompts() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        plans::materialize_scoping(root, name).expect("materialize");
+        let state = Mutex::new(State::default());
+        let first = "Fix the login flow login errors on login retry.";
+        store_working_title(&state, root, name, first);
+        let stored = plans::load_state(
+            &plans::PlanRef {
+                name: name.to_string(),
+                phase: plans::Phase::Scoping,
+            }
+            .path(root),
+        );
+        let title = stored.working_title.clone().expect("title stored");
+        assert!(title.to_lowercase().contains("login"));
+        let second = "Fix the checkout flow checkout errors on checkout retry.";
+        store_working_title(&state, root, name, second);
+        let kept = plans::load_state(
+            &plans::PlanRef {
+                name: name.to_string(),
+                phase: plans::Phase::Scoping,
+            }
+            .path(root),
+        );
+        assert_eq!(kept.working_title, Some(title));
+    }
+
+    #[test]
+    fn working_title_pending_carries_to_disk_on_first_send() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let state = Mutex::new(State::default());
+        let text = "Fix the login flow login errors on login retry.";
+        store_working_title(&state, root, name, text);
+        assert!(
+            state
+                .lock()
+                .expect("state")
+                .pending_titles
+                .contains_key(name)
+        );
+        plans::materialize_scoping(root, name).expect("materialize");
+        carry_pending_title(&state, root, name);
+        assert!(
+            !state
+                .lock()
+                .expect("state")
+                .pending_titles
+                .contains_key(name)
+        );
+        let stored = plans::load_state(
+            &plans::PlanRef {
+                name: name.to_string(),
+                phase: plans::Phase::Scoping,
+            }
+            .path(root),
+        );
+        assert!(
+            stored
+                .working_title
+                .as_deref()
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains("login")
+        );
+    }
+
+    #[test]
+    fn empty_first_prompt_stays_untitled() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        plans::materialize_scoping(root, name).expect("materialize");
+        let state = Mutex::new(State::default());
+        store_working_title(&state, root, name, "   \n  ");
+        let stored = plans::load_state(
+            &plans::PlanRef {
+                name: name.to_string(),
+                phase: plans::Phase::Scoping,
+            }
+            .path(root),
+        );
+        assert_eq!(stored.working_title, None);
     }
 }
