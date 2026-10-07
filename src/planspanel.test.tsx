@@ -68,7 +68,7 @@ function sectionHeaders() {
 function sessionRow(buttonName: string) {
 	const row = screen
 		.getByRole("button", { name: buttonName })
-		.closest(".session");
+		.closest(".sbody");
 	if (row === null) throw new Error("row missing");
 	return within(row as HTMLElement);
 }
@@ -621,8 +621,7 @@ describe("plans panel", () => {
 
 	describe("styling", () => {
 		test("session labels render muted", () => {
-			const label =
-				/\.session\s+\.slabel\s*\{[^}]*\}/.exec(appCss())?.[0] ?? "";
+			const label = /\.sbody\s+\.slabel\s*\{[^}]*\}/.exec(appCss())?.[0] ?? "";
 			expect(label).toContain("#9d9a92");
 		});
 
@@ -645,17 +644,105 @@ describe("plans panel", () => {
 		});
 
 		test("the select button fills the whole row", () => {
-			const row = /\.session\s+\.srow\s*\{[^}]*\}/.exec(appCss())?.[0] ?? "";
+			const row = /\.sbody\s+\.srow\s*\{[^}]*\}/.exec(appCss())?.[0] ?? "";
 			expect(row).toContain("align-self: stretch");
 		});
 
-		test("action buttons stay hover-only", () => {
+		test("action buttons stay hover-only on the open row", () => {
 			const css = appCss();
+			expect(css).not.toContain(".session");
 			const hidden = /\.plans\s+\.sbtn\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(hidden).toContain("opacity: 0");
 			const shown =
-				/\.plans\s+\.session:hover\s+\.sbtn[^{]*\{[^}]*\}/.exec(css)?.[0] ?? "";
+				/\.plans\s+\.sbody[^{]*\.sbtn[^{]*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(shown).toContain("opacity: 1");
+		});
+
+		test("the tree uses a dim spine without TODOS green", () => {
+			const css = appCss();
+			expect(css).toContain("rgba(255, 255, 255, 0.22)");
+			const tree = /\.plan-group\.tree\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(tree).toContain("18px");
+			const capped = /\.ngutter\.last\s+\.v\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(capped).toContain("50%");
+			const single = /\.ngutter\.single\s+\.v\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(single).toContain("50%");
+		});
+	});
+
+	describe("tree", () => {
+		test("draws a gutter per session with a capped spine", () => {
+			const plan = executingPlan();
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "executing" })}
+				/>,
+			);
+			const group = planGroup("Shiny, executing, opens Executing");
+			expect(group.querySelectorAll(".ngutter").length).toBe(2);
+			expect(group.querySelectorAll(".mgutter").length).toBe(1);
+			const gutters = group.querySelectorAll(".ngutter");
+			expect(gutters.item(0)?.className).not.toContain("last");
+			expect(gutters.item(1)?.className).toContain("last");
+		});
+
+		test("caps a single session spine", () => {
+			const plan = scopingPlan();
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "scoping" })}
+				/>,
+			);
+			const group = planGroup("Parallel sessions, scoping, opens Scoping");
+			expect(group.querySelectorAll(".ngutter").length).toBe(1);
+			expect(group.querySelector(".ngutter.single")).not.toBeNull();
+		});
+
+		test("colors the open path when the open session causes it", () => {
+			const plan = testEntryWith("idle", "scoping", "Idle", true, [
+				testStatus("scoping"),
+			]);
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: "idle", role: "scoping" })}
+				/>,
+			);
+			const group = planGroup("Idle, scoping, opens Scoping");
+			expect(group.querySelector(".mgutter .v.c-idle")).not.toBeNull();
+			expect(group.querySelector(".ngutter .v.c-idle")).not.toBeNull();
+			expect(group.querySelector(".ngutter .nd.c-idle")).not.toBeNull();
+		});
+
+		test("keeps the open path white when another session causes it", () => {
+			const plan = testEntryWith("broke", "executing", "Broke", true, [
+				testStatus("scoping"),
+				testStatus("executing", { failed: true }),
+			]);
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: "broke", role: "scoping" })}
+				/>,
+			);
+			const group = planGroup("Broke, executing, opens Executing");
+			expect(group.querySelector(".mk-failed")).not.toBeNull();
+			expect(group.querySelector(".mgutter .v.c-sel")).not.toBeNull();
+			expect(group.querySelector(".ngutter .nd.sel")).not.toBeNull();
+			expect(group.querySelector(".ngutter .nd.c-failed")).toBeNull();
+		});
+
+		test("keeps the open path white for quiet plans with a white marker", () => {
+			const plan = testEntryWith("run", "scoping", "Run", true, [
+				testStatus("scoping", { working: true }),
+			]);
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: "run", role: "scoping" })}
+				/>,
+			);
+			const group = planGroup("Run, scoping, opens Scoping");
+			expect(group.querySelector(".mk-sel")).not.toBeNull();
+			expect(group.querySelector(".mgutter .v.c-sel")).not.toBeNull();
+			expect(group.querySelector(".ngutter .nd.sel")).not.toBeNull();
 		});
 	});
 });

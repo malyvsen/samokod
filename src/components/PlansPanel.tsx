@@ -4,6 +4,7 @@ import {
 	attentionFor,
 	attentionTitle,
 	headerKey,
+	openPathFor,
 	PHASES,
 	roleLabel,
 } from "./plans/planDisplay";
@@ -80,14 +81,34 @@ function PlanGroup({
 }) {
 	const target = headerKey(plan);
 	const attention = attentionFor(plan);
+	const openRole = selected?.plan === plan.name ? selected.role : null;
+	const openPath = openRole === null ? "neutral" : openPathFor(plan, openRole);
+	const openIdx =
+		openRole === null
+			? -1
+			: plan.sessions.findIndex((status) => status.role === openRole);
 	const markerClass =
 		attention === null
 			? expanded
 				? "mk mk-sel"
 				: "mk mk-none"
 			: `mk mk-${attention}`;
+	const pathKey = openPath === "neutral" ? "sel" : openPath;
 	return (
-		<div className="plan-group">
+		<div className="plan-group tree">
+			<span className="mgutter">
+				{expanded ? (
+					<i
+						className={`v${openIdx >= 0 ? ` c-${pathKey}` : ""}`}
+						aria-hidden="true"
+					/>
+				) : null}
+				<span
+					className={markerClass}
+					title={attention === null ? undefined : attentionTitle(attention)}
+					aria-hidden="true"
+				/>
+			</span>
 			<button
 				className="plan-name"
 				type="button"
@@ -96,18 +117,13 @@ function PlanGroup({
 				data-full={plan.title}
 			>
 				<span
-					className={markerClass}
-					title={attention === null ? undefined : attentionTitle(attention)}
-					aria-hidden="true"
-				/>
-				<span
 					className={`ptitle${attention === null ? "" : ` gleam-${attention}`}`}
 				>
 					{plan.title}
 				</span>
 			</button>
 			{expanded
-				? plan.sessions.map((status) => (
+				? plan.sessions.map((status, index) => (
 						<SessionRow
 							key={status.role}
 							planName={plan.name}
@@ -116,7 +132,11 @@ function PlanGroup({
 							hasPlanMd={plan.has_plan_md}
 							worktree={plan.worktree}
 							status={status}
-							selected={selected}
+							openPath={openPath}
+							isOpen={index === openIdx}
+							isBeforeOpen={openIdx >= 0 && index < openIdx}
+							isLast={index === plan.sessions.length - 1}
+							isSingle={plan.sessions.length === 1}
 							onSelect={onSelect}
 							onExecute={onExecute}
 							onCancel={onCancel}

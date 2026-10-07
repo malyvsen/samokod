@@ -976,6 +976,12 @@ body {
 	margin-bottom: 10px;
 }
 
+.plan-group.tree {
+	display: grid;
+	grid-template-columns: 18px minmax(0, 1fr);
+	align-items: stretch;
+}
+
 .sect-head {
 	font-size: 11px;
 	letter-spacing: 0.14em;
@@ -1015,12 +1021,6 @@ body {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-}
-
-.plan-name .mk {
-	width: 8px;
-	height: 8px;
-	flex: none;
 }
 
 .mk-idle {
@@ -1109,26 +1109,87 @@ body {
 	z-index: 10;
 }
 
-.session {
+.mgutter {
+	position: relative;
+}
+
+.mgutter .mk {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	width: 8px;
+	height: 8px;
+}
+
+.mgutter .v {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	bottom: -1px;
+	width: 1px;
+	margin-left: -0.5px;
+	background: rgba(255, 255, 255, 0.22);
+}
+
+.ngutter {
+	position: relative;
+}
+
+.ngutter .v {
+	position: absolute;
+	left: 50%;
+	top: -1px;
+	bottom: 0;
+	width: 1px;
+	margin-left: -0.5px;
+	background: rgba(255, 255, 255, 0.22);
+}
+
+.ngutter.last .v {
+	bottom: 50%;
+}
+
+.ngutter.single .v {
+	top: -1px;
+	bottom: 50%;
+}
+
+.ngutter .h {
+	position: absolute;
+	left: 50%;
+	right: 0;
+	top: 50%;
+	height: 1px;
+	margin-top: -0.5px;
+	background: rgba(255, 255, 255, 0.22);
+}
+
+.ngutter .nd {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: 5px;
+	height: 5px;
+	transform: translate(-50%, -50%);
+	background: #050508;
+	border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.sbody {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	padding: 0 4px 0 0;
+	min-width: 0;
+	padding: 2px 4px 2px 0;
 	font-size: 12px;
-	cursor: pointer;
-	border: 1px solid transparent;
 }
 
-.session:hover {
+.sbody:hover {
 	background: rgba(255, 255, 255, 0.04);
 }
 
-.session.selected {
-	border-color: rgba(255, 255, 255, 0.25);
-	background: rgba(255, 255, 255, 0.06);
-}
-
-.session .srow {
+.sbody .srow {
 	flex: 1;
 	min-width: 0;
 	display: flex;
@@ -1144,7 +1205,7 @@ body {
 	text-align: left;
 }
 
-.session .slabel {
+.sbody .slabel {
 	flex: 1;
 	min-width: 0;
 	white-space: nowrap;
@@ -1153,6 +1214,113 @@ body {
 	color: #9d9a92;
 }
 
+.ngutter .h.sel {
+	background: #fff;
+	box-shadow: 0 0 8px rgba(255, 255, 255, 0.55);
+}
+
+.ngutter .nd.sel {
+	background: #fff;
+	border-color: #fff;
+	box-shadow: 0 0 8px rgba(255, 255, 255, 0.7);
+}
+
+.ngutter .h.c-idle {
+	background: #57c8ff;
+	box-shadow: 0 0 8px rgba(87, 200, 255, 0.8);
+}
+
+.ngutter .nd.c-idle {
+	background: #57c8ff;
+	border-color: #57c8ff;
+	box-shadow: 0 0 8px rgba(87, 200, 255, 0.9);
+}
+
+.ngutter .h.c-approval {
+	background: #ffd98a;
+	box-shadow: 0 0 8px rgba(255, 217, 138, 0.8);
+}
+
+.ngutter .nd.c-approval {
+	background: #ffd98a;
+	border-color: #ffd98a;
+	box-shadow: 0 0 8px rgba(255, 217, 138, 0.9);
+}
+
+.ngutter .h.c-failed {
+	background: #ff6b6b;
+	box-shadow: 0 0 8px rgba(255, 107, 107, 0.8);
+}
+
+.ngutter .nd.c-failed {
+	background: #ff6b6b;
+	border-color: #ff6b6b;
+	box-shadow: 0 0 8px rgba(255, 107, 107, 0.9);
+}
+
+.mgutter .v.c-sel,
+.ngutter .v.c-sel {
+	background: #fff;
+	box-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
+}
+
+.ngutter .v.u-sel {
+	background: linear-gradient(
+		to bottom,
+		#fff 0 50%,
+		rgba(255, 255, 255, 0.22) 50% 100%
+	);
+}
+
+.mgutter .v.c-idle,
+.ngutter .v.c-idle {
+	background: #57c8ff;
+	box-shadow: 0 0 8px rgba(87, 200, 255, 0.7);
+}
+
+.ngutter .v.u-idle {
+	background: linear-gradient(
+		to bottom,
+		#57c8ff 0 50%,
+		rgba(255, 255, 255, 0.22) 50% 100%
+	);
+}
+
+.mgutter .v.c-approval,
+.ngutter .v.c-approval {
+	background: #ffd98a;
+	box-shadow: 0 0 8px rgba(255, 217, 138, 0.7);
+}
+
+.ngutter .v.u-approval {
+	background: linear-gradient(
+		to bottom,
+		#ffd98a 0 50%,
+		rgba(255, 255, 255, 0.22) 50% 100%
+	);
+}
+
+.mgutter .v.c-failed,
+.ngutter .v.c-failed {
+	background: #ff6b6b;
+	box-shadow: 0 0 8px rgba(255, 107, 107, 0.7);
+}
+
+.ngutter .v.u-failed {
+	background: linear-gradient(
+		to bottom,
+		#ff6b6b 0 50%,
+		rgba(255, 255, 255, 0.22) 50% 100%
+	);
+}
+
+.plans .sbody:hover .sbtn,
+.plans .sbody.selected .sbtn,
+.plans .sbody:focus-within .sbtn {
+	opacity: 1;
+}
+
+/* biome-ignore lint/style/noDescendingSpecificity: sbtn layout sits below tree visibility opacity in disjoint properties, order is irrelevant */
 .sbtn {
 	flex: none;
 	width: 24px;
@@ -1190,14 +1358,9 @@ body {
 	cursor: default;
 }
 
+/* biome-ignore lint/style/noDescendingSpecificity: hidden opacity is overridden by higher-specificity tree visibility regardless of order */
 .plans .sbtn {
 	opacity: 0;
-}
-
-.plans .session:hover .sbtn,
-.plans .session.selected .sbtn,
-.plans .session:focus-within .sbtn {
-	opacity: 1;
 }
 
 .chatcol {

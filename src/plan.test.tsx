@@ -139,7 +139,7 @@ describe("plan", () => {
 		const executing = screen.getByRole("button", {
 			name: "Shiny Executing",
 		});
-		const row = executing.closest(".session");
+		const row = executing.closest(".sbody");
 		if (row === null) throw new Error("executing row missing");
 		await within(row as HTMLElement)
 			.findByRole("button", {
@@ -166,7 +166,7 @@ describe("plan", () => {
 		const scoping = screen.getByRole("button", {
 			name: "Parallel sessions Scoping",
 		});
-		const row = scoping.closest(".session");
+		const row = scoping.closest(".sbody");
 		if (row === null) throw new Error("scoping row missing");
 		const button = await within(row as HTMLElement).findByRole("button", {
 			name: "Cancel 2026-09-25.10-54-59",
@@ -191,7 +191,7 @@ describe("plan", () => {
 		const scoping = screen.getByRole("button", {
 			name: "Parallel sessions Scoping",
 		});
-		const row = scoping.closest(".session");
+		const row = scoping.closest(".sbody");
 		if (row === null) throw new Error("scoping row missing");
 		const button = await within(row as HTMLElement).findByRole("button", {
 			name: "Cancel 2026-09-25.10-54-59",
