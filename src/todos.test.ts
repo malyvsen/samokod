@@ -3,7 +3,7 @@ import { doneCount, todoMark, todoRowClass } from "./todos";
 import type { TodoStatus, TodoView } from "./types";
 
 function todo(status: TodoStatus): TodoView {
-	return { content: status, status, priority: "high" };
+	return { content: status, status };
 }
 
 describe("todo views", () => {

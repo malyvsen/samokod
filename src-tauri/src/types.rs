@@ -303,7 +303,6 @@ pub enum AppEvent {
 pub struct TodoView {
     pub content: String,
     pub status: TodoStatus,
-    pub priority: String,
 }
 
 /// Changed rows since the previous list: added rows plus status changes.

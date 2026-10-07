@@ -5,9 +5,9 @@ import { toSelectorModel } from "./components/selectors";
 import type { ConfigOptionView, SpendView, TodoView } from "./types";
 
 const TODOS: TodoView[] = [
-	{ content: "Add retry", status: "completed", priority: "high" },
-	{ content: "Wire view", status: "in_progress", priority: "high" },
-	{ content: "Verify green", status: "pending", priority: "med" },
+	{ content: "Add retry", status: "completed" },
+	{ content: "Wire view", status: "in_progress" },
+	{ content: "Verify green", status: "pending" },
 ];
 
 const SPEND_A: SpendView = {

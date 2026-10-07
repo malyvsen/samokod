@@ -1304,16 +1304,6 @@ body {
 	color: #8f8c85;
 }
 
-.side .row .prio {
-	flex: none;
-	font-size: 10px;
-	color: #8f8c85;
-	border: 1px solid rgba(255, 255, 255, 0.2);
-	padding: 0 4px;
-	margin-left: 8px;
-	align-self: center;
-}
-
 .side .row[data-full]:hover::after {
 	content: attr(data-full);
 	position: absolute;

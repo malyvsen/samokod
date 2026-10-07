@@ -33,7 +33,6 @@ fn parse_todos(payload: &serde_json::Value) -> Option<Vec<TodoView>> {
                 Some(TodoView {
                     content: item.get("content")?.as_str()?.to_string(),
                     status: parse_status(item.get("status")?.as_str()?)?,
-                    priority: item.get("priority")?.as_str()?.to_string(),
                 })
             })
             .collect(),
@@ -74,22 +73,21 @@ mod tests {
         TodoView {
             content: content.to_string(),
             status,
-            priority: "high".to_string(),
         }
     }
 
     fn todo_items() -> serde_json::Value {
         json!([
-            {"content": "a", "status": "pending", "priority": "medium"},
-            {"content": "b", "status": "pending", "priority": "medium"},
+            {"content": "a", "status": "pending"},
+            {"content": "b", "status": "pending"},
         ])
     }
 
     #[test]
     fn parses_call_input_shape() {
         let payload = json!({"todos": [
-            {"content": "a", "status": "pending", "priority": "high"},
-            {"content": "b", "status": "in_progress", "priority": "low"},
+            {"content": "a", "status": "pending"},
+            {"content": "b", "status": "in_progress"},
         ]});
         let todos = parse_todos(&payload).expect("todos key present");
         assert_eq!(todos.len(), 2);
@@ -99,7 +97,7 @@ mod tests {
     #[test]
     fn parses_completed_output_shape() {
         let payload = json!({"output": "…", "metadata": {"todos": [
-            {"content": "a", "status": "completed", "priority": "high"},
+            {"content": "a", "status": "completed"},
         ], "truncated": false}});
         let todos = parse_todos(&payload).expect("metadata.todos present");
         assert_eq!(todos, vec![todo("a", TodoStatus::Completed)]);
@@ -119,18 +117,19 @@ mod tests {
     #[test]
     fn skips_rows_with_missing_fields() {
         let payload = json!({"todos": [
-            {"content": "a", "status": "pending"},
-            {"content": "b", "status": "pending", "priority": "low"},
+            {"content": "a"},
+            {"content": "b", "status": "pending"},
         ]});
         let todos = parse_todos(&payload).expect("todos key present");
         assert_eq!(todos.len(), 1);
+        assert_eq!(todos[0].content, "b");
     }
 
     #[test]
     fn skips_rows_with_unknown_status() {
         let payload = json!({"todos": [
-            {"content": "a", "status": "cancelled", "priority": "high"},
-            {"content": "b", "status": "pending", "priority": "low"},
+            {"content": "a", "status": "cancelled"},
+            {"content": "b", "status": "pending"},
         ]});
         let todos = parse_todos(&payload).expect("todos key present");
         assert_eq!(todos.len(), 1);
@@ -154,7 +153,7 @@ mod tests {
 
     #[test]
     fn update_prefers_output_over_input() {
-        let input = json!({"todos": [{"content": "a", "status": "pending", "priority": "high"}]});
+        let input = json!({"todos": [{"content": "a", "status": "pending"}]});
         let output =
             json!({"output": "…", "metadata": {"todos": todo_items(), "truncated": false}});
         let fresh = todos_from_update(Some(&input), Some(&output)).expect("output carries todos");

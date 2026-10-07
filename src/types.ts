@@ -134,7 +134,6 @@ export type TodoStatus = "pending" | "in_progress" | "completed";
 export interface TodoView {
 	content: string;
 	status: TodoStatus;
-	priority: string;
 }
 
 interface TodoChangeView {

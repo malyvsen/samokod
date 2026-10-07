@@ -142,7 +142,6 @@ function TodoList({ todos, done }: { todos: TodoView[]; done: number }) {
 					>
 						<span className="mark">[{todoMark(todo.status)}]</span>
 						<span className="txt">{todo.content}</span>
-						<span className="prio">{todo.priority}</span>
 					</div>
 				))
 			)}

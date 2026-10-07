@@ -259,7 +259,7 @@ describe("plan", () => {
 		emit({
 			type: "todos_changed",
 			session: bbb,
-			todos: [{ content: "Beta todo", status: "pending", priority: "high" }],
+			todos: [{ content: "Beta todo", status: "pending" }],
 			changes: [],
 		});
 		emit({ type: "spend_tick", session: bbb, cost: 1.5, ctx_pct: 10 });
