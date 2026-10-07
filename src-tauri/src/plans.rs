@@ -880,4 +880,24 @@ mod tests {
         };
         assert_eq!(arrival_ms(root, &missing), None);
     }
+
+    #[test]
+    fn state_without_working_title_defaults_to_none() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let plan = PlanRef {
+            name: "2026-09-26.08-41-03".to_string(),
+            phase: Phase::Scoping,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        std::fs::write(
+            plan.path(root).join(STATE_FILE),
+            r#"{"scoping":"ses_old","entered_at":123}"#,
+        )
+        .expect("write old state");
+        let state = load_state(&plan.path(root));
+        assert_eq!(state.session(SessionRole::Scoping), Some("ses_old"));
+        assert_eq!(state.working_title, None);
+    }
 }
