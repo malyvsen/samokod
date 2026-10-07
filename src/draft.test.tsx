@@ -9,6 +9,7 @@ import {
 	testKey,
 	testStatus,
 } from "./fixtures";
+import { clearPreviewCache } from "./sessions/preview";
 import type { AppEvent, PlanEntry, SessionKey } from "./types";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
@@ -43,6 +44,8 @@ function emit(event: AppEvent) {
 }
 
 beforeEach(() => {
+	vi.clearAllMocks();
+	clearPreviewCache();
 	Object.defineProperty(window, "matchMedia", {
 		configurable: true,
 		writable: true,
@@ -95,25 +98,96 @@ describe("draft bubble in chat", () => {
 		expect(area.textContent).toBe("");
 	});
 
-	test("live send shows template and user bubbles and sends pure text", async () => {
+	test("fresh scoping session previews its template above the draft", async () => {
+		api.scopingTemplate.mockResolvedValue("TEMPLATE");
+		await openChat();
+		await screen.findByText("TEMPLATE");
+		const box = screen.getByRole("textbox", { name: "Ask for a change…" });
+		expect(box).toBeInTheDocument();
+		const leads = document.querySelectorAll(".msg.user:not(.draft)");
+		expect(leads).toHaveLength(1);
+		expect(leads[0]?.textContent).toContain("TEMPLATE");
+		const lead = screen.getByText("TEMPLATE").closest(".msg.user");
+		const draft = box.closest(".msg.user");
+		if (lead === null || draft === null) throw new Error("bubbles missing");
+		expect(
+			lead.compareDocumentPosition(draft) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
+
+	test("send with preview appends only the user bubble and sends pure text", async () => {
 		api.scopingTemplate.mockResolvedValue("TEMPLATE");
 		const user = await openChat();
-		await screen.findByRole("textbox", { name: "Ask for a change…" });
-		await user.keyboard("hello{Enter}");
-		expect(api.scopingTemplate).toHaveBeenCalledWith(testKey());
-		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello");
 		await screen.findByText("TEMPLATE");
+		await user.keyboard("hello{Enter}");
+		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello");
 		await screen.findByText("hello");
+		const bubbles = document.querySelectorAll(".msg.user:not(.draft)");
+		expect(bubbles).toHaveLength(2);
+		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
+		expect(bubbles[1]?.textContent).toContain("hello");
+		expect(api.scopingTemplate).toHaveBeenCalledTimes(1);
 	});
 
 	test("live send falls back to one bubble when template fetch fails", async () => {
 		api.scopingTemplate.mockRejectedValue(new Error("boom"));
 		const user = await openChat();
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
+		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
 		await user.keyboard("hello{Enter}");
 		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello");
 		await screen.findByText("hello");
 		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
+		const bubbles = document.querySelectorAll(".msg.user:not(.draft)");
+		expect(bubbles).toHaveLength(1);
+		expect(bubbles[0]?.textContent).toContain("hello");
+	});
+
+	test("previews stay per-session across switches", async () => {
+		const first = testEntryWith("aaa", "scoping", "First", false, [
+			testStatus("scoping"),
+		]);
+		const second = testEntryWith("bbb", "scoping", "Second", false, [
+			testStatus("scoping"),
+		]);
+		const plans = [first, second];
+		api.scopingTemplate.mockImplementation(async (session: SessionKey) =>
+			session.plan === "aaa" ? "AAA-TEMPLATE" : "BBB-TEMPLATE",
+		);
+		api.selectPlan.mockImplementation(async (session: SessionKey) => ({
+			plans,
+			selected: session,
+			config_defaults: testDefaults(),
+		}));
+		const user = await openChat(plans, { plan: "aaa", role: "scoping" });
+		await screen.findByText("AAA-TEMPLATE");
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Second, scoping, opens Scoping",
+			}),
+		);
+		await screen.findByText("BBB-TEMPLATE");
+		expect(screen.queryByText("AAA-TEMPLATE")).not.toBeInTheDocument();
+		await user.click(
+			await screen.findByRole("button", {
+				name: "First, scoping, opens Scoping",
+			}),
+		);
+		await screen.findByText("AAA-TEMPLATE");
+		expect(screen.queryByText("BBB-TEMPLATE")).not.toBeInTheDocument();
+	});
+
+	test("replayed template never duplicates the preview", async () => {
+		api.scopingTemplate.mockResolvedValue(null);
+		await openChat();
+		emit({ type: "history_preparing", session: testKey() });
+		emit({ type: "history_begin", session: testKey() });
+		emit({ type: "user_text", session: testKey(), chunk: "TEMPLATE" });
+		emit({ type: "user_text", session: testKey(), chunk: "hello" });
+		emit({ type: "history_done", session: testKey() });
+		await screen.findByText("hello");
+		expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);
+		expect(screen.getAllByText("hello")).toHaveLength(1);
 	});
 
 	test("preserves per-session user drafts across switches", async () => {
@@ -147,7 +221,7 @@ describe("draft bubble in chat", () => {
 		expect(await screen.findByRole("textbox")).toHaveTextContent("hello");
 	});
 
-	test("execute sends hidden role without a prompt", async () => {
+	test("execute shows the live first prompt without sending", async () => {
 		const entry = testEntryWith("aaa", "scoping", "First", true, [
 			testStatus("scoping"),
 		]);
@@ -167,6 +241,12 @@ describe("draft bubble in chat", () => {
 			role: "scoping",
 		});
 		expect(api.sendPrompt).not.toHaveBeenCalled();
+		emit({
+			type: "user_text",
+			session: { plan: "aaa", role: "executing" },
+			chunk: "EXECUTING-PROMPT",
+		});
+		await screen.findByText("EXECUTING-PROMPT");
 	});
 
 	test("hides while working and returns on turn done", async () => {

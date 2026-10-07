@@ -17,6 +17,7 @@ function assertNever(value: never): never {
 
 export function Transcript({
 	items,
+	lead = null,
 	start,
 	repoLabel,
 	onRetry,
@@ -25,6 +26,7 @@ export function Transcript({
 	children,
 }: {
 	items: TranscriptItem[];
+	lead?: string | null;
 	start: SessionStart | null;
 	repoLabel: string;
 	onRetry: (() => void) | null;
@@ -36,6 +38,12 @@ export function Transcript({
 		<>
 			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
 			<div className="tcol">
+				{lead !== null && (
+					<div className="msg user">
+						<div className="who">YOU</div>
+						{lead}
+					</div>
+				)}
 				{items.map((item) => {
 					if (item.kind === "user") {
 						return (

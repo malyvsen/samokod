@@ -14,7 +14,6 @@ import {
 	openRepo,
 	refreshBranch,
 	retryLast,
-	scopingTemplate,
 	selectPlan,
 	sendPrompt,
 	setConfigOption,
@@ -29,6 +28,7 @@ import { toSelectorModel } from "./components/selectors";
 import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
 import { hasUserMessage, useSessionDrafts } from "./sessions/drafts";
+import { previewPromiseFor, useScopingPreview } from "./sessions/preview";
 import { usePinnedTranscript } from "./sessions/scroll";
 import {
 	agentStatusOf,
@@ -103,6 +103,7 @@ export function App() {
 	const entry = selectedEntry(plans, selectedKey);
 	const readOnly = isReadOnly(entry);
 	useSessionStart(selectedKey, chats, readOnly);
+	useScopingPreview(selectedKey, updateChat);
 	const selectors =
 		chat === null
 			? { kind: "pending" as const, defaults: configDefaults }
@@ -239,29 +240,18 @@ export function App() {
 	async function handleSend(text: string) {
 		const key = selectedRef.current;
 		if (text === "" || busy || readOnly || key === null) return;
-		// Scoping renders its template as a separate bubble above the message.
-		let template: string | null = null;
-		if (key.role === "scoping") {
-			try {
-				template = await scopingTemplate(key);
-			} catch (error) {
-				console.warn("scoping_template failed", error);
-				template = null;
-			}
-		}
 		draft.onDraftSent();
-		const bubbles = template === null ? [text] : [template, text];
+		const template = await previewPromiseFor(key);
 		updateChat(key, (chat) => ({
 			...chat,
+			...(template === null ? null : { scopingPreview: template }),
 			transcript: [
 				...chat.transcript,
-				...bubbles.map(
-					(bubble): TranscriptItem => ({
-						kind: "user",
-						id: crypto.randomUUID(),
-						text: bubble,
-					}),
-				),
+				{
+					kind: "user",
+					id: crypto.randomUUID(),
+					text,
+				} satisfies TranscriptItem,
 			],
 		}));
 		await runTurn(key, text);
@@ -523,6 +513,7 @@ export function App() {
 							<div className="transcript" ref={scrollRef} onScroll={onScroll}>
 								<Transcript
 									items={transcript}
+									lead={chat?.scopingPreview ?? null}
 									start={chat?.start ?? null}
 									repoLabel={repoLabel}
 									onRetry={readOnly ? null : handleRetry}

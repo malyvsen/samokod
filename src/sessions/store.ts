@@ -27,6 +27,7 @@ export interface ChatState {
 	approval: boolean;
 	failed: boolean;
 	start: SessionStart;
+	scopingPreview: string | null;
 }
 
 export type Chats = Record<string, ChatState>;
@@ -41,6 +42,7 @@ export function emptyChat(): ChatState {
 		approval: false,
 		failed: false,
 		start: { kind: "idle" },
+		scopingPreview: null,
 	};
 }
 

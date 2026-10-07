@@ -161,6 +161,12 @@ describe("history events", () => {
 	});
 });
 
+describe("scoping preview", () => {
+	test("empty chat starts with no preview", () => {
+		expect(emptyChat().scopingPreview).toBeNull();
+	});
+});
+
 describe("replayed updates", () => {
 	test("user messages stay as separate bubbles without touching working", () => {
 		let chats = eventFor({ type: "history_preparing", session: testKey() });
