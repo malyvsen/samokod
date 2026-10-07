@@ -127,6 +127,18 @@ async fn select_plan(
 }
 
 #[tauri::command]
+async fn set_plan_mode(
+    state: State<'_, AgentManager>,
+    plan: String,
+    manual: bool,
+) -> Result<PlansUpdate, String> {
+    state
+        .set_plan_mode(plan, manual)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn send_prompt(
     state: State<'_, AgentManager>,
     session: SessionKey,
@@ -252,6 +264,7 @@ pub fn run() {
             begin_landing,
             cancel_plan,
             select_plan,
+            set_plan_mode,
             send_prompt,
             scoping_template,
             retry_last,

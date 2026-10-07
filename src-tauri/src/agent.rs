@@ -588,6 +588,30 @@ impl AgentManager {
         Ok(self.plans_update())
     }
 
+    /// Flip one plan between automatic and manual mode. Persists `manual`
+    /// into `state.json` and returns the refreshed list. Never touches live
+    /// sessions: flipping modes never kills a running turn.
+    pub async fn set_plan_mode(
+        &self,
+        plan: String,
+        manual: bool,
+    ) -> Result<PlansUpdate, AgentError> {
+        let (repo_root, _) = self
+            .reopen_snapshot()
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
+        let Some(plan_dir) = session_ids::locate(&repo_root, &plan) else {
+            return Err(AgentError::NoSession {
+                raw: "plan is gone".to_string(),
+            });
+        };
+        let mut state = plans::load_state(&plan_dir);
+        state.manual = manual;
+        plans::store_state(&plan_dir, &state);
+        Ok(self.plans_update())
+    }
+
     /// Select one session, discarding a previously-selected empty scoping
     /// session the same way as cancel. Returns the target selection.
     /// No `ensure_idle` gate: selection is allowed anytime, and an empty

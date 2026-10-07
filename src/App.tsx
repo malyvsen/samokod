@@ -17,6 +17,7 @@ import {
 	selectPlan,
 	sendPrompt,
 	setConfigOption,
+	setPlanMode,
 	validateRepo,
 } from "./api";
 import { reducedMotion, useAuroraMotion } from "./auroraMotion";
@@ -441,6 +442,23 @@ export function App() {
 		}
 	}
 
+	async function handleSetMode(plan: string, manual: boolean) {
+		try {
+			const update = await setPlanMode(plan, manual);
+			applyPlans(update);
+		} catch (error) {
+			const key = selectedRef.current;
+			if (key !== null) {
+				appendError(
+					key,
+					error instanceof Error ? error.message : String(error),
+					"couldn't switch plan mode - try again",
+					false,
+				);
+			}
+		}
+	}
+
 	async function runPlansAction(
 		key: SessionKey,
 		action: (session: SessionKey) => Promise<PlansUpdate>,
@@ -508,6 +526,7 @@ export function App() {
 							onCancel={(key) => void handleCancel(key)}
 							onFinishLanding={(key) => void handleFinishLanding(key)}
 							onBeginLanding={(key) => void handleBeginLanding(key)}
+							onSetMode={(plan, manual) => void handleSetMode(plan, manual)}
 						/>
 						<div className="chatcol">
 							<div className="transcript" ref={scrollRef} onScroll={onScroll}>

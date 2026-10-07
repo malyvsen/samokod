@@ -72,7 +72,7 @@ async function openChat() {
 	const user = userEvent.setup();
 	render(<App />);
 	await user.click(await screen.findByRole("button", { name: "open" }));
-	await screen.findByRole("button", { name: "+ NEW PLAN" });
+	await screen.findByRole("button", { name: "New plan" });
 	return user;
 }
 

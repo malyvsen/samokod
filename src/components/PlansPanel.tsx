@@ -20,6 +20,7 @@ export function PlansPanel({
 	onCancel,
 	onFinishLanding,
 	onBeginLanding,
+	onSetMode,
 }: {
 	plans: PlanEntry[];
 	selected: SessionKey | null;
@@ -29,16 +30,26 @@ export function PlansPanel({
 	onCancel: (session: SessionKey) => void;
 	onFinishLanding: (session: SessionKey) => void;
 	onBeginLanding: (session: SessionKey) => void;
+	onSetMode: (plan: string, manual: boolean) => void;
 }) {
 	const byPhase = groupByPhase(plans);
 	return (
 		<div className="plans">
-			<button className="newplan" type="button" onClick={onNewPlan}>
-				+ NEW PLAN
-			</button>
 			{PHASES.map((phase) => (
 				<Fragment key={phase}>
-					<div className="sect-head">{phase.toUpperCase()}</div>
+					<div className="sect-head">
+						<span>{phase.toUpperCase()}</span>
+						{phase === "scoping" ? (
+							<button
+								className="sbtn new"
+								type="button"
+								aria-label="New plan"
+								onClick={onNewPlan}
+							>
+								+
+							</button>
+						) : null}
+					</div>
 					{(byPhase.get(phase) ?? []).map((plan) => (
 						<PlanGroup
 							key={plan.name}
@@ -49,6 +60,7 @@ export function PlansPanel({
 							onCancel={onCancel}
 							onFinishLanding={onFinishLanding}
 							onBeginLanding={onBeginLanding}
+							onSetMode={onSetMode}
 						/>
 					))}
 				</Fragment>
@@ -65,6 +77,7 @@ function PlanGroup({
 	onCancel,
 	onFinishLanding,
 	onBeginLanding,
+	onSetMode,
 }: {
 	plan: PlanEntry;
 	selected: SessionKey | null;
@@ -73,6 +86,7 @@ function PlanGroup({
 	onCancel: (session: SessionKey) => void;
 	onFinishLanding: (session: SessionKey) => void;
 	onBeginLanding: (session: SessionKey) => void;
+	onSetMode: (plan: string, manual: boolean) => void;
 }) {
 	const target = headerKey(plan);
 	const attention = attentionFor(plan);
@@ -84,7 +98,7 @@ function PlanGroup({
 			? -1
 			: plan.sessions.findIndex((status) => status.role === openRole);
 	return (
-		<div className="plan-group tree">
+		<div className={`plan-group tree${expanded ? " sel" : ""}`}>
 			<span className="mgutter">
 				{expanded ? (
 					<i
@@ -98,19 +112,47 @@ function PlanGroup({
 					aria-hidden="true"
 				/>
 			</span>
-			<button
-				className="plan-name"
-				type="button"
-				onClick={() => onSelect(target)}
-				aria-label={`${plan.title}, ${plan.phase}, opens ${roleLabel(target.role)}`}
-				data-full={plan.title}
-			>
-				<span
-					className={`ptitle${attention === null ? "" : ` sheen-${attention}`}`}
+			<div className="phead">
+				<button
+					className="plan-name"
+					type="button"
+					onClick={() => onSelect(target)}
+					aria-label={`${plan.title}, ${plan.phase}, opens ${roleLabel(target.role)}`}
+					data-full={plan.title}
 				>
-					{plan.title}
-				</span>
-			</button>
+					<span
+						className={`ptitle${attention === null ? "" : ` sheen-${attention}`}`}
+					>
+						{plan.title}
+					</span>
+				</button>
+				{plan.phase === "completed" || plan.phase === "cancelled" ? null : (
+					<span className="hact">
+						<button
+							className="sbtn cancel"
+							type="button"
+							aria-label={`Cancel ${plan.title}`}
+							onClick={(event) => {
+								event.stopPropagation();
+								onCancel(target);
+							}}
+						>
+							✕
+						</button>
+						<button
+							className={`sbtn mode${plan.manual ? " manual" : ""}`}
+							type="button"
+							aria-label={plan.manual ? "Switch to auto" : "Switch to manual"}
+							onClick={(event) => {
+								event.stopPropagation();
+								onSetMode(plan.name, !plan.manual);
+							}}
+						>
+							{plan.manual ? "M" : "A"}
+						</button>
+					</span>
+				)}
+			</div>
 			{expanded
 				? plan.sessions.map((status, index) => (
 						<SessionRow

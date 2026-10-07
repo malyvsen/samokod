@@ -78,7 +78,7 @@ async function openChat() {
 	const user = userEvent.setup();
 	render(<App />);
 	await user.click(await screen.findByRole("button", { name: "open" }));
-	await screen.findByRole("button", { name: "+ NEW PLAN" });
+	await screen.findByRole("button", { name: "New plan" });
 	return user;
 }
 
@@ -328,7 +328,7 @@ describe("plan", () => {
 		const user = await openChat();
 		emit({ type: "agent_text", session: testKey(), chunk: "old chat" });
 		emit({ type: "turn_done", session: testKey() });
-		await user.click(screen.getByRole("button", { name: "+ NEW PLAN" }));
+		await user.click(screen.getByRole("button", { name: "New plan" }));
 		expect(api.createPlan).toHaveBeenCalledTimes(1);
 		expect(screen.queryByText("old chat")).not.toBeInTheDocument();
 		expect(
@@ -383,7 +383,7 @@ describe("plan", () => {
 	test("failed create surfaces its own hint without retry", async () => {
 		api.createPlan.mockRejectedValue(new Error("denied"));
 		const user = await openChat();
-		await user.click(screen.getByRole("button", { name: "+ NEW PLAN" }));
+		await user.click(screen.getByRole("button", { name: "New plan" }));
 		expect(
 			await screen.findByText("couldn't create plan - try again"),
 		).toBeInTheDocument();

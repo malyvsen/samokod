@@ -159,6 +159,7 @@ pub(crate) fn sorted_entries(
             has_plan_md: plan.has_plan_md(repo_root),
             sessions: session_statuses(repo_root, plan, sessions),
             worktree: worktree_status(repo_root, worktrees, target_branch, plan),
+            manual: entry_manual(repo_root, plan),
         })
         .collect()
 }
@@ -184,6 +185,15 @@ fn entry_title(
         return title.clone();
     }
     "Untitled".to_string()
+}
+
+/// Manual flag from disk state; pending names with no directory stay
+/// automatic. Pure except the state read.
+fn entry_manual(repo_root: &Path, plan: &plans::PlanRef) -> bool {
+    if !plan.path(repo_root).is_dir() {
+        return false;
+    }
+    plans::load_state(&plan.path(repo_root)).manual
 }
 
 /// One status row per session a plan owns, from `roles_for`: scoping

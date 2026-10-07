@@ -40,12 +40,13 @@ export function testEntry(
 	phase: PlanPhase = "scoping",
 	title = "Parallel sessions",
 	has_plan_md = false,
+	manual = false,
 ): PlanEntry {
 	const sessions =
 		phase === "scoping"
 			? [testStatus("scoping")]
 			: [testStatus("scoping"), testStatus("executing")];
-	return { name, phase, title, has_plan_md, sessions, worktree: null };
+	return { name, phase, title, has_plan_md, sessions, worktree: null, manual };
 }
 
 export function testEntryWith(
@@ -55,8 +56,17 @@ export function testEntryWith(
 	has_plan_md: boolean,
 	statuses: SessionStatusView[],
 	worktree: WorktreeStatus | null = null,
+	manual = false,
 ): PlanEntry {
-	return { name, phase, title, has_plan_md, sessions: statuses, worktree };
+	return {
+		name,
+		phase,
+		title,
+		has_plan_md,
+		sessions: statuses,
+		worktree,
+		manual,
+	};
 }
 
 export function testWorktree(

@@ -24,6 +24,7 @@ function panelProps(
 		onCancel: vi.fn(),
 		onFinishLanding: vi.fn(),
 		onBeginLanding: vi.fn(),
+		onSetMode: vi.fn(),
 	};
 }
 
@@ -87,11 +88,14 @@ function appCss() {
 
 describe("plans panel", () => {
 	describe("sections", () => {
-		test("shows the new-plan button first", async () => {
+		test("shows a hover-only plus next to scoping", async () => {
 			const props = panelProps([scopingPlan()]);
 			const user = userEvent.setup();
 			render(<PlansPanel {...props} />);
-			await user.click(screen.getByRole("button", { name: "+ NEW PLAN" }));
+			expect(screen.queryByRole("button", { name: "+ NEW PLAN" })).toBeNull();
+			const plus = screen.getByRole("button", { name: "New plan" });
+			expect(plus.textContent).toBe("+");
+			await user.click(plus);
 			expect(props.onNewPlan).toHaveBeenCalledTimes(1);
 		});
 
@@ -171,6 +175,97 @@ describe("plans panel", () => {
 			});
 			expect(header.className).toBe("plan-name");
 		});
+
+		test("shows cancel left of an automatic switch", () => {
+			const plan = scopingPlan();
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "scoping" })}
+				/>,
+			);
+			const group = planGroup("Parallel sessions, scoping, opens Scoping");
+			const buttons = within(group).getAllByRole("button");
+			const cancel = within(group).getByRole("button", {
+				name: "Cancel Parallel sessions",
+			});
+			const mode = within(group).getByRole("button", {
+				name: "Switch to manual",
+			});
+			expect(mode.textContent).toBe("A");
+			expect(mode.className).toContain("mode");
+			expect(mode.className).not.toContain("manual");
+			expect(buttons.indexOf(cancel)).toBeLessThan(buttons.indexOf(mode));
+		});
+
+		test("shows a manual switch with the reverse label", async () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59",
+				"scoping",
+				"Parallel sessions",
+				true,
+				[testStatus("scoping")],
+				null,
+				true,
+			);
+			const props = panelProps([plan], {
+				plan: plan.name,
+				role: "scoping",
+			});
+			const user = userEvent.setup();
+			render(<PlansPanel {...props} />);
+			const mode = screen.getByRole("button", { name: "Switch to auto" });
+			expect(mode.textContent).toBe("M");
+			expect(mode.className).toContain("manual");
+			await user.click(mode);
+			expect(props.onSetMode).toHaveBeenCalledWith(plan.name, false);
+		});
+
+		test("flipping to manual calls back with the plan", async () => {
+			const plan = scopingPlan();
+			const props = panelProps([plan], {
+				plan: plan.name,
+				role: "scoping",
+			});
+			const user = userEvent.setup();
+			render(<PlansPanel {...props} />);
+			await user.click(
+				screen.getByRole("button", { name: "Switch to manual" }),
+			);
+			expect(props.onSetMode).toHaveBeenCalledWith(plan.name, true);
+		});
+
+		test("cancelling from the header uses the latest role", async () => {
+			const plan = executingPlan();
+			const props = panelProps([plan], {
+				plan: plan.name,
+				role: "executing",
+			});
+			const user = userEvent.setup();
+			render(<PlansPanel {...props} />);
+			await user.click(screen.getByRole("button", { name: "Cancel Shiny" }));
+			expect(props.onCancel).toHaveBeenCalledWith({
+				plan: plan.name,
+				role: "executing",
+			});
+		});
+
+		test("finished plans show no header controls", () => {
+			render(
+				<PlansPanel
+					{...panelProps(
+						[
+							testEntryWith("done", "completed", "Done", true, [
+								testStatus("scoping"),
+								testStatus("executing"),
+							]),
+						],
+						{ plan: "done", role: "executing" },
+					)}
+				/>,
+			);
+			expect(screen.queryByRole("button", { name: /Switch to/ })).toBeNull();
+			expect(screen.queryByRole("button", { name: /Cancel Done/ })).toBeNull();
+		});
 	});
 
 	describe("expansion", () => {
@@ -215,7 +310,7 @@ describe("plans panel", () => {
 			).toBeInTheDocument();
 		});
 
-		test("shows actions only on the expanded session", () => {
+		test("shows session rows only on the expanded plan", () => {
 			const active = executingPlan();
 			const { container } = render(
 				<PlansPanel
@@ -229,8 +324,13 @@ describe("plans panel", () => {
 			expect(
 				within(
 					planGroup("Parallel sessions, scoping, opens Scoping"),
-				).queryByRole("button", { name: /Cancel|Send|Land/i }),
+				).queryByRole("button", { name: /Send|Land/i }),
 			).toBeNull();
+			expect(
+				within(
+					planGroup("Parallel sessions, scoping, opens Scoping"),
+				).getByRole("button", { name: "Cancel Parallel sessions" }),
+			).toBeInTheDocument();
 		});
 
 		test("keeps collapsed attention while viewing another plan", () => {
@@ -487,7 +587,11 @@ describe("plans panel", () => {
 					)}
 				/>,
 			);
-			expect(container.querySelectorAll(".sbtn").length).toBe(0);
+			expect(
+				planGroup("Done, completed, opens Executing").querySelectorAll(".sbtn")
+					.length,
+			).toBe(0);
+			expect(container.querySelectorAll(".sbtn").length).toBe(1);
 		});
 
 		test("execute stays disabled without plan.md", () => {
@@ -613,7 +717,10 @@ describe("plans panel", () => {
 				expect(
 					button.textContent === "✕" ||
 						button.textContent === ">" ||
-						button.textContent === "✓",
+						button.textContent === "✓" ||
+						button.textContent === "A" ||
+						button.textContent === "M" ||
+						button.textContent === "+",
 				).toBe(true);
 			}
 		});
@@ -651,11 +758,27 @@ describe("plans panel", () => {
 		test("action buttons stay hover-only on the open row", () => {
 			const css = appCss();
 			expect(css).not.toContain(".session");
+			expect(css).not.toContain(".newplan");
 			const hidden = /\.plans\s+\.sbtn\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(hidden).toContain("opacity: 0");
 			const shown =
 				/\.plans\s+\.sbody[^{]*\.sbtn[^{]*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(shown).toContain("opacity: 1");
+		});
+
+		test("header controls stay hover-only except on the selected plan", () => {
+			const css = appCss();
+			expect(css).toContain(".plan-group:hover .hact .sbtn");
+			expect(css).toContain(".plan-group.sel .hact .sbtn");
+			expect(css).toContain(".sect-head:hover .sbtn");
+		});
+
+		test("mode switch uses green auto and amber manual", () => {
+			const css = appCss();
+			const auto = /\.sbtn\.mode\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(auto).toContain("#7dffc4");
+			const manual = /\.sbtn\.mode\.manual\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(manual).toContain("#ffd98a");
 		});
 
 		test("the tree uses a dim spine without TODOS green", () => {

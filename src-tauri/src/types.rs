@@ -171,6 +171,10 @@ pub struct PlanEntry {
     /// dirtiness, and fast-forwardability. Recomputed on every list
     /// update so rows can choose the correct landing button.
     pub worktree: Option<WorktreeStatusView>,
+    /// Manual mode: true holds the plan in place, false lets it advance on
+    /// its own. The single copy lives in `PlanState`; this is its view.
+    #[serde(default)]
+    pub manual: bool,
 }
 
 /// Live worktree state for one executing or landing plan.

@@ -50,6 +50,13 @@ export function selectPlan(session: SessionKey): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("select_plan", { session });
 }
 
+export function setPlanMode(
+	plan: string,
+	manual: boolean,
+): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("set_plan_mode", { plan, manual });
+}
+
 export function sendPrompt(session: SessionKey, text: string): Promise<void> {
 	return invoke("send_prompt", { session, text });
 }

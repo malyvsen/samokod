@@ -88,6 +88,10 @@ pub struct PlanState {
     /// `plan.md` heading once written.
     #[serde(default)]
     pub working_title: Option<String>,
+    /// Manual mode: true holds the plan in place, false (the default) lets
+    /// it advance on its own. Travels with renames inside `state.json`.
+    #[serde(default)]
+    pub manual: bool,
 }
 
 impl PlanState {

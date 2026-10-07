@@ -102,8 +102,8 @@ describe("pending pickers", () => {
 		const user = userEvent.setup();
 		render(<App />);
 		await user.click(await screen.findByRole("button", { name: "open" }));
-		await screen.findByRole("button", { name: "+ NEW PLAN" });
-		await user.click(screen.getByRole("button", { name: "+ NEW PLAN" }));
+		await screen.findByRole("button", { name: "New plan" });
+		await user.click(screen.getByRole("button", { name: "New plan" }));
 		await vi.waitFor(() =>
 			expect(api.loadHistory).toHaveBeenCalledWith({
 				plan: "2026-09-25.11-00-00",

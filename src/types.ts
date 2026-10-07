@@ -70,6 +70,7 @@ export interface PlanEntry {
 	has_plan_md: boolean;
 	sessions: SessionStatusView[];
 	worktree: WorktreeStatus | null;
+	manual: boolean;
 }
 
 export interface RepoDefaults {
