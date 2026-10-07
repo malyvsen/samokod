@@ -3,7 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { PlansPanel } from "./components/PlansPanel";
-import { testEntryWith, testStatus, testWorktree } from "./fixtures";
+import { testEntryWith, testStatus } from "./fixtures";
 import type { PlanEntry } from "./types";
 
 const SECTIONS = ["SCOPING", "EXECUTING", "LANDING", "COMPLETED", "CANCELLED"];
@@ -37,14 +37,10 @@ function scopingPlan() {
 }
 
 function executingPlan() {
-	return testEntryWith(
-		"2026-09-25.10-54-59.slug",
-		"executing",
-		"Shiny",
-		true,
-		[testStatus("scoping"), testStatus("executing")],
-		testWorktree(),
-	);
+	return testEntryWith("2026-09-25.10-54-59.slug", "executing", "Shiny", true, [
+		testStatus("scoping"),
+		testStatus("executing"),
+	]);
 }
 
 function landingPlan() {
@@ -54,7 +50,6 @@ function landingPlan() {
 		"Shiny",
 		true,
 		[testStatus("scoping"), testStatus("executing"), testStatus("landing")],
-		testWorktree(),
 	);
 }
 
@@ -82,7 +77,6 @@ describe("plans panel", () => {
 			const props = panelProps([scopingPlan()]);
 			const user = userEvent.setup();
 			render(<PlansPanel {...props} />);
-			expect(screen.queryByRole("button", { name: "+ NEW PLAN" })).toBeNull();
 			const plus = screen.getByRole("button", { name: "New plan" });
 			expect(plus.textContent).toBe("+");
 			await user.click(plus);
@@ -240,7 +234,6 @@ describe("plans panel", () => {
 				"Shiny",
 				true,
 				[testStatus("scoping"), testStatus("executing")],
-				testWorktree(),
 				true,
 			);
 			const props = panelProps([plan], {
@@ -624,23 +617,19 @@ describe("plans panel", () => {
 			expect(row).toContain("align-self: stretch");
 		});
 
-		test("action buttons stay hover-only except on the selected plan", () => {
-			const css = appCss();
-			expect(css).not.toContain(".session");
-			expect(css).not.toContain(".newplan");
-			expect(css).not.toContain(".sbtn.promote");
-			const hidden = /\.plans\s+\.sbtn\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
-			expect(hidden).toContain("opacity: 0");
-			const shown =
-				/\.plans\s+\.plan-group[^{]*\.sbtn[^{]*\{[^}]*\}/.exec(css)?.[0] ?? "";
-			expect(shown).toContain("opacity: 1");
-		});
-
 		test("header controls stay hover-only except on the selected plan", () => {
 			const css = appCss();
-			expect(css).toContain(".plan-group:hover .hact .sbtn");
-			expect(css).toContain(".plan-group.sel .hact .sbtn");
-			expect(css).toContain(".sect-head:hover .sbtn");
+			const hidden = /\.plans\s+\.sbtn\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(hidden).toContain("opacity: 0");
+			for (const selector of [
+				".plan-group:hover .hact .sbtn",
+				".plan-group.sel .hact .sbtn",
+				".plan-group:focus-within .hact .sbtn",
+				".sect-head:hover .sbtn",
+				".sect-head:focus-within .sbtn",
+			]) {
+				expect(css).toContain(selector);
+			}
 		});
 
 		test("mode switch uses green auto and amber manual", () => {

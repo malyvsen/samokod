@@ -6,6 +6,8 @@
 // `next_action` is pure over a plain view (unit-tested with no git repo);
 // `transition` is the single effectful core that the manual commands and
 // the pump all go through, so the pump adds no second copy of any step.
+use std::collections::HashSet;
+
 use crate::opencode;
 use crate::plans::{self, Phase};
 use crate::types::{AgentError, PlansUpdate, SessionKey, SessionRole};
@@ -38,10 +40,12 @@ impl AgentManager {
     pub(crate) async fn pump(&self) {
         let mut selected = lock_state(&self.state).and_then(|state| state.current.clone());
         let mut fired_any = false;
-        for _ in 0..64 {
-            let Some((repo_root, _)) = self.reopen_snapshot() else {
-                break;
-            };
+        // Every fired transition makes its plan ineligible for the next
+        // pass (its turn starts, or it leaves the phase), so the pump
+        // settles on its own. The set below only backstops that invariant:
+        // a plan firing twice means a transition stopped sticking.
+        let mut fired_plans = HashSet::new();
+        'pump: while let Some((repo_root, _)) = self.reopen_snapshot() {
             let mut scanned = plans::scan_plans(&repo_root);
             scanned.retain(|plan| plan.phase.is_active());
             if scanned.is_empty() {
@@ -65,6 +69,10 @@ impl AgentManager {
                     Ok(_) => {
                         fired = true;
                         fired_any = true;
+                        if !fired_plans.insert(plan_name.clone()) {
+                            log::warn!("pump fired twice for {plan_name}; stopping");
+                            break 'pump;
+                        }
                         // The selected plan follows its own moves; background
                         // plans never steal the selection.
                         match selected {
@@ -453,7 +461,7 @@ pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
         return None;
     }
     match view.phase {
-        Phase::Scoping => None,
+        Phase::Scoping | Phase::Completed | Phase::Cancelled => None,
         Phase::Executing => {
             if view.dirty {
                 None
@@ -482,7 +490,6 @@ pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
                 })
             }
         }
-        Phase::Completed | Phase::Cancelled => None,
     }
 }
 

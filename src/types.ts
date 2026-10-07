@@ -56,20 +56,12 @@ export type PlanPhase =
 	| "completed"
 	| "cancelled";
 
-export interface WorktreeStatus {
-	worktree_branch: string;
-	target_branch: string;
-	dirty: boolean;
-	ffable: boolean;
-}
-
 export interface PlanEntry {
 	name: string;
 	phase: PlanPhase;
 	title: string;
 	has_plan_md: boolean;
 	sessions: SessionStatusView[];
-	worktree: WorktreeStatus | null;
 	manual: boolean;
 }
 

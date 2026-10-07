@@ -9,7 +9,7 @@ use tauri::AppHandle;
 use crate::plans;
 use crate::types::{
     AppEvent, OpenRepoResult, PlanEntry, PlansUpdate, RepoDefaults, SessionKey, SessionRole,
-    SessionStatusView, WorktreeStatusView,
+    SessionStatusView,
 };
 
 use super::AgentManager;
@@ -27,8 +27,6 @@ impl AgentManager {
             &state.sessions,
             state.pending_scoping.as_deref(),
             &state.pending_titles,
-            &state.worktrees,
-            &state.checkout_branch,
         );
         let selected = most_recent_key(&plans).unwrap_or_else(|| SessionKey {
             plan: plans
@@ -57,8 +55,6 @@ impl AgentManager {
             &state.sessions,
             state.pending_scoping.as_deref(),
             &state.pending_titles,
-            &state.worktrees,
-            &state.checkout_branch,
         );
         let selected = state.current.clone().unwrap_or_else(|| {
             most_recent_key(&plans).unwrap_or_else(|| SessionKey {
@@ -127,8 +123,6 @@ pub(crate) fn sorted_entries(
     sessions: &HashMap<SessionKey, LiveSession>,
     pending: Option<&str>,
     pending_titles: &HashMap<String, String>,
-    worktrees: &HashMap<String, crate::worktrees::WorktreeRecord>,
-    target_branch: &str,
 ) -> Vec<PlanEntry> {
     let mut plans = plans::scan_plans(repo_root);
     if let Some(name) = pending
@@ -158,7 +152,6 @@ pub(crate) fn sorted_entries(
             title: entry_title(repo_root, plan, pending_titles),
             has_plan_md: plan.has_plan_md(repo_root),
             sessions: session_statuses(repo_root, plan, sessions),
-            worktree: worktree_status(repo_root, worktrees, target_branch, plan),
             manual: entry_manual(repo_root, plan),
         })
         .collect()
@@ -233,57 +226,6 @@ fn defaults_for(repo_root: &Path) -> RepoDefaults {
     }
 }
 
-/// Live worktree state for one executing or landing plan. Missing
-/// checkouts fail safe: dirty holds the plan, and the backend refuses the
-/// transition the same way. Git errors fail safe the same way with a
-/// warn-log, per the preserve-evidence rule. The target branch is the live
-/// value passed in, echoed so the pump decides against the current target.
-fn worktree_status(
-    repo_root: &Path,
-    worktrees: &HashMap<String, crate::worktrees::WorktreeRecord>,
-    target_branch: &str,
-    plan: &plans::PlanRef,
-) -> Option<WorktreeStatusView> {
-    if !matches!(plan.phase, plans::Phase::Executing | plans::Phase::Landing) {
-        return None;
-    }
-    let (path, worktree_branch) = match worktrees.get(&plan.name) {
-        Some(record) => (record.path.clone(), record.worktree_branch.clone()),
-        None => (
-            crate::worktrees::worktree_path(repo_root, &plan.name),
-            crate::worktrees::branch_name(&plan.name),
-        ),
-    };
-    if !path.is_dir() {
-        return Some(WorktreeStatusView {
-            worktree_branch,
-            target_branch: target_branch.to_string(),
-            dirty: true,
-            ffable: false,
-        });
-    }
-    let dirty = match crate::worktrees::is_dirty(&path) {
-        Ok(dirty) => dirty,
-        Err(error) => {
-            log::warn!("failed to check worktree dirtiness: {error}");
-            true
-        }
-    };
-    let ffable = match crate::worktrees::is_ffable(repo_root, target_branch, &worktree_branch) {
-        Ok(ffable) => ffable,
-        Err(error) => {
-            log::warn!("failed to check fast-forwardability: {error}");
-            false
-        }
-    };
-    Some(WorktreeStatusView {
-        worktree_branch,
-        target_branch: target_branch.to_string(),
-        dirty,
-        ffable,
-    })
-}
-
 /// Most-recent session across the sorted plans: the landing session when
 /// the plan owns one, else executing, else scoping.
 pub(crate) fn most_recent_key(plans: &[PlanEntry]) -> Option<SessionKey> {
@@ -321,8 +263,6 @@ pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
                 &guard.sessions,
                 guard.pending_scoping.as_deref(),
                 &guard.pending_titles,
-                &guard.worktrees,
-                &guard.checkout_branch,
             );
             let selected = guard.current.clone().or_else(|| most_recent_key(&plans));
             (plans, selected)

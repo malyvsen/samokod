@@ -167,23 +167,10 @@ pub struct PlanEntry {
     pub title: String,
     pub has_plan_md: bool,
     pub sessions: Vec<SessionStatusView>,
-    /// Live worktree state for executing and landing plans: branch,
-    /// dirtiness, and fast-forwardability. Recomputed on every list update
-    /// so the pump can decide the next automatic transition.
-    pub worktree: Option<WorktreeStatusView>,
     /// Manual mode: true holds the plan in place, false lets it advance on
     /// its own. The single copy lives in `PlanState`; this is its view.
     #[serde(default)]
     pub manual: bool,
-}
-
-/// Live worktree state for one executing or landing plan.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct WorktreeStatusView {
-    pub worktree_branch: String,
-    pub target_branch: String,
-    pub dirty: bool,
-    pub ffable: bool,
 }
 
 /// Stored model/effort defaults for the instant disabled picker paint.

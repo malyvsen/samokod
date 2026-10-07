@@ -5,7 +5,6 @@ import type {
 	SessionKey,
 	SessionRole,
 	SessionStatusView,
-	WorktreeStatus,
 } from "./types";
 
 export function testDefaults(
@@ -46,7 +45,7 @@ export function testEntry(
 		phase === "scoping"
 			? [testStatus("scoping")]
 			: [testStatus("scoping"), testStatus("executing")];
-	return { name, phase, title, has_plan_md, sessions, worktree: null, manual };
+	return { name, phase, title, has_plan_md, sessions, manual };
 }
 
 export function testEntryWith(
@@ -55,7 +54,6 @@ export function testEntryWith(
 	title: string,
 	has_plan_md: boolean,
 	statuses: SessionStatusView[],
-	worktree: WorktreeStatus | null = null,
 	manual = false,
 ): PlanEntry {
 	return {
@@ -64,19 +62,6 @@ export function testEntryWith(
 		title,
 		has_plan_md,
 		sessions: statuses,
-		worktree,
 		manual,
-	};
-}
-
-export function testWorktree(
-	overrides: Partial<WorktreeStatus> = {},
-): WorktreeStatus {
-	return {
-		worktree_branch: "samokod/shiny",
-		target_branch: "feature",
-		dirty: false,
-		ffable: true,
-		...overrides,
 	};
 }
