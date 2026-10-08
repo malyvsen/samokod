@@ -225,7 +225,7 @@ describe("replayed updates", () => {
 			permission: {
 				tool_call_id: "tc1",
 				title: "run this action?",
-				kind: "bash",
+				tool: "bash",
 				options: [{ id: "a", kind: "allow" }],
 				rule_hint: "hint",
 			},
@@ -253,7 +253,7 @@ describe("replayed updates", () => {
 			permission: {
 				tool_call_id: "tc1",
 				title: "run this action?",
-				kind: "bash",
+				tool: "bash",
 				options: [{ id: "a", kind: "allow" }],
 				rule_hint: "hint",
 			},

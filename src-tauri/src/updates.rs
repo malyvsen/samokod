@@ -119,10 +119,27 @@ fn line_text(
 }
 
 /// Wire name when present, else the kind label. Names render as-is.
-fn tool_label(name: Option<&str>, kind: Option<ToolKind>) -> String {
+pub fn tool_label(name: Option<&str>, kind: Option<ToolKind>) -> String {
     match name.map(str::trim) {
         Some(name) if !name.is_empty() => name.to_string(),
         _ => kind_label(kind).as_str().to_string(),
+    }
+}
+
+/// Fallback label when the wire name is absent. Pure.
+fn kind_label(kind: Option<ToolKind>) -> ToolKindLabel {
+    match kind {
+        Some(ToolKind::Read) => ToolKindLabel::Read,
+        Some(ToolKind::Edit) => ToolKindLabel::Edit,
+        Some(ToolKind::Delete) => ToolKindLabel::Delete,
+        Some(ToolKind::Move) => ToolKindLabel::Move,
+        Some(ToolKind::Search) => ToolKindLabel::Search,
+        Some(ToolKind::Execute) => ToolKindLabel::Execute,
+        Some(ToolKind::Think) => ToolKindLabel::Think,
+        Some(ToolKind::Fetch) => ToolKindLabel::Fetch,
+        Some(ToolKind::SwitchMode) => ToolKindLabel::SwitchMode,
+        Some(ToolKind::Other) | None => ToolKindLabel::Other,
+        _ => ToolKindLabel::Other,
     }
 }
 
@@ -176,24 +193,6 @@ fn to_tool_status(status: ToolCallStatus) -> ToolStatus {
         ToolCallStatus::Completed => ToolStatus::Completed,
         ToolCallStatus::Failed => ToolStatus::Failed,
         _ => ToolStatus::Pending,
-    }
-}
-
-/// Human label for a tool kind, shared by tool lines and permission cards.
-/// Pure.
-pub fn kind_label(kind: Option<ToolKind>) -> ToolKindLabel {
-    match kind {
-        Some(ToolKind::Read) => ToolKindLabel::Read,
-        Some(ToolKind::Edit) => ToolKindLabel::Edit,
-        Some(ToolKind::Delete) => ToolKindLabel::Delete,
-        Some(ToolKind::Move) => ToolKindLabel::Move,
-        Some(ToolKind::Search) => ToolKindLabel::Search,
-        Some(ToolKind::Execute) => ToolKindLabel::Execute,
-        Some(ToolKind::Think) => ToolKindLabel::Think,
-        Some(ToolKind::Fetch) => ToolKindLabel::Fetch,
-        Some(ToolKind::SwitchMode) => ToolKindLabel::SwitchMode,
-        Some(ToolKind::Other) | None => ToolKindLabel::Other,
-        _ => ToolKindLabel::Other,
     }
 }
 
@@ -266,10 +265,10 @@ mod tests {
             assert_eq!(line.status, view);
         }
 
-        let kind_label = ToolCall::new("id-1", "edit file.md")
+        let kind_only = ToolCall::new("id-1", "edit file.md")
             .kind(ToolKind::Edit)
             .status(ToolCallStatus::Completed);
-        assert_eq!(format_tool_line(&kind_label).text, "edit: edit file.md");
+        assert_eq!(format_tool_line(&kind_only).text, "edit: edit file.md");
 
         let named = ToolCall::new("id-1", "Explore plans UI")
             .name("task")

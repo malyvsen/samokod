@@ -178,17 +178,16 @@ fn permission_view(
     request: &acp::RequestPermissionRequest,
     options: Vec<PermissionOptionView>,
 ) -> PermissionView {
+    let fields = &request.tool_call.fields;
     PermissionView {
         tool_call_id: request.tool_call.tool_call_id.to_string(),
-        title: request
-            .tool_call
-            .fields
+        title: fields
             .title
             .clone()
             .unwrap_or_else(|| "run this action?".to_string()),
-        kind: crate::updates::kind_label(request.tool_call.fields.kind),
+        tool: crate::updates::tool_label(fields.name.as_deref(), fields.kind),
         options,
-        rule_hint: crate::permissions::rule_hint(request.tool_call.fields.name.as_deref()),
+        rule_hint: crate::permissions::rule_hint(fields.name.as_deref()),
     }
 }
 

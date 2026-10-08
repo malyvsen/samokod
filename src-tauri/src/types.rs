@@ -46,8 +46,7 @@ pub enum ToolStatus {
     Failed,
 }
 
-/// Shared label for a tool kind, used by tool lines (label when the wire
-/// name is absent) and permission cards.
+/// Fallback label when the wire tool name is absent.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolKindLabel {
@@ -122,7 +121,7 @@ pub struct PermissionOptionView {
 pub struct PermissionView {
     pub tool_call_id: String,
     pub title: String,
-    pub kind: ToolKindLabel,
+    pub tool: String,
     pub options: Vec<PermissionOptionView>,
     /// Effective rule only, never the config file it came from.
     pub rule_hint: String,

@@ -131,7 +131,7 @@ describe("message queue", () => {
 			permission: {
 				tool_call_id: "t1",
 				title: "Run command",
-				kind: "bash",
+				tool: "bash",
 				options: [
 					{ id: "allow", kind: "allow" },
 					{ id: "reject", kind: "reject" },

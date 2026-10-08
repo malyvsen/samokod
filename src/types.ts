@@ -102,22 +102,10 @@ export interface PermissionOptionView {
 	kind: "allow" | "reject";
 }
 
-export type ToolKindLabel =
-	| "read"
-	| "edit"
-	| "delete"
-	| "move"
-	| "search"
-	| "bash"
-	| "think"
-	| "fetch"
-	| "mode"
-	| "tool";
-
 export interface PermissionView {
 	tool_call_id: string;
 	title: string;
-	kind: ToolKindLabel;
+	tool: string;
 	options: PermissionOptionView[];
 	rule_hint: string;
 }

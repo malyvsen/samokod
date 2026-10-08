@@ -6,7 +6,6 @@ import { todoMark, todoRowClass } from "../todos";
 import type {
 	PermissionOptionView,
 	PermissionView,
-	ToolKindLabel,
 	ToolLineView,
 	ToolStatus,
 	TranscriptItem,
@@ -85,7 +84,6 @@ export function Transcript({
 					}
 					if (item.kind === "approval") {
 						const permission: PermissionView = item.permission;
-						const kind: ToolKindLabel = permission.kind;
 						const allow = permission.options.find(
 							(option: PermissionOptionView) => option.kind === "allow",
 						);
@@ -96,7 +94,7 @@ export function Transcript({
 							<div className="approval" key={item.id}>
 								<h3 data-full={permission.title}>{permission.title}</h3>
 								<p>
-									{kind} · {permission.rule_hint}
+									{permission.tool} · {permission.rule_hint}
 								</p>
 								<p className="hint">
 									Reject skips just this command - the agent keeps working.
