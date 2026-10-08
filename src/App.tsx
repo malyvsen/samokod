@@ -29,7 +29,7 @@ import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
 import { hasUserMessage, useSessionDrafts } from "./sessions/drafts";
 import { previewPromiseFor, useScopingPreview } from "./sessions/preview";
-import { useSessionQueues } from "./sessions/queue";
+import { type QueueMoveDirection, useSessionQueues } from "./sessions/queue";
 import { usePinnedTranscript } from "./sessions/scroll";
 import {
 	agentStatusOf,
@@ -239,6 +239,12 @@ export function App() {
 		const key = selectedRef.current;
 		if (key === null) return;
 		queue.setEditing(key, null);
+	}
+
+	function handleQueueMove(id: string, direction: QueueMoveDirection) {
+		const key = selectedRef.current;
+		if (key === null) return;
+		queue.move(key, id, direction);
 	}
 
 	const headId = queue.items[0]?.id ?? null;
@@ -576,6 +582,7 @@ export function App() {
 												onEdit={handleQueueEdit}
 												onCommit={handleQueueCommit}
 												onCancel={handleQueueCancel}
+												onMove={handleQueueMove}
 											/>
 											<DraftBubble
 												key={selectedId}

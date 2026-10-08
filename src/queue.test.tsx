@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	testDefaults,
@@ -293,5 +293,134 @@ describe("queued editing", () => {
 		expect(
 			screen.getByRole("textbox", { name: "Edit queued message" }),
 		).toBeInTheDocument();
+	});
+});
+
+describe("queued reorder", () => {
+	function queuedOrder(): string[] {
+		return Array.from(document.querySelectorAll(".msg.user.queued")).map(
+			(node) => node.textContent ?? "",
+		);
+	}
+
+	function moveButton(
+		name: "Move queued message up" | "Move queued message down",
+		index: number,
+	): HTMLElement {
+		const buttons = screen.getAllByRole("button", { name });
+		const button = buttons[index];
+		if (button === undefined)
+			throw new Error(`missing ${name} at index ${index}`);
+		return button;
+	}
+
+	function queuedAt(index: number): string {
+		const order = queuedOrder();
+		const text = order[index];
+		if (text === undefined) throw new Error(`missing queued bubble ${index}`);
+		return text;
+	}
+
+	test("two items show arrows with disabled ends; single hides them", async () => {
+		const user = await startWorking();
+		await user.keyboard("first{Enter}");
+		expect(
+			screen.queryByRole("button", { name: "Move queued message up" }),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "Move queued message down" }),
+		).not.toBeInTheDocument();
+		await user.keyboard("second{Enter}");
+		const ups = screen.getAllByRole("button", {
+			name: "Move queued message up",
+		});
+		const downs = screen.getAllByRole("button", {
+			name: "Move queued message down",
+		});
+		expect(ups).toHaveLength(2);
+		expect(downs).toHaveLength(2);
+		expect(moveButton("Move queued message up", 0)).toBeDisabled();
+		expect(moveButton("Move queued message down", 0)).not.toBeDisabled();
+		expect(moveButton("Move queued message up", 1)).not.toBeDisabled();
+		expect(moveButton("Move queued message down", 1)).toBeDisabled();
+	});
+
+	test("clicking down on the first item swaps order and drains the new head", async () => {
+		const user = await startWorking();
+		await user.keyboard("first{Enter}");
+		await user.keyboard("second{Enter}");
+		expect(queuedAt(0)).toContain("first");
+		expect(queuedAt(1)).toContain("second");
+		await user.click(moveButton("Move queued message down", 0));
+		expect(queuedAt(0)).toContain("second");
+		expect(queuedAt(1)).toContain("first");
+		emitAppEvent(api, { type: "turn_done", session: testKey() });
+		await vi.waitFor(() =>
+			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "second"),
+		);
+	});
+
+	test("arrow click and Enter reorder without entering edit", async () => {
+		const user = await startWorking();
+		await user.keyboard("first{Enter}");
+		await user.keyboard("second{Enter}");
+		await user.click(moveButton("Move queued message down", 0));
+		expect(
+			screen.queryByRole("textbox", { name: "Edit queued message" }),
+		).not.toBeInTheDocument();
+		expect(queuedAt(0)).toContain("second");
+		const up = moveButton("Move queued message up", 1);
+		up.focus();
+		await user.keyboard("{Enter}");
+		expect(
+			screen.queryByRole("textbox", { name: "Edit queued message" }),
+		).not.toBeInTheDocument();
+		expect(queuedAt(0)).toContain("first");
+		expect(queuedAt(1)).toContain("second");
+	});
+
+	test("editing keeps arrows; mousedown and click reorder with draft intact", async () => {
+		const user = await startWorking();
+		await user.keyboard("first{Enter}");
+		await user.keyboard("second{Enter}");
+		await user.click(screen.getByText("first"));
+		const editor = screen.getByRole("textbox", {
+			name: "Edit queued message",
+		});
+		expect(editor).toBeInTheDocument();
+		expect(
+			screen.getAllByRole("button", { name: "Move queued message up" }),
+		).toHaveLength(2);
+		await user.keyboard(" edited");
+		const down = moveButton("Move queued message down", 0);
+		fireEvent.mouseDown(down);
+		await user.click(down);
+		const kept = screen.getByRole("textbox", {
+			name: "Edit queued message",
+		});
+		expect(kept).toBeInTheDocument();
+		expect(kept.textContent).toContain("first edited");
+		const bubbles = document.querySelectorAll(".msg.user.queued");
+		const moved = bubbles[1];
+		if (moved === undefined) throw new Error("missing moved bubble");
+		expect(moved.textContent).toContain("first edited");
+	});
+
+	test("tab to an arrow does not cancel the edit", async () => {
+		const user = await startWorking();
+		await user.keyboard("first{Enter}");
+		await user.keyboard("second{Enter}");
+		await user.click(screen.getByText("first"));
+		const editor = screen.getByRole("textbox", {
+			name: "Edit queued message",
+		});
+		expect(editor).toBeInTheDocument();
+		await user.tab({ shift: true });
+		expect(
+			screen.getByRole("textbox", { name: "Edit queued message" }),
+		).toBeInTheDocument();
+		expect(document.activeElement?.getAttribute("aria-label")).toContain(
+			"Move queued message",
+		);
 	});
 });

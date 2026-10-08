@@ -1,11 +1,21 @@
 import { useEffect, useRef } from "react";
-import type { QueuedMessage } from "../sessions/queue";
+import type { QueuedMessage, QueueMoveDirection } from "../sessions/queue";
 import {
 	extractText,
 	insertPlainText,
 	moveCaretToEnd,
 	shouldCommitEnter,
 } from "./editableText";
+
+type QueuedHeaderControls =
+	| { kind: "hidden" }
+	| {
+			kind: "movable";
+			id: string;
+			disableUp: boolean;
+			disableDown: boolean;
+			onMove: (id: string, direction: QueueMoveDirection) => void;
+	  };
 
 export function QueuedBubbleList({
 	items,
@@ -14,6 +24,7 @@ export function QueuedBubbleList({
 	onEdit,
 	onCommit,
 	onCancel,
+	onMove,
 }: {
 	items: QueuedMessage[];
 	editingId: string | null;
@@ -21,16 +32,29 @@ export function QueuedBubbleList({
 	onEdit: (id: string) => void;
 	onCommit: (id: string, text: string) => void;
 	onCancel: () => void;
+	onMove: (id: string, direction: QueueMoveDirection) => void;
 }) {
 	if (items.length === 0) return null;
+	const showControls = items.length > 1;
 	return (
 		<>
-			{items.map((item) =>
-				item.id === editingId ? (
+			{items.map((item, index) => {
+				const controls: QueuedHeaderControls =
+					showControls === false
+						? { kind: "hidden" }
+						: {
+								kind: "movable",
+								id: item.id,
+								disableUp: index === 0,
+								disableDown: index === items.length - 1,
+								onMove,
+							};
+				return item.id === editingId ? (
 					<QueuedBubbleEditor
 						key={item.id}
 						text={item.text}
 						blocked={editingBlocked}
+						controls={controls}
 						onCommit={(text) => onCommit(item.id, text)}
 						onCancel={onCancel}
 					/>
@@ -38,15 +62,24 @@ export function QueuedBubbleList({
 					<QueuedBubble
 						key={item.id}
 						text={item.text}
+						controls={controls}
 						onEdit={() => onEdit(item.id)}
 					/>
-				),
-			)}
+				);
+			})}
 		</>
 	);
 }
 
-function QueuedBubble({ text, onEdit }: { text: string; onEdit: () => void }) {
+function QueuedBubble({
+	text,
+	controls,
+	onEdit,
+}: {
+	text: string;
+	controls: QueuedHeaderControls;
+	onEdit: () => void;
+}) {
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: queued edit is click-to-edit like the draft - a button element would bring native button metrics.
 		<div
@@ -56,12 +89,13 @@ function QueuedBubble({ text, onEdit }: { text: string; onEdit: () => void }) {
 			tabIndex={0}
 			onClick={onEdit}
 			onKeyDown={(event) => {
+				if (event.target !== event.currentTarget) return;
 				if (event.key !== "Enter" && event.key !== " ") return;
 				event.preventDefault();
 				onEdit();
 			}}
 		>
-			<div className="who">QUEUED</div>
+			<QueuedHeader controls={controls} />
 			{text}
 		</div>
 	);
@@ -70,14 +104,17 @@ function QueuedBubble({ text, onEdit }: { text: string; onEdit: () => void }) {
 function QueuedBubbleEditor({
 	text,
 	blocked,
+	controls,
 	onCommit,
 	onCancel,
 }: {
 	text: string;
 	blocked: boolean;
+	controls: QueuedHeaderControls;
 	onCommit: (text: string) => void;
 	onCancel: () => void;
 }) {
+	const containerRef = useRef<HTMLDivElement | null>(null);
 	const ref = useRef<HTMLDivElement | null>(null);
 
 	useEffect(() => {
@@ -99,10 +136,11 @@ function QueuedBubbleEditor({
 
 	return (
 		<div
+			ref={containerRef}
 			className={blocked ? "msg user queued blocked" : "msg user queued"}
 			title="Editing"
 		>
-			<div className="who">QUEUED</div>
+			<QueuedHeader controls={controls} />
 			{/* biome-ignore lint/a11y/useSemanticElements: contenteditable is the design - a textarea cannot size like a sent message without measuring code. */}
 			<div
 				ref={ref}
@@ -125,8 +163,72 @@ function QueuedBubbleEditor({
 					event.preventDefault();
 					insertPlainText(event.clipboardData.getData("text/plain"));
 				}}
-				onBlur={onCancel}
+				onBlur={(event) => {
+					if (
+						event.relatedTarget instanceof Node &&
+						containerRef.current?.contains(event.relatedTarget) === true
+					)
+						return;
+					onCancel();
+				}}
 			/>
 		</div>
+	);
+}
+
+function QueuedHeader({ controls }: { controls: QueuedHeaderControls }) {
+	return (
+		<div className="who">
+			<span>QUEUED</span>
+			{controls.kind === "movable" && (
+				<QueuedMoveControls
+					id={controls.id}
+					disableUp={controls.disableUp}
+					disableDown={controls.disableDown}
+					onMove={controls.onMove}
+				/>
+			)}
+		</div>
+	);
+}
+
+function QueuedMoveControls({
+	id,
+	disableUp,
+	disableDown,
+	onMove,
+}: {
+	id: string;
+	disableUp: boolean;
+	disableDown: boolean;
+	onMove: (id: string, direction: QueueMoveDirection) => void;
+}) {
+	return (
+		<span className="qmove">
+			<button
+				type="button"
+				aria-label="Move queued message up"
+				disabled={disableUp}
+				onMouseDown={(event) => event.preventDefault()}
+				onClick={(event) => {
+					event.stopPropagation();
+					onMove(id, "up");
+				}}
+			>
+				↑
+			</button>
+			<button
+				type="button"
+				aria-label="Move queued message down"
+				disabled={disableDown}
+				onMouseDown={(event) => event.preventDefault()}
+				onClick={(event) => {
+					event.stopPropagation();
+					onMove(id, "down");
+				}}
+			>
+				↓
+			</button>
+		</span>
 	);
 }
