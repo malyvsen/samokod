@@ -27,6 +27,14 @@ pub fn agent_text_of(update: &SessionUpdate) -> Option<String> {
     }
 }
 
+/// Extract streamed thought text from an update, if any. Pure.
+pub fn thought_text_of(update: &SessionUpdate) -> Option<String> {
+    match update {
+        SessionUpdate::AgentThoughtChunk(chunk) => text_of_block(&chunk.content),
+        _ => None,
+    }
+}
+
 /// Extract user message text from an update, if any. Pure.
 pub fn user_text_of(update: &SessionUpdate) -> Option<String> {
     match update {
@@ -201,6 +209,7 @@ mod tests {
         )));
         assert_eq!(agent_text_of(&update), Some("hello".to_string()));
         assert_eq!(user_text_of(&update), None);
+        assert_eq!(thought_text_of(&update), None);
     }
 
     #[test]
@@ -210,6 +219,17 @@ mod tests {
         )));
         assert_eq!(user_text_of(&update), Some("do things".to_string()));
         assert_eq!(agent_text_of(&update), None);
+        assert_eq!(thought_text_of(&update), None);
+    }
+
+    #[test]
+    fn thought_chunk_extracts_text() {
+        let update = SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::Text(
+            TextContent::new("considering"),
+        )));
+        assert_eq!(thought_text_of(&update), Some("considering".to_string()));
+        assert_eq!(agent_text_of(&update), None);
+        assert_eq!(user_text_of(&update), None);
     }
 
     #[test]
@@ -217,6 +237,7 @@ mod tests {
         let call = ToolCall::new("id-1", "title").kind(ToolKind::Read);
         let update = SessionUpdate::ToolCall(call);
         assert_eq!(agent_text_of(&update), None);
+        assert_eq!(thought_text_of(&update), None);
     }
 
     #[test]

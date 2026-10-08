@@ -212,6 +212,12 @@ pub enum AppEvent {
         session: SessionKey,
         chunk: String,
     },
+    /// Streamed thought tail. Transient only: the frontend keeps the tail
+    /// in ephemeral state and stores only the frozen burst duration.
+    AgentThought {
+        session: SessionKey,
+        chunk: String,
+    },
     /// Replayed user message chunk. Only emitted while a session's history
     /// loads, plus the eager executing/landing first prompt which emits
     /// live; live scoping turns append the user bubble optimistically instead.
@@ -352,5 +358,25 @@ mod tests {
     #[test]
     fn missing_binary_names_opencode() {
         assert!(AgentError::MissingBinary.to_string().contains("opencode"));
+    }
+
+    #[test]
+    fn thought_event_serializes_as_snake_case() {
+        let event = AppEvent::AgentThought {
+            session: SessionKey {
+                plan: "p".to_string(),
+                role: SessionRole::Scoping,
+            },
+            chunk: "considering".to_string(),
+        };
+        let value = serde_json::to_value(&event).expect("serializes");
+        assert_eq!(
+            value.get("type").and_then(|v| v.as_str()),
+            Some("agent_thought")
+        );
+        assert_eq!(
+            value.get("chunk").and_then(|v| v.as_str()),
+            Some("considering")
+        );
     }
 }

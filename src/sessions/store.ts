@@ -9,6 +9,7 @@ import type {
 	TranscriptItem,
 } from "../types";
 import { sessionKeyOf } from "../types";
+import { freezeBurst, type LiveStatus, liveForThought } from "./thoughts";
 
 export type SessionStart =
 	| { kind: "idle" }
@@ -29,6 +30,7 @@ export interface ChatState {
 	failed: boolean;
 	start: SessionStart;
 	scopingPreview: string | null;
+	live: LiveStatus | null;
 }
 
 export type Chats = Record<string, ChatState>;
@@ -44,6 +46,7 @@ export function emptyChat(): ChatState {
 		failed: false,
 		start: { kind: "idle" },
 		scopingPreview: null,
+		live: null,
 	};
 }
 
@@ -105,7 +108,11 @@ function beginStart(
 /// Pure per-session event reducer. Session-keyed events route into their own
 /// entry (background sessions update silently); global events leave the map
 /// untouched so the caller handles them separately.
-export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
+export function applySessionEvent(
+	chats: Chats,
+	event: AppEvent,
+	now: number = Date.now(),
+): Chats {
 	switch (event.type) {
 		case "plans_changed":
 		case "branch_changed":
@@ -113,9 +120,28 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 		case "agent_text": {
 			const key = event.session;
 			const chunk = event.chunk;
-			return updateEntry(chats, key, (chat) =>
-				withTranscript(chat, appendText(chat.transcript, chunk)),
-			);
+			return updateEntry(chats, key, (chat) => {
+				const frozen = freezeBurst(chat.transcript, chat.live);
+				const transcript = appendText(frozen, chunk);
+				if (chat.start.kind === "replaying") return { ...chat, transcript };
+				return {
+					...withTranscript(chat, transcript),
+					live: { kind: "waiting" },
+				};
+			});
+		}
+		case "agent_thought": {
+			const key = event.session;
+			const chunk = event.chunk;
+			return updateEntry(chats, key, (chat) => {
+				if (chat.start.kind === "replaying") return chat;
+				return {
+					...chat,
+					working: true,
+					failed: false,
+					live: liveForThought(chat.live, chunk, now),
+				};
+			});
 		}
 		case "user_text": {
 			const key = event.session;
@@ -133,21 +159,23 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 			const key = event.session;
 			const line = event.line;
 			return updateEntry(chats, key, (chat) => {
-				const index = chat.transcript.findIndex(
+				const frozen = freezeBurst(chat.transcript, chat.live);
+				const index = frozen.findIndex(
 					(item) => item.kind === "tool" && item.line.id === line.id,
 				);
 				const transcript: TranscriptItem[] =
 					index >= 0
-						? chat.transcript.map((item, current) =>
+						? frozen.map((item, current) =>
 								current === index && item.kind === "tool"
 									? { ...item, line }
 									: item,
 							)
-						: [
-								...chat.transcript,
-								{ kind: "tool", id: crypto.randomUUID(), line },
-							];
-				return withTranscript(chat, transcript);
+						: [...frozen, { kind: "tool", id: crypto.randomUUID(), line }];
+				if (chat.start.kind === "replaying") return { ...chat, transcript };
+				return {
+					...withTranscript(chat, transcript),
+					live: { kind: "waiting" },
+				};
 			});
 		}
 		case "turn_done":
@@ -156,6 +184,8 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 				working: false,
 				approval: false,
 				failed: false,
+				transcript: freezeBurst(chat.transcript, chat.live),
+				live: null,
 			}));
 		case "turn_failed":
 		case "agent_exited":
@@ -165,27 +195,30 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 				approval: false,
 				failed: true,
 				transcript: [
-					...chat.transcript,
+					...freezeBurst(chat.transcript, chat.live),
 					errorItem(event.raw, event.hint, event.retryable),
 				],
+				live: null,
 			}));
 		case "permission_asked":
 			return updateEntry(chats, event.session, (chat) => {
 				// Replayed approvals arrive already answered, so they render
 				// resolved without pausing for input.
 				const replaying = chat.start.kind === "replaying";
+				const transcript: TranscriptItem[] = [
+					...freezeBurst(chat.transcript, chat.live),
+					{
+						kind: "approval",
+						id: crypto.randomUUID(),
+						permission: event.permission,
+						resolved: replaying,
+					},
+				];
 				return {
 					...chat,
 					approval: replaying ? chat.approval : true,
-					transcript: [
-						...chat.transcript,
-						{
-							kind: "approval",
-							id: crypto.randomUUID(),
-							permission: event.permission,
-							resolved: replaying,
-						},
-					],
+					transcript,
+					live: replaying ? chat.live : { kind: "waiting" },
 				};
 			});
 		case "permission_resolved":
@@ -204,21 +237,30 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 				configOptions: event.options,
 			}));
 		case "todos_changed":
-			return updateEntry(chats, event.session, (chat) => ({
-				...chat,
-				todos: event.todos,
-				transcript:
-					event.changes.length > 0
-						? [
-								...chat.transcript,
-								{
-									kind: "todos",
-									id: crypto.randomUUID(),
-									changes: event.changes,
-								},
-							]
-						: chat.transcript,
-			}));
+			return updateEntry(chats, event.session, (chat) => {
+				if (event.changes.length === 0) {
+					return { ...chat, todos: event.todos };
+				}
+				const replaying = chat.start.kind === "replaying";
+				const transcript: TranscriptItem[] = [
+					...freezeBurst(chat.transcript, chat.live),
+					{
+						kind: "todos",
+						id: crypto.randomUUID(),
+						changes: event.changes,
+					},
+				];
+				return {
+					...chat,
+					todos: event.todos,
+					transcript,
+					live: replaying
+						? chat.live
+						: chat.working
+							? { kind: "waiting" }
+							: null,
+				};
+			});
 		case "spend_tick":
 			return updateEntry(chats, event.session, (chat) => ({
 				...chat,
@@ -231,21 +273,31 @@ export function applySessionEvent(chats: Chats, event: AppEvent): Chats {
 				spend: null,
 			}));
 		case "history_preparing":
-			return updateEntry(chats, event.session, (chat) =>
-				beginStart(chat, { kind: "preparing" }),
-			);
+			return updateEntry(chats, event.session, (chat) => ({
+				...beginStart(chat, { kind: "preparing" }),
+				live: null,
+			}));
 		case "history_begin":
-			return updateEntry(chats, event.session, (chat) =>
-				beginStart(chat, { kind: "replaying" }),
-			);
+			return updateEntry(chats, event.session, (chat) => ({
+				...beginStart(
+					{
+						...chat,
+						transcript: freezeBurst(chat.transcript, chat.live),
+					},
+					{ kind: "replaying" },
+				),
+				live: null,
+			}));
 		case "history_done":
 			return updateEntry(chats, event.session, (chat) => ({
 				...chat,
 				start: { kind: "idle" },
+				live: null,
 			}));
 		case "history_failed":
 			return updateEntry(chats, event.session, (chat) => ({
 				...chat,
+				live: null,
 				start: {
 					kind: "failed",
 					error: {
@@ -276,7 +328,7 @@ export function carryHistory(
 	const next = { ...chats };
 	const entry = next[sessionKeyOf(key)] ?? emptyChat();
 	delete next[sessionKeyOf(key)];
-	next[sessionKeyOf(historyKey)] = { ...entry, working: false };
+	next[sessionKeyOf(historyKey)] = { ...entry, working: false, live: null };
 	if (
 		executingRunning &&
 		sessionKeyOf(update.selected) !== sessionKeyOf(historyKey)
@@ -286,6 +338,7 @@ export function carryHistory(
 			...(next[id] ?? emptyChat()),
 			working: true,
 			failed: false,
+			live: null,
 		};
 	}
 	return next;

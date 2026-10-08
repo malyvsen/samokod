@@ -283,6 +283,15 @@ pub(crate) fn handle_notification(
             },
         );
     }
+    if let Some(chunk) = crate::updates::thought_text_of(&notification.update) {
+        emit_event(
+            app,
+            AppEvent::AgentThought {
+                session: key.clone(),
+                chunk,
+            },
+        );
+    }
     // User messages only surface here while history replays. Live turns
     // already show their bubble (scoping appends optimistically, eager
     // executing/landing first prompts arrive as their own event), so
@@ -385,8 +394,8 @@ pub(crate) fn handle_notification(
                 },
             );
         }
-        acp::SessionUpdate::AgentMessageChunk(_) => {}
-        // Already streamed as agent text above. Known-but-unrendered kinds
+        acp::SessionUpdate::AgentMessageChunk(_) | acp::SessionUpdate::AgentThoughtChunk(_) => {}
+        // Already streamed as agent text or thought above. Known-but-unrendered kinds
         // are routine; an unknown kind means protocol drift.
         update => match crate::updates::update_kind(update) {
             Some(kind) => log::debug!("unhandled session update: {kind}"),

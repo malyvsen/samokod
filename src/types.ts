@@ -141,6 +141,7 @@ export interface SpendView {
 
 export type AppEvent =
 	| { type: "agent_text"; session: SessionKey; chunk: string }
+	| { type: "agent_thought"; session: SessionKey; chunk: string }
 	| { type: "user_text"; session: SessionKey; chunk: string }
 	| { type: "tool_line"; session: SessionKey; line: ToolLineView }
 	| { type: "turn_done"; session: SessionKey }
@@ -194,6 +195,7 @@ export type AppEvent =
 export type TranscriptItem =
 	| { kind: "user"; id: string; text: string }
 	| { kind: "agent"; id: string; text: string }
+	| { kind: "thought"; id: string; seconds: number }
 	| { kind: "tool"; id: string; line: ToolLineView }
 	| { kind: "todos"; id: string; changes: TodoChangeView[] }
 	| {

@@ -47,6 +47,7 @@ import {
 	errorItem,
 	updateEntry,
 } from "./sessions/store";
+import { useThoughtTimers } from "./sessions/thoughts";
 import type {
 	AppEvent,
 	PlanEntry,
@@ -106,6 +107,7 @@ export function App() {
 	const readOnly = isReadOnly(entry);
 	useSessionStart(selectedKey, chats, readOnly);
 	useScopingPreview(selectedKey, updateChat);
+	useThoughtTimers(selectedKey, chat, updateChat);
 	const selectors =
 		chat === null
 			? { kind: "pending" as const, defaults: configDefaults }
@@ -558,6 +560,7 @@ export function App() {
 									repoLabel={repoLabel}
 									onRetry={readOnly ? null : handleRetry}
 									onAnswer={handleAnswer}
+									live={chat?.live ?? null}
 									onHistoryRetry={
 										chat?.start.kind === "failed" && chat.start.error.retryable
 											? handleHistoryRetry

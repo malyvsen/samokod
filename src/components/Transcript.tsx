@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { assertNever } from "../assert";
 import type { SessionStart } from "../sessions/store";
+import type { LiveStatus } from "../sessions/thoughts";
 import { todoMark, todoRowClass } from "../todos";
 import type {
 	PermissionOptionView,
@@ -20,6 +21,7 @@ export function Transcript({
 	onRetry,
 	onAnswer,
 	onHistoryRetry = null,
+	live = null,
 	children,
 }: {
 	items: TranscriptItem[];
@@ -29,6 +31,7 @@ export function Transcript({
 	onRetry: (() => void) | null;
 	onAnswer: (toolCallId: string, optionId: string) => void;
 	onHistoryRetry?: (() => void) | null;
+	live?: LiveStatus | null;
 	children?: ReactNode;
 }) {
 	return (
@@ -127,6 +130,13 @@ export function Transcript({
 							</div>
 						);
 					}
+					if (item.kind === "thought") {
+						return (
+							<div className="arow thought" key={item.id}>
+								thinking: {item.seconds}s
+							</div>
+						);
+					}
 					return (
 						<ErrorBar
 							key={item.id}
@@ -136,6 +146,10 @@ export function Transcript({
 						/>
 					);
 				})}
+				{live?.kind === "waiting" && (
+					<div className="arow waiting">waiting</div>
+				)}
+				{live?.kind === "thinking" && <ThinkingRow tail={live.tail} />}
 				{start?.kind === "failed" && (
 					<ErrorBar
 						raw={start.error.raw}
@@ -212,6 +226,24 @@ function ErrorBar({
 				)}
 			</div>
 			<div className="ehint">{hint}</div>
+		</div>
+	);
+}
+
+function ThinkingRow({ tail }: { tail: string }) {
+	const scrollRef = useRef<HTMLSpanElement>(null);
+	useEffect(() => {
+		const node = scrollRef.current;
+		if (node !== null && tail.length > 0) {
+			node.scrollLeft = node.scrollWidth;
+		}
+	}, [tail]);
+	return (
+		<div className="arow thinking">
+			<span className="tlabel">thinking:</span>
+			<span ref={scrollRef} className="tscroll" data-full={tail}>
+				{tail}
+			</span>
 		</div>
 	);
 }

@@ -266,3 +266,72 @@ describe("replayed updates", () => {
 		});
 	});
 });
+
+describe("thought bursts", () => {
+	test("thoughts stay silent while replaying", () => {
+		let chats = eventFor({ type: "history_preparing", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
+		chats = applySessionEvent(
+			chats,
+			{ type: "agent_thought", session: testKey(), chunk: "hmm" },
+			1000,
+		);
+		const chat = chatOf(chats);
+		expect(chat.live).toBeNull();
+		expect(chat.transcript).toEqual([]);
+		expect(chat.working).toBe(false);
+	});
+
+	test("content freezes the burst ahead with seconds", () => {
+		let chats = applySessionEvent(
+			withChat(),
+			{ type: "agent_thought", session: testKey(), chunk: "hello" },
+			1000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{ type: "agent_text", session: testKey(), chunk: "answer" },
+			2000,
+		);
+		const chat = chatOf(chats);
+		expect(chat.transcript[0]).toMatchObject({ kind: "thought", seconds: 1 });
+		expect(chat.transcript[1]).toMatchObject({ kind: "agent", text: "answer" });
+		expect(chat.live).toEqual({ kind: "waiting" });
+	});
+
+	test("turn end freezes the burst and clears live", () => {
+		let chats = applySessionEvent(
+			withChat(),
+			{ type: "agent_thought", session: testKey(), chunk: "hello" },
+			1000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{ type: "turn_done", session: testKey() },
+			9000,
+		);
+		const chat = chatOf(chats);
+		expect(chat.transcript[0]).toMatchObject({ kind: "thought", seconds: 1 });
+		expect(chat.live).toBeNull();
+		expect(chat.working).toBe(false);
+	});
+
+	test("history begin freezes the burst and stays silent", () => {
+		let chats = applySessionEvent(
+			withChat(),
+			{ type: "agent_thought", session: testKey(), chunk: "hello" },
+			1000,
+		);
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
+		const chat = chatOf(chats);
+		expect(chat.transcript[0]).toMatchObject({ kind: "thought", seconds: 1 });
+		expect(chat.live).toBeNull();
+		expect(chat.start).toEqual({ kind: "replaying" });
+	});
+});

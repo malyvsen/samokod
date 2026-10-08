@@ -217,6 +217,61 @@ describe("transcript agent tables", () => {
 	});
 });
 
+describe("transcript thought rows", () => {
+	test("frozen bursts read as thinking seconds", () => {
+		render(
+			<Transcript
+				items={[{ kind: "thought", id: "t1", seconds: 8 }]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		expect(screen.getByText("thinking: 8s")).toBeInTheDocument();
+	});
+
+	test("waiting shows a static row", () => {
+		const { container } = render(
+			<Transcript
+				items={[{ kind: "user", id: "u1", text: "hello" }]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				live={{ kind: "waiting" }}
+			/>,
+		);
+		expect(container.querySelector(".arow.waiting")?.textContent).toBe(
+			"waiting",
+		);
+	});
+
+	test("thinking shows the live tail with the full text tooltip", () => {
+		const { container } = render(
+			<Transcript
+				items={[{ kind: "user", id: "u1", text: "hello" }]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				live={{
+					kind: "thinking",
+					tail: "checking the directory",
+					burstStart: 0,
+					updatedAt: 1000,
+				}}
+			/>,
+		);
+		const row = container.querySelector(".arow.thinking");
+		expect(row?.textContent).toContain("thinking:");
+		expect(row?.textContent).toContain("checking the directory");
+		expect(container.querySelector(".tscroll")?.getAttribute("data-full")).toBe(
+			"checking the directory",
+		);
+	});
+});
+
 describe("transcript tool lines", () => {
 	test("renders tool line text as-is", () => {
 		render(
