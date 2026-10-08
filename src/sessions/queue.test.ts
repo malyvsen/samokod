@@ -1,7 +1,12 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 import { testKey } from "../fixtures";
-import { drainCandidate, queueReducer, useSessionQueues } from "./queue";
+import {
+	drainCandidate,
+	moveQueuedItem,
+	queueReducer,
+	useSessionQueues,
+} from "./queue";
 
 describe("queueReducer", () => {
 	test("enqueue appends per session", () => {
@@ -58,6 +63,126 @@ describe("queueReducer", () => {
 		const { result } = renderHook(() => useSessionQueues(testKey()));
 		expect(result.current.items).toEqual([]);
 		expect(result.current.editingId).toBeNull();
+	});
+
+	test("move middle up swaps with predecessor", () => {
+		const start = {
+			a: {
+				items: [
+					{ id: "1", text: "first" },
+					{ id: "2", text: "second" },
+					{ id: "3", text: "third" },
+				],
+				editingId: null,
+			},
+		};
+		const next = queueReducer(start, {
+			type: "move",
+			sessionId: "a",
+			id: "2",
+			direction: "up",
+		});
+		expect(next.a?.items.map((item) => item.id)).toEqual(["2", "1", "3"]);
+	});
+
+	test("move preserves editingId", () => {
+		const start = {
+			a: {
+				items: [
+					{ id: "1", text: "first" },
+					{ id: "2", text: "second" },
+				],
+				editingId: "2",
+			},
+		};
+		const next = queueReducer(start, {
+			type: "move",
+			sessionId: "a",
+			id: "2",
+			direction: "up",
+		});
+		expect(next.a?.items.map((item) => item.id)).toEqual(["2", "1"]);
+		expect(next.a?.editingId).toBe("2");
+	});
+
+	test("move only touches the targeted session", () => {
+		const start = {
+			a: {
+				items: [
+					{ id: "1", text: "first" },
+					{ id: "2", text: "second" },
+				],
+				editingId: null,
+			},
+			b: { items: [{ id: "9", text: "other" }], editingId: null },
+		};
+		const next = queueReducer(start, {
+			type: "move",
+			sessionId: "a",
+			id: "2",
+			direction: "up",
+		});
+		expect(next.a?.items.map((item) => item.id)).toEqual(["2", "1"]);
+		expect(next.b).toBe(start.b);
+	});
+
+	test("move no-op returns the same state reference", () => {
+		const start = {
+			a: {
+				items: [
+					{ id: "1", text: "first" },
+					{ id: "2", text: "second" },
+				],
+				editingId: null,
+			},
+		};
+		expect(
+			queueReducer(start, {
+				type: "move",
+				sessionId: "a",
+				id: "1",
+				direction: "up",
+			}),
+		).toBe(start);
+		expect(
+			queueReducer(start, {
+				type: "move",
+				sessionId: "a",
+				id: "unknown",
+				direction: "up",
+			}),
+		).toBe(start);
+	});
+});
+
+describe("moveQueuedItem", () => {
+	const items = [
+		{ id: "1", text: "first" },
+		{ id: "2", text: "second" },
+		{ id: "3", text: "third" },
+	];
+	test("middle up swaps with predecessor", () => {
+		expect(moveQueuedItem(items, "2", "up")?.map((item) => item.id)).toEqual([
+			"2",
+			"1",
+			"3",
+		]);
+	});
+	test("middle down swaps with successor", () => {
+		expect(moveQueuedItem(items, "2", "down")?.map((item) => item.id)).toEqual([
+			"1",
+			"3",
+			"2",
+		]);
+	});
+	test("first up returns null", () => {
+		expect(moveQueuedItem(items, "1", "up")).toBeNull();
+	});
+	test("last down returns null", () => {
+		expect(moveQueuedItem(items, "3", "down")).toBeNull();
+	});
+	test("unknown id returns null", () => {
+		expect(moveQueuedItem(items, "unknown", "up")).toBeNull();
 	});
 });
 

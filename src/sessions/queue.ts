@@ -8,15 +8,22 @@ export interface QueuedMessage {
 	text: string;
 }
 
-export function useSessionQueues(selectedKey: SessionKey | null): {
+export type QueueMoveDirection = "up" | "down";
+
+export interface SessionQueues {
 	items: QueuedMessage[];
 	editingId: string | null;
 	enqueue: (key: SessionKey, text: string) => void;
 	remove: (key: SessionKey, id: string) => void;
 	setText: (key: SessionKey, id: string, text: string) => void;
 	setEditing: (key: SessionKey, id: string | null) => void;
+	move: (key: SessionKey, id: string, direction: QueueMoveDirection) => void;
 	takeNext: (key: SessionKey) => QueuedMessage | null;
-} {
+}
+
+export function useSessionQueues(
+	selectedKey: SessionKey | null,
+): SessionQueues {
 	const [queues, dispatch] = useReducer(queueReducer, {});
 	const queuesRef = useRef(queues);
 	queuesRef.current = queues;
@@ -46,6 +53,18 @@ export function useSessionQueues(selectedKey: SessionKey | null): {
 		dispatch({ type: "setEditing", sessionId: sessionKeyOf(key), id });
 	}, []);
 
+	const move = useCallback(
+		(key: SessionKey, id: string, direction: QueueMoveDirection) => {
+			dispatch({
+				type: "move",
+				sessionId: sessionKeyOf(key),
+				id,
+				direction,
+			});
+		},
+		[],
+	);
+
 	const takeNext = useCallback((key: SessionKey) => {
 		const sessionId = sessionKeyOf(key);
 		const current = queuesRef.current[sessionId];
@@ -67,6 +86,7 @@ export function useSessionQueues(selectedKey: SessionKey | null): {
 		remove,
 		setText,
 		setEditing,
+		move,
 		takeNext,
 	};
 }
@@ -84,7 +104,13 @@ export type QueueAction =
 	| { type: "enqueue"; sessionId: string; message: QueuedMessage }
 	| { type: "remove"; sessionId: string; id: string }
 	| { type: "setText"; sessionId: string; id: string; text: string }
-	| { type: "setEditing"; sessionId: string; id: string | null };
+	| { type: "setEditing"; sessionId: string; id: string | null }
+	| {
+			type: "move";
+			sessionId: string;
+			id: string;
+			direction: QueueMoveDirection;
+	  };
 
 export function drainCandidate(
 	items: QueuedMessage[],
@@ -96,6 +122,24 @@ export function drainCandidate(
 	if (head === null) return null;
 	if (editingId !== null && editingId === head.id) return null;
 	return head;
+}
+
+export function moveQueuedItem(
+	items: QueuedMessage[],
+	id: string,
+	direction: QueueMoveDirection,
+): QueuedMessage[] | null {
+	const index = items.findIndex((item) => item.id === id);
+	if (index === -1) return null;
+	const target = direction === "up" ? index - 1 : index + 1;
+	if (target < 0 || target >= items.length) return null;
+	const next = [...items];
+	const current = next[index];
+	const other = next[target];
+	if (current === undefined || other === undefined) return null;
+	next[index] = other;
+	next[target] = current;
+	return next;
 }
 
 export function queueReducer(state: Queues, action: QueueAction): Queues {
@@ -149,6 +193,16 @@ export function queueReducer(state: Queues, action: QueueAction): Queues {
 					items: current?.items ?? [],
 					editingId: action.id,
 				},
+			};
+		}
+		case "move": {
+			const current = state[action.sessionId];
+			if (current === undefined) return state;
+			const next = moveQueuedItem(current.items, action.id, action.direction);
+			if (next === null) return state;
+			return {
+				...state,
+				[action.sessionId]: { items: next, editingId: current.editingId },
 			};
 		}
 		default:
