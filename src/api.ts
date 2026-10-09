@@ -88,6 +88,13 @@ export function setConfigOption(
 	return invoke("set_config_option", { session, configId, value });
 }
 
+export function setGlobalConfigOption(
+	configId: string,
+	value: string,
+): Promise<ConfigOptionView[]> {
+	return invoke("set_global_config_option", { configId, value });
+}
+
 export function warmSession(session: SessionKey): Promise<void> {
 	return invoke("warm_session", { session });
 }

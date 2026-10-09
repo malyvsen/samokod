@@ -64,6 +64,81 @@ impl AgentManager {
         log_roles("selected", &roles);
         Ok(response)
     }
+
+    /// Set one config option repo-wide: every live session gets the same
+    /// value, each `last_roles` refreshes from its own response, and moved
+    /// model/effort roles persist as the repo default. Returns the last
+    /// session's option list for the settings paint; with no live sessions
+    /// it fails instead of guessing.
+    pub async fn set_global_config_option(
+        &self,
+        config_id: String,
+        value: String,
+    ) -> Result<Vec<ConfigOptionView>, AgentError> {
+        let live: Vec<(SessionKey, ConnectionTo<Agent>, String)> = match self.state.lock() {
+            Ok(state) => state
+                .sessions
+                .iter()
+                .filter_map(|(key, live)| {
+                    let connection = live.connection.clone()?;
+                    let session_id = live.session_id.clone()?;
+                    (!connection.is_incoming_closed())
+                        .then(|| (key.clone(), connection, session_id))
+                })
+                .collect(),
+            Err(error) => {
+                log::warn!("failed to snapshot live sessions: {error}");
+                Vec::new()
+            }
+        };
+        if live.is_empty() {
+            return Err(AgentError::NoSession {
+                raw: "no live sessions to configure".to_string(),
+            });
+        }
+        let mut last = Vec::new();
+        for (key, connection, session_id) in live {
+            let response = send_config_option(
+                &connection,
+                &acp::SessionId::new(session_id),
+                &config_id,
+                &value,
+            )
+            .await
+            .map_err(|error| AgentError::RequestFailed { raw: error })?;
+            let roles = crate::repo_state::roles_from_options(&response);
+            let moved = match self.state.lock() {
+                Ok(mut state) => {
+                    let current = state
+                        .sessions
+                        .get(&key)
+                        .map(|live| live.last_roles.clone())
+                        .unwrap_or_default();
+                    let moved: Vec<crate::repo_state::ConfigRole> =
+                        crate::repo_state::ConfigRole::ALL
+                            .into_iter()
+                            .filter(|role| role.get(&current) != role.get(&roles))
+                            .collect();
+                    if let Some(live) = state.sessions.get_mut(&key) {
+                        live.last_roles = roles.clone();
+                    }
+                    Some(moved)
+                }
+                Err(error) => {
+                    log::warn!("failed to remember global choice: {error}");
+                    None
+                }
+            };
+            if let (Some(moved), Some(repo)) = (moved, self.current_repo()) {
+                for role in moved {
+                    crate::repo_state::set_role(&repo, role, role.get(&roles).map(String::as_str));
+                }
+            }
+            log_roles("selected", &roles);
+            last = response;
+        }
+        Ok(last)
+    }
 }
 
 /// Select one agent by mode id. Fails loud: a scoping session running as

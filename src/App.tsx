@@ -14,7 +14,7 @@ import {
 	retryLast,
 	selectPlan,
 	sendPrompt,
-	setConfigOption,
+	setGlobalConfigOption,
 	setPlanMode,
 	validateRepo,
 } from "./api";
@@ -24,8 +24,8 @@ import { PlanMdPane } from "./components/PlanMdPane";
 import { PlansPanel } from "./components/PlansPanel";
 import { QueuedBubbleList } from "./components/QueuedBubble";
 import { RepoPicker } from "./components/RepoPicker";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { SidePanel } from "./components/SidePanel";
-import { toSelectorModel } from "./components/selectors";
 import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
 import {
@@ -87,6 +87,7 @@ export function App() {
 		model: null,
 		effort: null,
 	});
+	const [sidebarMode, setSidebarMode] = useState<"plans" | "settings">("plans");
 	const appRef = useRef<HTMLDivElement>(null);
 	const notifyEdit = useAuroraMotion(appRef);
 	const configGeneration = useRef(0);
@@ -124,12 +125,6 @@ export function App() {
 	useThoughtTimers(selectedKey, chat, updateChat);
 	const planMd = usePlanMd(selectedKey, chat?.working ?? false);
 	const isScoping = selectedKey?.role === "scoping";
-	const selectors =
-		chat === null
-			? { kind: "pending" as const, defaults: configDefaults }
-			: readOnly
-				? { kind: "live" as const, options: chat.configOptions }
-				: toSelectorModel(chat.configOptions, configDefaults);
 
 	const sendNow = useCallback(
 		async (key: SessionKey, text: string) => {
@@ -499,16 +494,26 @@ export function App() {
 	}
 
 	async function handleConfigChange(configId: string, value: string) {
-		const key = selectedRef.current;
-		if (busy || readOnly || key === null) return;
 		configGeneration.current += 1;
 		const generation = configGeneration.current;
 		try {
-			const options = await setConfigOption(key, configId, value);
+			const options = await setGlobalConfigOption(configId, value);
 			if (configGeneration.current !== generation) return;
-			updateChat(key, (chat) => ({ ...chat, configOptions: options }));
+			setChats((current) => {
+				const next: Chats = { ...current };
+				for (const id of Object.keys(next)) {
+					const existing = next[id];
+					if (existing !== undefined) {
+						next[id] = { ...existing, configOptions: options };
+					}
+				}
+				return next;
+			});
 		} catch (error) {
-			console.warn(`set_config_option ${configId}=${value} failed`, error);
+			console.warn(
+				`set_global_config_option ${configId}=${value} failed`,
+				error,
+			);
 			return;
 		}
 	}
@@ -683,17 +688,33 @@ export function App() {
 						branch={branch}
 						chat={chat}
 						onStop={handleStop}
+						onToggleSettings={() =>
+							setSidebarMode((mode) =>
+								mode === "plans" ? "settings" : "plans",
+							)
+						}
 					/>
 					<div className="mainrow">
-						<PlansPanel
-							plans={plans}
-							selected={selectedKey}
-							onSelect={handleSelect}
-							onNewPlan={() => void handleNewPlan()}
-							onExecute={(key) => void handleExecute(key)}
-							onCancel={(key) => void handleCancel(key)}
-							onSetMode={(plan, manual) => void handleSetMode(plan, manual)}
-						/>
+						{sidebarMode === "plans" ? (
+							<PlansPanel
+								plans={plans}
+								selected={selectedKey}
+								onSelect={handleSelect}
+								onNewPlan={() => void handleNewPlan()}
+								onExecute={(key) => void handleExecute(key)}
+								onCancel={(key) => void handleCancel(key)}
+								onSetMode={(plan, manual) => void handleSetMode(plan, manual)}
+							/>
+						) : (
+							<SettingsPanel
+								chats={chats}
+								defaults={configDefaults}
+								disabled={busy}
+								onChange={(configId, value) =>
+									void handleConfigChange(configId, value)
+								}
+							/>
+						)}
 						<div className="chatcol">
 							<div className="transcript" ref={scrollRef} onScroll={onScroll}>
 								<Transcript
@@ -744,12 +765,7 @@ export function App() {
 						{isScoping ? (
 							<PlanMdPane text={planMd} />
 						) : (
-							<SidePanel
-								todos={chat?.todos ?? []}
-								selectors={selectors}
-								disabled={busy || readOnly}
-								onChange={handleConfigChange}
-							/>
+							<SidePanel todos={chat?.todos ?? []} />
 						)}
 					</div>
 				</>

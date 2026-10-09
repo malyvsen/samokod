@@ -199,6 +199,18 @@ async fn set_config_option(
 }
 
 #[tauri::command]
+async fn set_global_config_option(
+    state: State<'_, AgentManager>,
+    config_id: String,
+    value: String,
+) -> Result<Vec<ConfigOptionView>, String> {
+    state
+        .set_global_config_option(config_id, value)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn scoping_template(
     state: State<'_, AgentManager>,
     session: SessionKey,
@@ -289,6 +301,7 @@ pub fn run() {
             cancel_turn,
             answer_permission,
             set_config_option,
+            set_global_config_option,
             warm_session,
             load_history
         ])

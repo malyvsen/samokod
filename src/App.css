@@ -357,10 +357,19 @@ body {
 }
 
 .brand {
+	font: inherit;
 	font-weight: 700;
 	letter-spacing: 0.12em;
 	font-size: 12px;
 	color: #fff;
+	background: transparent;
+	border: 0;
+	padding: 0;
+	cursor: pointer;
+}
+
+button.brand:hover {
+	color: #7dffc4;
 }
 
 .repo-static {
@@ -1110,6 +1119,25 @@ body {
 	display: flex;
 	flex-direction: column;
 	gap: 4px;
+}
+
+.plans.settings {
+	gap: 10px;
+}
+
+.settings .sect {
+	display: grid;
+	gap: 6px;
+}
+
+.settings .slabel {
+	font-size: 11px;
+	letter-spacing: 0.14em;
+	color: #7dffc4;
+}
+
+.settings .dsel {
+	width: 100%;
 }
 
 .plan-group {

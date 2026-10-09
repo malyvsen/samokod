@@ -14,11 +14,13 @@ export function TopBar({
 	branch,
 	chat,
 	onStop,
+	onToggleSettings,
 }: {
 	repoLabel: string;
 	branch: string;
 	chat: ChatState | null;
 	onStop: () => void;
+	onToggleSettings: () => void;
 }) {
 	const status = agentStatusOf(chat);
 	const busy = isSessionBusy(chat);
@@ -31,7 +33,14 @@ export function TopBar({
 	);
 	return (
 		<div className="topbar">
-			<span className="brand">SAMOKOD</span>
+			<button
+				className="brand"
+				type="button"
+				onClick={onToggleSettings}
+				aria-label="Toggle settings"
+			>
+				SAMOKOD
+			</button>
 			<span className="repo-static">
 				{repoLabel} · {branch}
 			</span>

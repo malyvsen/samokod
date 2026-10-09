@@ -77,6 +77,10 @@ describe("pending pickers", () => {
 		await screen.findByText("No plan yet.");
 		expect(screen.queryByText("TODOS")).not.toBeInTheDocument();
 		expect(screen.queryByText("MODEL")).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Toggle settings" }));
+		await screen.findByText("stored-model");
+		expect(screen.getByText("MODEL")).toBeInTheDocument();
+		expect(screen.getByLabelText("Model")).toBeDisabled();
 	});
 
 	test("incoming config_options enables authoritative lists", async () => {
@@ -89,7 +93,8 @@ describe("pending pickers", () => {
 			selected: executingKey,
 			config_defaults: testDefaults({ model: "stale-model", effort: null }),
 		});
-		await openChat(api);
+		const user = await openChat(api);
+		await user.click(screen.getByRole("button", { name: "Toggle settings" }));
 		expect(screen.getByText("stale-model")).toBeInTheDocument();
 		emitAppEvent(api, {
 			type: "config_options",

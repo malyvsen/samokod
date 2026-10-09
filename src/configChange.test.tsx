@@ -65,10 +65,11 @@ beforeEach(() => {
 	stubMatchMedia();
 	api.getPrefs.mockResolvedValue({ recent: [] });
 	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "feature" });
-	api.setConfigOption.mockReset();
+	api.setGlobalConfigOption.mockReset();
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
 	api.scopingTemplate.mockResolvedValue(null);
+	api.planMdText.mockResolvedValue(null);
 });
 
 async function openChatWith(options: ConfigOptionView[]) {
@@ -90,24 +91,24 @@ async function openChatWith(options: ConfigOptionView[]) {
 		session: executingKey,
 		options,
 	});
+	await user.click(screen.getByRole("button", { name: "Toggle settings" }));
 	return { user, key: executingKey };
 }
 
 describe("config change", () => {
 	test("adopts the returned list including new options", async () => {
-		const { user, key } = await openChatWith([
+		const { user } = await openChatWith([
 			modelOption("openai/gpt-4o"),
 			modeOption(),
 		]);
-		api.setConfigOption.mockResolvedValue([
+		api.setGlobalConfigOption.mockResolvedValue([
 			modelOption("openai/gpt-5"),
 			effortOption("low"),
 			modeOption(),
 		]);
 		await user.click(screen.getByLabelText("Model"));
 		await user.click(screen.getByText("GPT-5"));
-		expect(api.setConfigOption).toHaveBeenCalledWith(
-			key,
+		expect(api.setGlobalConfigOption).toHaveBeenCalledWith(
 			"model",
 			"openai/gpt-5",
 		);
@@ -123,7 +124,7 @@ describe("config change", () => {
 		]);
 		const first = deferred<ConfigOptionView[]>();
 		const second = deferred<ConfigOptionView[]>();
-		api.setConfigOption
+		api.setGlobalConfigOption
 			.mockReturnValueOnce(first.promise)
 			.mockReturnValueOnce(second.promise);
 		await user.click(screen.getByLabelText("Effort"));
@@ -146,7 +147,7 @@ describe("config change", () => {
 			effortOption("low"),
 			modeOption(),
 		]);
-		api.setConfigOption.mockRejectedValue(new Error("denied"));
+		api.setGlobalConfigOption.mockRejectedValue(new Error("denied"));
 		await user.click(screen.getByLabelText("Effort"));
 		await user.click(screen.getByText("Medium"));
 		await screen.findByText("Low");

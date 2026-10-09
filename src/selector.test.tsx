@@ -1,8 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
-import { SidePanel } from "./components/SidePanel";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { toSelectorModel } from "./components/selectors";
+import { emptyChat } from "./sessions/store";
 import type { ConfigOptionView } from "./types";
 
 const standard: ConfigOptionView[] = [
@@ -77,16 +78,18 @@ function selectors(
 	onChange: (configId: string, value: string) => void,
 ) {
 	return (
-		<SidePanel
-			todos={[]}
-			selectors={{ kind: "live", options }}
+		<SettingsPanel
+			chats={{
+				"a::executing": { ...emptyChat(), configOptions: options },
+			}}
+			defaults={{ model: null, effort: null }}
 			disabled={disabled}
 			onChange={onChange}
 		/>
 	);
 }
 
-describe("sidebar selectors", () => {
+describe("settings selectors", () => {
 	test("shows current model", () => {
 		render(selectors(standard, false, vi.fn()));
 		expect(screen.getByText("Big Pickle")).toBeInTheDocument();

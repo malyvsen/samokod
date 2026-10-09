@@ -8,13 +8,17 @@ function chatWith(overrides: Partial<ChatState> = {}): ChatState {
 	return { ...emptyChat(), ...overrides };
 }
 
-function topBar(chat: ChatState | null, options: { onStop?: () => void } = {}) {
+function topBar(
+	chat: ChatState | null,
+	options: { onStop?: () => void; onToggleSettings?: () => void } = {},
+) {
 	return (
 		<TopBar
 			repoLabel="~/repo"
 			branch="feature"
 			chat={chat}
 			onStop={options.onStop ?? vi.fn()}
+			onToggleSettings={options.onToggleSettings ?? vi.fn()}
 		/>
 	);
 }
@@ -114,5 +118,15 @@ describe("top bar", () => {
 		expect(
 			screen.queryByRole("button", { name: /plan phase/ }),
 		).not.toBeInTheDocument();
+	});
+
+	test("brand is a button that toggles settings", () => {
+		const onToggleSettings = vi.fn();
+		render(topBar(chatWith(), { onToggleSettings }));
+		const brand = screen.getByRole("button", { name: "Toggle settings" });
+		expect(brand.textContent).toBe("SAMOKOD");
+		expect(brand.className).toContain("brand");
+		brand.click();
+		expect(onToggleSettings).toHaveBeenCalledTimes(1);
 	});
 });
