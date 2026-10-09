@@ -739,8 +739,6 @@ export function App() {
 						</div>
 						<SidePanel
 							todos={chat?.todos ?? []}
-							spend={chat?.spend ?? null}
-							sessionId={selectedId ?? ""}
 							selectors={selectors}
 							disabled={busy || readOnly}
 							onChange={handleConfigChange}

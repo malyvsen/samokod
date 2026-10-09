@@ -198,7 +198,7 @@ describe("plan", () => {
 		).toBeInTheDocument();
 	});
 
-	test("selecting a row swaps transcript, todos, and cost", async () => {
+	test("selecting a row swaps transcript and todos", async () => {
 		api.openRepo.mockResolvedValue({
 			repo_root: "/repo",
 			branch: "feature",
@@ -232,12 +232,6 @@ describe("plan", () => {
 			todos: [{ content: "Beta todo", status: "pending" }],
 			changes: [],
 		});
-		emitAppEvent(api, {
-			type: "spend_tick",
-			session: bbb,
-			cost: 1.5,
-			ctx_pct: 10,
-		});
 		expect(screen.getByText("aaa chat")).toBeInTheDocument();
 		await user.click(
 			screen.getByRole("button", { name: "Beta, scoping, opens Scoping" }),
@@ -246,7 +240,7 @@ describe("plan", () => {
 		await screen.findByText("bbb chat");
 		expect(screen.queryByText("aaa chat")).not.toBeInTheDocument();
 		expect(screen.getByText("Beta todo")).toBeInTheDocument();
-		expect(screen.getByText("$1.50")).toBeInTheDocument();
+		expect(screen.queryByText("$1.50")).not.toBeInTheDocument();
 		await user.click(
 			screen.getByRole("button", { name: "Alpha, scoping, opens Scoping" }),
 		);

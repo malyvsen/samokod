@@ -1,3 +1,5 @@
+import { formatContext, formatCost } from "../../spend";
+import { todoMark, todoRowClass } from "../../todos";
 import type { SessionKey, SessionStatusView } from "../../types";
 import type { AttentionKind } from "./planDisplay";
 import { roleLabel } from "./planDisplay";
@@ -36,6 +38,25 @@ export function SessionRow({
 				>
 					<span className="slabel">{roleLabel(status.role)}</span>
 				</button>
+				<span className="sess-tip" aria-hidden="true">
+					<span className="costline">
+						<span>{formatCost(status.spend.cost)}</span>
+						<span>{formatContext(status.spend.ctx_pct)}</span>
+					</span>
+					{status.todos.length === 0 ? (
+						<span className="trow dim">No todos yet</span>
+					) : (
+						status.todos.map((todo) => (
+							<span
+								className={`trow ${todoRowClass(todo.status)}`}
+								key={todo.content}
+							>
+								<span className="mark">[{todoMark(todo.status)}]</span>
+								<span className="txt">{todo.content}</span>
+							</span>
+						))
+					)}
+				</span>
 			</div>
 		</>
 	);

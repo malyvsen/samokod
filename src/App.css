@@ -1390,6 +1390,7 @@ body {
 }
 
 .sbody {
+	position: relative;
 	display: flex;
 	align-items: center;
 	gap: 8px;
@@ -1400,6 +1401,75 @@ body {
 
 .sbody:hover {
 	background: rgba(255, 255, 255, 0.04);
+}
+
+.sess-tip {
+	display: none;
+	position: absolute;
+	left: 0;
+	top: calc(100% + 4px);
+	width: 260px;
+	max-width: 260px;
+	padding: 6px 8px;
+	font-size: 12px;
+	letter-spacing: normal;
+	color: #e8e6e1;
+	background: rgba(8, 8, 12, 0.95);
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	z-index: 10;
+}
+
+.sbody:hover .sess-tip,
+.sbody:focus-within .sess-tip {
+	display: block;
+}
+
+.sess-tip .costline {
+	display: grid;
+	gap: 2px;
+	margin-bottom: 6px;
+	color: #9d9a92;
+	font-variant-numeric: tabular-nums;
+}
+
+.sess-tip .trow {
+	display: flex;
+	gap: 6px;
+	padding: 2px 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: #e8e6e1;
+}
+
+.sess-tip .trow .mark {
+	flex: none;
+	width: 26px;
+	color: #8f8c85;
+}
+
+.sess-tip .trow .txt {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.sess-tip .trow.done {
+	color: #8f8c85;
+}
+
+.sess-tip .trow.done .mark {
+	color: #7dffc4;
+}
+
+.sess-tip .trow.active .mark {
+	color: #ffd98a;
+}
+
+.sess-tip .trow.dim {
+	color: #8f8c85;
 }
 
 .sbody .srow {
@@ -1648,6 +1718,7 @@ body {
 	text-overflow: ellipsis;
 }
 
+/* biome-ignore lint/style/noDescendingSpecificity: sess-tip and todo marks live in disjoint subtrees, order is irrelevant */
 .todo .row .mark {
 	flex: none;
 	color: #8f8c85;

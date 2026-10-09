@@ -79,8 +79,6 @@ function selectors(
 	return (
 		<SidePanel
 			todos={[]}
-			spend={null}
-			sessionId="s1"
 			selectors={{ kind: "live", options }}
 			disabled={disabled}
 			onChange={onChange}

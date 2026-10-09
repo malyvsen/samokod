@@ -637,6 +637,82 @@ describe("plans panel", () => {
 			).toBeNull();
 		});
 
+		test("hover tooltip shows stacked cost and context", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing", {
+						spend: { cost: 1.24, ctx_pct: 38.4 },
+						todos: [],
+					}),
+				],
+			);
+			const { container } = render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "executing" })}
+				/>,
+			);
+			const tips = container.querySelectorAll(".sess-tip .costline");
+			expect(tips.length).toBeGreaterThan(0);
+			expect(screen.getAllByText("$1.24").length).toBeGreaterThan(0);
+			expect(screen.getAllByText("38% context").length).toBeGreaterThan(0);
+		});
+
+		test("hover tooltip lists todos with status marks", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing", {
+						spend: { cost: 0.42, ctx_pct: 10 },
+						todos: [
+							{ content: "Add retry", status: "completed" },
+							{ content: "Wire view", status: "in_progress" },
+							{ content: "Verify green", status: "pending" },
+						],
+					}),
+				],
+			);
+			const { container } = render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "executing" })}
+				/>,
+			);
+			expect(screen.getAllByText("Add retry").length).toBeGreaterThan(0);
+			expect(screen.getAllByText("Wire view").length).toBeGreaterThan(0);
+			const tips = [...container.querySelectorAll(".sess-tip")];
+			const doneMark = tips
+				.map((tip) => tip.querySelector(".trow.done .mark")?.textContent)
+				.find((text) => text !== undefined);
+			expect(doneMark).toContain("x");
+			const activeMark = tips
+				.map((tip) => tip.querySelector(".trow.active .mark")?.textContent)
+				.find((text) => text !== undefined);
+			expect(activeMark).toContain(">");
+			for (const tip of tips) {
+				expect(tip.textContent).not.toContain("1/3");
+			}
+		});
+
+		test("hover tooltip shows empty todos without counts", () => {
+			const plan = testEntryWith("empty", "scoping", "Empty", false, [
+				testStatus("scoping", { spend: { cost: 0, ctx_pct: 0 }, todos: [] }),
+			]);
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "scoping" })}
+				/>,
+			);
+			expect(screen.getAllByText("No todos yet").length).toBeGreaterThan(0);
+		});
+
 		test("finished plans have no buttons", () => {
 			const { container } = render(
 				<PlansPanel
