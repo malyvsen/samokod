@@ -50,7 +50,7 @@ beforeEach(() => {
 });
 
 describe("pending pickers", () => {
-	test("createPlan with empty options loads history and shows stored labels", async () => {
+	test("createPlan with empty options loads history and shows the plan pane", async () => {
 		api.openRepo.mockResolvedValue({
 			repo_root: "/repo",
 			branch: "feature",
@@ -74,26 +74,26 @@ describe("pending pickers", () => {
 				role: "scoping",
 			}),
 		);
-		expect(screen.getByText("MODEL")).toBeInTheDocument();
-		expect(screen.getByText("EFFORT")).toBeInTheDocument();
-		expect(screen.getByText("stored-model")).toBeInTheDocument();
-		expect(screen.getByLabelText("Model")).toBeDisabled();
-		expect(screen.getByLabelText("Effort")).toBeDisabled();
+		await screen.findByText("No plan yet.");
+		expect(screen.queryByText("TODOS")).not.toBeInTheDocument();
+		expect(screen.queryByText("MODEL")).not.toBeInTheDocument();
 	});
 
 	test("incoming config_options enables authoritative lists", async () => {
+		const executingPlan = "2026-09-25.10-54-59.slug";
+		const executingKey = { plan: executingPlan, role: "executing" as const };
 		api.openRepo.mockResolvedValue({
 			repo_root: "/repo",
 			branch: "feature",
-			plans: [testEntry()],
-			selected: testKey(),
+			plans: [testEntry(executingPlan, "executing", "Shiny", true)],
+			selected: executingKey,
 			config_defaults: testDefaults({ model: "stale-model", effort: null }),
 		});
 		await openChat(api);
 		expect(screen.getByText("stale-model")).toBeInTheDocument();
 		emitAppEvent(api, {
 			type: "config_options",
-			session: testKey(),
+			session: executingKey,
 			options: authoritative(),
 		});
 		await screen.findByText("Real Model");

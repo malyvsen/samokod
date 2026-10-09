@@ -210,6 +210,34 @@ pub(crate) fn reserve_scoping_name(
     plans::unique_name(&plans::timestamp_now(), &taken)
 }
 
+/// Live `plan.md` text for one session's plan, or `None` when the file is
+/// absent. Searches every phase by name via `PlanRef::plan_md` since the
+/// file travels with renames. Pure file read.
+pub(crate) fn plan_md_text_for(
+    repo_root: &Path,
+    session: &SessionKey,
+) -> Result<Option<String>, String> {
+    for phase in [
+        plans::Phase::Scoping,
+        plans::Phase::Executing,
+        plans::Phase::Landing,
+        plans::Phase::Completed,
+        plans::Phase::Cancelled,
+    ] {
+        let plan_ref = plans::PlanRef {
+            name: session.plan.clone(),
+            phase,
+        };
+        let path = plan_ref.plan_md(repo_root);
+        if path.is_file() {
+            let text = std::fs::read_to_string(&path)
+                .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+            return Ok(Some(text));
+        }
+    }
+    Ok(None)
+}
+
 #[derive(Clone)]
 pub struct AgentManager {
     state: Arc<Mutex<State>>,
@@ -613,6 +641,20 @@ impl AgentManager {
             });
         };
         scoping_template_for(&state_guard, &repo_root, &session)
+    }
+
+    /// Live `plan.md` text for one session's plan, or `None` when the file
+    /// does not exist yet (fresh scoping, pending, or bare). Searches every
+    /// phase by name since the file travels with renames; read-only, never
+    /// creates directories. Pure file read except the repo-root snapshot.
+    pub fn plan_md_text(&self, session: SessionKey) -> Result<Option<String>, AgentError> {
+        let Some(repo_root) = lock_state(&self.state).and_then(|state| state.repo_root.clone())
+        else {
+            return Err(AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            });
+        };
+        plan_md_text_for(&repo_root, &session).map_err(|raw| AgentError::RequestFailed { raw })
     }
 
     /// Live worktree coordinates plus landing state for one plan. The
@@ -1413,6 +1455,34 @@ mod tests {
             role: SessionRole::Scoping,
         };
         assert!(scoping_template_for(&state, root, &gone).is_err());
+    }
+
+    #[test]
+    fn plan_md_text_reads_live_file_or_none() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let key = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert_eq!(plan_md_text_for(root, &key).expect("missing"), None);
+        let scoping = plans::materialize_scoping(root, name).expect("materialize");
+        assert_eq!(plan_md_text_for(root, &key).expect("bare"), None);
+        std::fs::write(scoping.plan_md(root), "# Shiny\n\nSteps.\n").expect("write");
+        let text = plan_md_text_for(root, &key)
+            .expect("read")
+            .expect("present");
+        assert!(text.contains("# Shiny"));
+        let executing = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Executing,
+        };
+        let moved = plan_md_text_for(root, &executing)
+            .expect("read executing")
+            .expect("present");
+        assert_eq!(moved, text);
     }
 
     #[test]

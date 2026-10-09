@@ -198,7 +198,7 @@ describe("plan", () => {
 		).toBeInTheDocument();
 	});
 
-	test("selecting a row swaps transcript and todos", async () => {
+	test("selecting a row swaps transcript while scoping shows the plan", async () => {
 		api.openRepo.mockResolvedValue({
 			repo_root: "/repo",
 			branch: "feature",
@@ -226,12 +226,6 @@ describe("plan", () => {
 		emitAppEvent(api, { type: "turn_done", session: aaa });
 		emitAppEvent(api, { type: "agent_text", session: bbb, chunk: "bbb chat" });
 		emitAppEvent(api, { type: "turn_done", session: bbb });
-		emitAppEvent(api, {
-			type: "todos_changed",
-			session: bbb,
-			todos: [{ content: "Beta todo", status: "pending" }],
-			changes: [],
-		});
 		expect(screen.getByText("aaa chat")).toBeInTheDocument();
 		await user.click(
 			screen.getByRole("button", { name: "Beta, scoping, opens Scoping" }),
@@ -239,13 +233,12 @@ describe("plan", () => {
 		expect(api.selectPlan).toHaveBeenCalledWith(bbb, null);
 		await screen.findByText("bbb chat");
 		expect(screen.queryByText("aaa chat")).not.toBeInTheDocument();
-		expect(screen.getByText("Beta todo")).toBeInTheDocument();
-		expect(screen.queryByText("$1.50")).not.toBeInTheDocument();
+		expect(screen.getByText("No plan yet.")).toBeInTheDocument();
+		expect(screen.queryByText("TODOS")).not.toBeInTheDocument();
 		await user.click(
 			screen.getByRole("button", { name: "Alpha, scoping, opens Scoping" }),
 		);
 		await screen.findByText("aaa chat");
-		expect(screen.queryByText("Beta todo")).not.toBeInTheDocument();
 	});
 
 	test("selecting away drops only the empty previous session", async () => {

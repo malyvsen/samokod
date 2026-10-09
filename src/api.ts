@@ -60,6 +60,10 @@ export function scopingTemplate(session: SessionKey): Promise<string | null> {
 	return invoke<string | null>("scoping_template", { session });
 }
 
+export function planMdText(session: SessionKey): Promise<string | null> {
+	return invoke<string | null>("plan_md_text", { session });
+}
+
 export function retryLast(session: SessionKey): Promise<boolean> {
 	return invoke<boolean>("retry_last", { session });
 }

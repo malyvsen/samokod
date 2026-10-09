@@ -209,6 +209,16 @@ async fn scoping_template(
 }
 
 #[tauri::command]
+async fn plan_md_text(
+    state: State<'_, AgentManager>,
+    session: SessionKey,
+) -> Result<Option<String>, String> {
+    state
+        .plan_md_text(session)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn warm_session(state: State<'_, AgentManager>, session: SessionKey) -> Result<(), String> {
     state
         .warm_session(session)
@@ -274,6 +284,7 @@ pub fn run() {
             set_plan_mode,
             send_prompt,
             scoping_template,
+            plan_md_text,
             retry_last,
             cancel_turn,
             answer_permission,

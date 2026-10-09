@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { testDefaults, testEntry, testKey } from "./fixtures";
+import { testDefaults, testEntry } from "./fixtures";
 import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
 import type { ConfigOptionView } from "./types";
 
@@ -75,25 +75,27 @@ async function openChatWith(options: ConfigOptionView[]) {
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo" }],
 	});
+	const executingPlan = "2026-09-25.10-54-59.slug";
+	const executingKey = { plan: executingPlan, role: "executing" as const };
 	api.openRepo.mockResolvedValue({
 		repo_root: "/repo",
 		branch: "feature",
-		plans: [testEntry()],
-		selected: testKey(),
+		plans: [testEntry(executingPlan, "executing", "Shiny", true)],
+		selected: executingKey,
 		config_defaults: testDefaults(),
 	});
 	const user = await openChat(api);
 	emitAppEvent(api, {
 		type: "config_options",
-		session: testKey(),
+		session: executingKey,
 		options,
 	});
-	return user;
+	return { user, key: executingKey };
 }
 
 describe("config change", () => {
 	test("adopts the returned list including new options", async () => {
-		const user = await openChatWith([
+		const { user, key } = await openChatWith([
 			modelOption("openai/gpt-4o"),
 			modeOption(),
 		]);
@@ -105,7 +107,7 @@ describe("config change", () => {
 		await user.click(screen.getByLabelText("Model"));
 		await user.click(screen.getByText("GPT-5"));
 		expect(api.setConfigOption).toHaveBeenCalledWith(
-			testKey(),
+			key,
 			"model",
 			"openai/gpt-5",
 		);
@@ -114,7 +116,7 @@ describe("config change", () => {
 	});
 
 	test("ignores a stale earlier response", async () => {
-		const user = await openChatWith([
+		const { user } = await openChatWith([
 			modelOption("openai/gpt-5"),
 			effortOption("low"),
 			modeOption(),
@@ -139,7 +141,7 @@ describe("config change", () => {
 	});
 
 	test("keeps the previous list when the change fails", async () => {
-		const user = await openChatWith([
+		const { user } = await openChatWith([
 			modelOption("openai/gpt-5"),
 			effortOption("low"),
 			modeOption(),

@@ -23,6 +23,7 @@ export const api = {
 	warmSession: vi.fn(),
 	loadHistory: vi.fn(),
 	scopingTemplate: vi.fn(),
+	planMdText: vi.fn(async () => null as string | null),
 	onAppEvent: vi.fn(() => () => {}),
 };
 
@@ -33,10 +34,11 @@ export const dialog = {
 export function emitAppEvent(apiMock: typeof api, event: AppEvent): void {
 	type Handler = (event: AppEvent) => void;
 	const calls = apiMock.onAppEvent.mock.calls as unknown as Handler[][];
-	const handler = calls.at(-1)?.[0];
-	if (handler === undefined) throw new Error("no app event handler");
+	if (calls.length === 0) throw new Error("no app event handler");
 	act(() => {
-		handler(event);
+		for (const call of calls) {
+			call[0]?.(event);
+		}
 	});
 }
 

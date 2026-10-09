@@ -20,6 +20,7 @@ import {
 } from "./api";
 import { reducedMotion, useAuroraMotion } from "./auroraMotion";
 import { DraftBubble } from "./components/DraftBubble";
+import { PlanMdPane } from "./components/PlanMdPane";
 import { PlansPanel } from "./components/PlansPanel";
 import { QueuedBubbleList } from "./components/QueuedBubble";
 import { RepoPicker } from "./components/RepoPicker";
@@ -32,6 +33,7 @@ import {
 	shouldKeepOnSwitch,
 	useSessionDrafts,
 } from "./sessions/drafts";
+import { usePlanMd } from "./sessions/planMd";
 import { previewPromiseFor, useScopingPreview } from "./sessions/preview";
 import {
 	type QueueMoveDirection,
@@ -120,6 +122,8 @@ export function App() {
 	useSessionStart(selectedKey, chats, readOnly);
 	useScopingPreview(selectedKey, updateChat);
 	useThoughtTimers(selectedKey, chat, updateChat);
+	const planMd = usePlanMd(selectedKey, chat?.working ?? false);
+	const isScoping = selectedKey?.role === "scoping";
 	const selectors =
 		chat === null
 			? { kind: "pending" as const, defaults: configDefaults }
@@ -737,12 +741,16 @@ export function App() {
 								</Transcript>
 							</div>
 						</div>
-						<SidePanel
-							todos={chat?.todos ?? []}
-							selectors={selectors}
-							disabled={busy || readOnly}
-							onChange={handleConfigChange}
-						/>
+						{isScoping ? (
+							<PlanMdPane text={planMd} />
+						) : (
+							<SidePanel
+								todos={chat?.todos ?? []}
+								selectors={selectors}
+								disabled={busy || readOnly}
+								onChange={handleConfigChange}
+							/>
+						)}
 					</div>
 				</>
 			)}
