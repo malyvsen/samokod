@@ -10,7 +10,7 @@ use crate::plans;
 use crate::todos::estimate_remaining;
 use crate::types::{
     AppEvent, OpenRepoResult, PlanEntry, PlansUpdate, RepoDefaults, SessionKey, SessionRole,
-    SessionStatusView, TodoProgressView, TodoStatus,
+    SessionStatusView, SpendStatusView, TodoProgressView, TodoStatus,
 };
 
 use super::AgentManager;
@@ -202,6 +202,13 @@ pub(crate) fn session_statuses(
                 failed: live.map(|live| live.failed).unwrap_or(false),
                 live: live.map(|live| live.is_live()).unwrap_or(false),
                 progress: live.and_then(progress_for),
+                spend: live
+                    .map(|live| SpendStatusView {
+                        cost: live.cost,
+                        ctx_pct: live.ctx_pct,
+                    })
+                    .unwrap_or_default(),
+                todos: live.map(|live| live.todos.clone()).unwrap_or_default(),
             }
         })
         .collect()

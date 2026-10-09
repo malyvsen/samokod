@@ -31,6 +31,8 @@ export function testStatus(
 		failed: false,
 		live: false,
 		progress: null,
+		spend: { cost: 0, ctx_pct: 0 },
+		todos: [],
 		...overrides,
 	};
 }

@@ -53,6 +53,13 @@ export interface SessionStatusView {
 	failed: boolean;
 	live: boolean;
 	progress: TodoProgressView | null;
+	spend: SessionSpend;
+	todos: TodoView[];
+}
+
+interface SessionSpend {
+	cost: number;
+	ctx_pct: number;
 }
 
 /// Phase of one plan: where its directory lives under `.samokod/plans/`.

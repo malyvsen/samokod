@@ -133,6 +133,8 @@ pub(crate) struct LiveSession {
     pub(crate) pending: HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>,
     pub(crate) todos: Vec<crate::types::TodoView>,
     pub(crate) todos_started_at: Option<std::time::SystemTime>,
+    pub(crate) cost: f64,
+    pub(crate) ctx_pct: f64,
     pub(crate) tool_calls: HashMap<String, crate::acp::ToolCall>,
     pub(crate) plan: ActivePlan,
 }
@@ -151,6 +153,8 @@ impl LiveSession {
             pending: HashMap::new(),
             todos: Vec::new(),
             todos_started_at: None,
+            cost: 0.0,
+            ctx_pct: 0.0,
             tool_calls: HashMap::new(),
             plan,
         }
@@ -287,6 +291,8 @@ impl AgentManager {
                     pending: HashMap::new(),
                     todos: Vec::new(),
                     todos_started_at: None,
+                    cost: 0.0,
+                    ctx_pct: 0.0,
                     tool_calls: HashMap::new(),
                     plan,
                 },

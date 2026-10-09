@@ -149,7 +149,7 @@ pub struct SessionKey {
 ///
 /// failed red, approval amber, working green, idle active blue, the rest
 /// gray.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionStatusView {
     pub role: SessionRole,
     pub working: bool,
@@ -158,6 +158,20 @@ pub struct SessionStatusView {
     pub live: bool,
     #[serde(default)]
     pub progress: Option<TodoProgressView>,
+    #[serde(default)]
+    pub spend: SpendStatusView,
+    #[serde(default)]
+    pub todos: Vec<TodoView>,
+}
+
+/// Spend totals for one session, mirrored from the latest `UsageUpdate`.
+/// `ctx_pct` matches the `SpendTick` event field name.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct SpendStatusView {
+    #[serde(default)]
+    pub cost: f64,
+    #[serde(default)]
+    pub ctx_pct: f64,
 }
 
 /// Per-session todo progress for the plans list. `eta_secs` is `None`
@@ -171,7 +185,7 @@ pub struct TodoProgressView {
 }
 
 /// One plan row for the plans list.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlanEntry {
     pub name: String,
     pub phase: crate::plans::Phase,
@@ -195,7 +209,7 @@ pub struct RepoDefaults {
 
 /// Plans list pushed after every prompt, transition, or title change,
 /// and returned by plan commands.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlansUpdate {
     pub plans: Vec<PlanEntry>,
     pub selected: SessionKey,
@@ -204,7 +218,7 @@ pub struct PlansUpdate {
 
 /// Repository payload returned after opening a repo. No agents spawn here;
 /// every session starts lazily on its first prompt.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OpenRepoResult {
     pub repo_root: String,
     pub branch: String,

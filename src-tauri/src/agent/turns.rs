@@ -386,14 +386,23 @@ pub(crate) fn handle_notification(
             }
         }
         acp::SessionUpdate::UsageUpdate(update) => {
+            let cost = update.cost.as_ref().map(|cost| cost.amount).unwrap_or(0.0);
+            let ctx_pct = context_pct(update.used, update.size);
+            if let Some(mut guard) = lock_state(state)
+                && let Some(live) = guard.sessions.get_mut(key)
+            {
+                live.cost = cost;
+                live.ctx_pct = ctx_pct;
+            }
             emit_event(
                 app,
                 AppEvent::SpendTick {
                     session: key.clone(),
-                    cost: update.cost.as_ref().map(|cost| cost.amount).unwrap_or(0.0),
-                    ctx_pct: context_pct(update.used, update.size),
+                    cost,
+                    ctx_pct,
                 },
             );
+            push_sorted(state, app);
         }
         acp::SessionUpdate::ConfigOptionUpdate(update) => {
             let options = config_views(&update.config_options);
