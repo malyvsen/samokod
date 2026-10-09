@@ -5,7 +5,6 @@ import {
 	OptionDropdown,
 	pendingOptions,
 	splitOptions,
-	toSelectorModel,
 } from "./selectors";
 
 export function SettingsPanel({
@@ -19,35 +18,12 @@ export function SettingsPanel({
 	disabled: boolean;
 	onChange: (configId: string, value: string) => void;
 }) {
-	const liveOptions = liveOptionsFrom(chats);
-	const selectors =
-		liveOptions === null
-			? { kind: "pending" as const, defaults }
-			: toSelectorModel(liveOptions, defaults);
-	if (selectors.kind === "pending") {
-		const pending = pendingOptions(selectors.defaults);
-		return (
-			<div className="plans settings">
-				<div className="sect">
-					<div className="slabel">MODEL</div>
-					<OptionDropdown
-						option={pending.model}
-						disabled={true}
-						onChange={onChange}
-					/>
-				</div>
-				<div className="sect">
-					<div className="slabel">EFFORT</div>
-					<OptionDropdown
-						option={pending.effort}
-						disabled={true}
-						onChange={onChange}
-					/>
-				</div>
-			</div>
-		);
-	}
-	const { model, effort, extras } = splitOptions(selectors.options);
+	const live = liveOptionsFrom(chats);
+	const { model, effort, extras } =
+		live === null
+			? { ...pendingOptions(defaults), extras: [] }
+			: splitOptions(live);
+	const frozen = live === null;
 	return (
 		<div className="plans settings">
 			{model !== undefined && (
@@ -55,7 +31,7 @@ export function SettingsPanel({
 					<div className="slabel">MODEL</div>
 					<OptionDropdown
 						option={model}
-						disabled={disabled}
+						disabled={frozen || disabled}
 						onChange={onChange}
 					/>
 				</div>
@@ -65,7 +41,7 @@ export function SettingsPanel({
 				{effort !== undefined ? (
 					<OptionDropdown
 						option={effort}
-						disabled={disabled}
+						disabled={frozen || disabled}
 						onChange={onChange}
 					/>
 				) : (
@@ -76,7 +52,7 @@ export function SettingsPanel({
 				<OptionDropdown
 					key={option.id}
 					option={option}
-					disabled={disabled}
+					disabled={frozen || disabled}
 					onChange={onChange}
 				/>
 			))}

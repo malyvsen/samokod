@@ -5,20 +5,6 @@ import type {
 	RepoDefaults,
 } from "../types";
 
-export type SelectorModel =
-	| { kind: "live"; options: ConfigOptionView[] }
-	| { kind: "pending"; defaults: RepoDefaults };
-
-export function toSelectorModel(
-	liveOptions: ConfigOptionView[],
-	defaults: RepoDefaults,
-): SelectorModel {
-	if (liveOptions.length > 0) {
-		return { kind: "live", options: liveOptions };
-	}
-	return { kind: "pending", defaults };
-}
-
 export function pendingOptions(defaults: RepoDefaults): {
 	model: ConfigOptionView;
 	effort: ConfigOptionView;

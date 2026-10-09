@@ -4,7 +4,6 @@ import type {
 	ConfigOptionView,
 	PlansUpdate,
 	SessionKey,
-	SpendView,
 	TodoView,
 	TranscriptItem,
 } from "../types";
@@ -23,7 +22,6 @@ export type SessionStart =
 export interface ChatState {
 	transcript: TranscriptItem[];
 	todos: TodoView[];
-	spend: SpendView | null;
 	configOptions: ConfigOptionView[];
 	working: boolean;
 	approval: boolean;
@@ -39,7 +37,6 @@ export function emptyChat(): ChatState {
 	return {
 		transcript: [],
 		todos: [],
-		spend: null,
 		configOptions: [],
 		working: false,
 		approval: false,
@@ -262,15 +259,13 @@ export function applySessionEvent(
 				};
 			});
 		case "spend_tick":
-			return updateEntry(chats, event.session, (chat) => ({
-				...chat,
-				spend: { cost: event.cost, contextPct: event.ctx_pct },
-			}));
+			// Spend lives on the plans-list session status (the hover
+			// tooltip); per-chat totals are obsolete.
+			return chats;
 		case "session_reset":
 			return updateEntry(chats, event.session, (chat) => ({
 				...chat,
 				todos: [],
-				spend: null,
 			}));
 		case "history_preparing":
 			return updateEntry(chats, event.session, (chat) => ({

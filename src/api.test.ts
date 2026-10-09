@@ -5,7 +5,7 @@ import {
 	loadHistory,
 	onAppEvent,
 	selectPlan,
-	setConfigOption,
+	setGlobalConfigOption,
 	setPlanMode,
 	warmSession,
 } from "./api";
@@ -31,9 +31,8 @@ beforeEach(() => {
 describe("session commands", () => {
 	test("sends camelCase keys matching the Rust command", async () => {
 		vi.mocked(invoke).mockResolvedValue([]);
-		await setConfigOption(testKey(), "model", "openai/gpt-5");
-		expect(invoke).toHaveBeenCalledWith("set_config_option", {
-			session: testKey(),
+		await setGlobalConfigOption("model", "openai/gpt-5");
+		expect(invoke).toHaveBeenCalledWith("set_global_config_option", {
 			configId: "model",
 			value: "openai/gpt-5",
 		});

@@ -80,14 +80,6 @@ export function answerPermission(
 	return invoke("answer_permission", { session, toolCallId, optionId });
 }
 
-export function setConfigOption(
-	session: SessionKey,
-	configId: string,
-	value: string,
-): Promise<ConfigOptionView[]> {
-	return invoke("set_config_option", { session, configId, value });
-}
-
 export function setGlobalConfigOption(
 	configId: string,
 	value: string,

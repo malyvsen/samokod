@@ -9,62 +9,6 @@ use crate::types::{AgentError, ConfigOptionValueView, ConfigOptionView, SessionK
 use super::AgentManager;
 
 impl AgentManager {
-    /// Set one session config option without restarting the session.
-    /// Returns the agent's complete option list, including dependent updates.
-    /// Also stores the choice as the repo-wide default new sessions start
-    /// from.
-    pub async fn set_config_option(
-        &self,
-        session: SessionKey,
-        config_id: String,
-        value: String,
-    ) -> Result<Vec<ConfigOptionView>, AgentError> {
-        let (connection, session_id, _, _) =
-            self.session_snapshot_for(&session)
-                .ok_or_else(|| AgentError::NoSession {
-                    raw: "open a repository first".to_string(),
-                })?;
-        let response = send_config_option(
-            &connection,
-            &acp::SessionId::new(session_id),
-            &config_id,
-            &value,
-        )
-        .await
-        .map_err(|error| AgentError::RequestFailed { raw: error })?;
-        // Re-sync both roles from the full response list: dependent options
-        // can vanish in the same response, clearing the stored role.
-        let roles = crate::repo_state::roles_from_options(&response);
-        let moved = match self.state.lock() {
-            Ok(mut state) => {
-                let current_roles = state
-                    .sessions
-                    .get(&session)
-                    .map(|live| live.last_roles.clone())
-                    .unwrap_or_default();
-                let moved: Vec<crate::repo_state::ConfigRole> = crate::repo_state::ConfigRole::ALL
-                    .into_iter()
-                    .filter(|role| role.get(&current_roles) != role.get(&roles))
-                    .collect();
-                if let Some(live) = state.sessions.get_mut(&session) {
-                    live.last_roles = roles.clone();
-                }
-                Some(moved)
-            }
-            Err(error) => {
-                log::warn!("failed to remember config choice: {error}");
-                None
-            }
-        };
-        if let (Some(moved), Some(repo)) = (moved, self.current_repo()) {
-            for role in moved {
-                crate::repo_state::set_role(&repo, role, role.get(&roles).map(String::as_str));
-            }
-        }
-        log_roles("selected", &roles);
-        Ok(response)
-    }
-
     /// Set one config option repo-wide: every live session gets the same
     /// value, each `last_roles` refreshes from its own response, and moved
     /// model/effort roles persist as the repo default. Returns the last

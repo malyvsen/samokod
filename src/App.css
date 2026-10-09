@@ -1790,27 +1790,6 @@ button.brand:hover {
 	flex-direction: column;
 }
 
-.side .pin {
-	margin-top: auto;
-	display: grid;
-	gap: 10px;
-}
-
-.side .sect {
-	display: grid;
-	gap: 6px;
-}
-
-.side .slabel {
-	font-size: 11px;
-	letter-spacing: 0.14em;
-	color: #7dffc4;
-}
-
-.side .dsel {
-	width: 100%;
-}
-
 .side .head {
 	font-size: 11px;
 	letter-spacing: 0.14em;

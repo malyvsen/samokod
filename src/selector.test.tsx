@@ -2,7 +2,6 @@ import { render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { toSelectorModel } from "./components/selectors";
 import { emptyChat } from "./sessions/store";
 import type { ConfigOptionView } from "./types";
 
@@ -193,23 +192,5 @@ describe("settings selectors", () => {
 			expect.stringContaining("Low"),
 			expect.stringContaining("High"),
 		]);
-	});
-});
-
-describe("toSelectorModel", () => {
-	test("empty live plus defaults maps to pending", () => {
-		const model = toSelectorModel([], { model: "m1", effort: "high" });
-		expect(model).toEqual({
-			kind: "pending",
-			defaults: { model: "m1", effort: "high" },
-		});
-	});
-
-	test("non-empty live maps to live and keeps options", () => {
-		const model = toSelectorModel(standard, { model: "stale", effort: null });
-		expect(model.kind).toBe("live");
-		if (model.kind === "live") {
-			expect(model.options).toBe(standard);
-		}
 	});
 });

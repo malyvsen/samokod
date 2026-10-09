@@ -136,11 +136,6 @@ interface TodoChangeView {
 	status: TodoStatus;
 }
 
-export interface SpendView {
-	cost: number;
-	contextPct: number;
-}
-
 export type AppEvent =
 	| { type: "agent_text"; session: SessionKey; chunk: string }
 	| { type: "agent_thought"; session: SessionKey; chunk: string }

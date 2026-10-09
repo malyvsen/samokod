@@ -18,7 +18,6 @@ export const api = {
 	retryLast: vi.fn(),
 	cancelTurn: vi.fn(),
 	answerPermission: vi.fn(),
-	setConfigOption: vi.fn(),
 	setGlobalConfigOption: vi.fn(),
 	setPlanMode: vi.fn(),
 	warmSession: vi.fn(),

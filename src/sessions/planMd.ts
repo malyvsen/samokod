@@ -15,43 +15,21 @@ export function usePlanMd(
 		}
 		const key = selectedKey;
 		let cancelled = false;
-		function fetch() {
-			planMdText(key)
-				.then((next) => {
-					if (cancelled) return;
-					setText(next);
-				})
-				.catch((error: unknown) => {
-					if (cancelled) return;
-					console.warn("plan_md_text failed", error);
-				});
-		}
-		fetch();
-		return () => {
-			cancelled = true;
-		};
-	}, [selectedKey]);
-
-	useEffect(() => {
-		if (selectedKey === null || selectedKey.role !== "scoping") return;
-		const key = selectedKey;
-		return onAppEvent((event) => {
-			if (event.type === "plans_changed") {
-				void planMdText(key)
-					.then((next) => setText(next))
-					.catch((error: unknown) => {
-						console.warn("plan_md_text failed", error);
-					});
-				return;
-			}
+		const load = () =>
+			loadPlanMd(key, (next) => {
+				if (!cancelled) setText(next);
+			});
+		load();
+		const stop = onAppEvent((event) => {
+			if (event.type === "plans_changed") load();
 			if (event.type === "turn_done" && sameSession(event.session, key)) {
-				void planMdText(key)
-					.then((next) => setText(next))
-					.catch((error: unknown) => {
-						console.warn("plan_md_text failed", error);
-					});
+				load();
 			}
 		});
+		return () => {
+			cancelled = true;
+			stop();
+		};
 	}, [selectedKey]);
 
 	useEffect(() => {
@@ -60,11 +38,7 @@ export function usePlanMd(
 		}
 		const key = selectedKey;
 		const timer = window.setInterval(() => {
-			void planMdText(key)
-				.then((next) => setText(next))
-				.catch((error: unknown) => {
-					console.warn("plan_md_text failed", error);
-				});
+			loadPlanMd(key, setText);
 		}, 2000);
 		return () => {
 			window.clearInterval(timer);
@@ -72,4 +46,12 @@ export function usePlanMd(
 	}, [selectedKey, working]);
 
 	return text;
+}
+
+function loadPlanMd(key: SessionKey, onText: (text: string | null) => void) {
+	void planMdText(key)
+		.then(onText)
+		.catch((error: unknown) => {
+			console.warn("plan_md_text failed", error);
+		});
 }
