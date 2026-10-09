@@ -53,7 +53,7 @@ impl AgentManager {
             // Set-once; headings win; empty stays `Untitled`.
             store_working_title(&self.state, &repo_root, &session.plan, &text);
             let pending_match = match self.state.lock() {
-                Ok(state) => state.pending_scoping.as_deref() == Some(session.plan.as_str()),
+                Ok(state) => state.pending_scoping.contains_key(&session.plan),
                 Err(error) => {
                     log::warn!("failed to check pending session: {error}");
                     false
@@ -64,9 +64,7 @@ impl AgentManager {
                 carry_pending_title(&self.state, &repo_root, &session.plan);
                 match self.state.lock() {
                     Ok(mut state) => {
-                        if state.pending_scoping.as_deref() == Some(session.plan.as_str()) {
-                            state.pending_scoping = None;
-                        }
+                        state.pending_scoping.remove(&session.plan);
                     }
                     Err(error) => {
                         log::warn!("failed to clear pending session: {error}");
@@ -406,8 +404,9 @@ pub(crate) fn handle_notification(
 
 /// Store a working title from the scoping message text. Set-once: skips
 /// when a `plan.md` heading exists or a title is already stored (disk or
-/// pending map). Stores to disk when materialized, to the pending map
-/// otherwise. Empty prompts stay `Untitled` via extractor `None`.
+/// the pending-map value). Stores to disk when materialized, to the
+/// pending-map entry otherwise. Empty prompts stay `Untitled` via
+/// extractor `None`.
 fn store_working_title(
     state: &Mutex<State>,
     repo_root: &std::path::Path,
@@ -432,7 +431,12 @@ fn store_working_title(
         }
     }
     if lock_state(state)
-        .map(|guard| guard.pending_titles.contains_key(plan_name))
+        .map(|guard| {
+            guard
+                .pending_scoping
+                .get(plan_name)
+                .is_some_and(|title| title.is_some())
+        })
         .unwrap_or(false)
     {
         return;
@@ -446,16 +450,18 @@ fn store_working_title(
             stored.working_title = Some(title);
             plans::store_state(&plan_dir, &stored);
         }
-    } else if let Some(mut guard) = lock_state(state) {
-        guard.pending_titles.insert(plan_name.to_string(), title);
+    } else if let Some(mut guard) = lock_state(state)
+        && let Some(slot) = guard.pending_scoping.get_mut(plan_name)
+    {
+        *slot = Some(title);
     }
 }
 
 /// Move a pending working title into `state.json` at materialize time.
-/// Set-once: never overwrites a disk title.
+/// Set-once: never overwrites a disk title. Removes the pending-map entry.
 fn carry_pending_title(state: &Mutex<State>, repo_root: &std::path::Path, plan_name: &str) {
-    let title = lock_state(state).and_then(|mut guard| guard.pending_titles.remove(plan_name));
-    let Some(title) = title else {
+    let removed = lock_state(state).and_then(|mut guard| guard.pending_scoping.remove(plan_name));
+    let Some(Some(title)) = removed else {
         return;
     };
     let plan_ref = plans::PlanRef {
@@ -464,7 +470,9 @@ fn carry_pending_title(state: &Mutex<State>, repo_root: &std::path::Path, plan_n
     };
     if !plan_ref.path(repo_root).is_dir() {
         if let Some(mut guard) = lock_state(state) {
-            guard.pending_titles.insert(plan_name.to_string(), title);
+            guard
+                .pending_scoping
+                .insert(plan_name.to_string(), Some(title));
         }
         return;
     }
@@ -648,14 +656,22 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
         let state = Mutex::new(State::default());
+        {
+            state
+                .lock()
+                .expect("state")
+                .pending_scoping
+                .insert(name.to_string(), None);
+        }
         let text = "Fix the login flow login errors on login retry.";
         store_working_title(&state, root, name, text);
         assert!(
             state
                 .lock()
                 .expect("state")
-                .pending_titles
-                .contains_key(name)
+                .pending_scoping
+                .get(name)
+                .is_some_and(|title| title.is_some())
         );
         plans::materialize_scoping(root, name).expect("materialize");
         carry_pending_title(&state, root, name);
@@ -663,7 +679,7 @@ mod tests {
             !state
                 .lock()
                 .expect("state")
-                .pending_titles
+                .pending_scoping
                 .contains_key(name)
         );
         let stored = plans::load_state(

@@ -34,14 +34,11 @@ pub(crate) struct State {
     /// Plans with a sent user prompt. Feeds the empty-scoping gate;
     /// carried across renames with the plan.
     prompted: HashSet<String>,
-    /// Reserved scoping timestamp with no directory yet. Listed as a
-    /// normal `Untitled` entry until the first `send_prompt` materializes
-    /// it; vanishing on cancel or select-away leaves no trace.
-    pending_scoping: Option<String>,
-    /// Working titles for reserved scoping names with no directory yet.
-    /// Moved into `state.json` at materialize time; cleared with the
-    /// pending name on vanish or repo switch.
-    pending_titles: HashMap<String, String>,
+    /// Diskless scoping sessions: reserved name plus draft-inferred title.
+    /// Presence means pending; the value is the draft-inferred title
+    /// (`None` renders as `Untitled`). Listed until the first `send_prompt`
+    /// materializes the directory; vanishing leaves no trace.
+    pending_scoping: HashMap<String, Option<String>>,
     /// Background warms in flight, one per session key. Single-flights
     /// `warm_session` against a racing `send_prompt`.
     warming: HashSet<SessionKey>,
@@ -115,8 +112,8 @@ pub(crate) fn is_empty_scoping(state: &State, repo_root: &Path, name: &str) -> b
 /// Discard an empty scoping session without a `cancelled/` trace:
 /// `remove_dir_all` when present (`NotFound` is fine, other errors are
 /// logged per the preserve-evidence rule), plus the `LiveSession` and
-/// `prompted` entry. Clears `pending_scoping` and any pending working
-/// title on match. Caller owns the lock.
+/// `prompted` entry. Removes the single pending-map entry on match.
+/// Caller owns the lock.
 pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str) {
     let plan = plans::PlanRef {
         name: name.to_string(),
@@ -139,10 +136,7 @@ pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str) {
         role: SessionRole::Scoping,
     });
     state.prompted.remove(name);
-    state.pending_titles.remove(name);
-    if state.pending_scoping.as_deref() == Some(name) {
-        state.pending_scoping = None;
-    }
+    state.pending_scoping.remove(name);
 }
 
 /// Scoping template for one session. Returns the rendered template
@@ -157,7 +151,7 @@ pub(crate) fn scoping_template_for(
     if session.role != SessionRole::Scoping {
         return Ok(None);
     }
-    let is_pending = state.pending_scoping.as_deref() == Some(session.plan.as_str());
+    let is_pending = state.pending_scoping.contains_key(&session.plan);
     let plan_ref = plans::PlanRef {
         name: session.plan.clone(),
         phase: plans::Phase::Scoping,
@@ -175,17 +169,18 @@ pub(crate) fn scoping_template_for(
 }
 
 /// Reserved timestamp name for a lazy scoping session: collision-proof
-/// against on-disk scoping names plus the current pending name. Pure
+/// against on-disk scoping names plus every pending name. Pure
 /// except the directory read.
-pub(crate) fn reserve_scoping_name(repo_root: &Path, pending: Option<&str>) -> String {
+pub(crate) fn reserve_scoping_name(
+    repo_root: &Path,
+    pending: &HashMap<String, Option<String>>,
+) -> String {
     let mut taken: std::collections::HashSet<String> = plans::scan_plans(repo_root)
         .into_iter()
         .filter(|plan| plan.phase == plans::Phase::Scoping)
         .map(|plan| plan.name)
         .collect();
-    if let Some(pending) = pending {
-        taken.insert(pending.to_string());
-    }
+    taken.extend(pending.keys().cloned());
     plans::unique_name(&plans::timestamp_now(), &taken)
 }
 
@@ -241,8 +236,8 @@ impl AgentManager {
                 .iter()
                 .all(|plan| plan.phase != plans::Phase::Scoping)
             {
-                let name = reserve_scoping_name(&repo_root, state.pending_scoping.as_deref());
-                state.pending_scoping = Some(name.clone());
+                let name = reserve_scoping_name(&repo_root, &state.pending_scoping);
+                state.pending_scoping.insert(name.clone(), None);
                 state.current = Some(SessionKey {
                     plan: name,
                     role: SessionRole::Scoping,
@@ -264,11 +259,10 @@ impl AgentManager {
         })?;
         {
             let state = self.state.lock().expect("state poisoned");
-            if let (Some(current), Some(pending)) =
-                (state.current.clone(), state.pending_scoping.clone())
+            if let Some(current) = state.current.clone()
                 && current.role == SessionRole::Scoping
-                && current.plan == pending
-                && is_empty_scoping(&state, &repo_root, &pending)
+                && state.pending_scoping.contains_key(&current.plan)
+                && is_empty_scoping(&state, &repo_root, &current.plan)
             {
                 drop(state);
                 return Ok(self.plans_update());
@@ -276,11 +270,11 @@ impl AgentManager {
         }
         let name = {
             let state = self.state.lock().expect("state poisoned");
-            reserve_scoping_name(&repo_root, state.pending_scoping.as_deref())
+            reserve_scoping_name(&repo_root, &state.pending_scoping)
         };
         match self.state.lock() {
             Ok(mut state) => {
-                state.pending_scoping = Some(name.clone());
+                state.pending_scoping.insert(name.clone(), None);
                 state.current = Some(SessionKey {
                     plan: name,
                     role: SessionRole::Scoping,
@@ -445,15 +439,13 @@ impl AgentManager {
                         let plans = plans_list::sorted_entries(
                             &repo_root,
                             &state.sessions,
-                            state.pending_scoping.as_deref(),
-                            &state.pending_titles,
+                            &state.pending_scoping,
                         );
                         if let Some(key) = plans_list::most_recent_key(&plans) {
                             state.current = Some(key);
                         } else {
-                            let name =
-                                reserve_scoping_name(&repo_root, state.pending_scoping.as_deref());
-                            state.pending_scoping = Some(name.clone());
+                            let name = reserve_scoping_name(&repo_root, &state.pending_scoping);
+                            state.pending_scoping.insert(name.clone(), None);
                             state.current = Some(SessionKey {
                                 plan: name,
                                 role: SessionRole::Scoping,
@@ -537,8 +529,8 @@ impl AgentManager {
             // Name-based across all phases: finished plans live under
             // `completed/` or `cancelled/` and stay selectable read-only.
             // Only names missing everywhere report "plan is gone".
-            let target_exists = (state.pending_scoping.as_deref() == Some(session.plan.as_str())
-                && session.role == SessionRole::Scoping)
+            let target_exists = (session.role == SessionRole::Scoping
+                && state.pending_scoping.contains_key(&session.plan))
                 || session_ids::plan_exists(&repo_root, &session.plan);
             if !target_exists {
                 return Err(AgentError::NoSession {
@@ -1026,7 +1018,7 @@ mod tests {
         write_plan_dir(root, plans::Phase::Landing, "m", Some("M"));
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
         write_plan_dir(root, plans::Phase::Scoping, "s", Some("S"));
-        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new());
+        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
         let phases: Vec<plans::Phase> = entries.iter().map(|entry| entry.phase).collect();
         assert_eq!(
             phases,
@@ -1049,7 +1041,7 @@ mod tests {
         plans::materialize_scoping(root, "2026-09-26.08-41-03").expect("old");
         std::thread::sleep(std::time::Duration::from_millis(10));
         plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("new");
-        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new());
+        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "2026-09-26.08-41-04");
         assert_eq!(entries[1].name, "2026-09-26.08-41-03");
@@ -1062,7 +1054,7 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Scoping, "first", Some("First"));
         write_plan_dir(root, plans::Phase::Scoping, "second", Some("Second"));
-        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new());
+        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "second");
         assert_eq!(entries[1].name, "first");
@@ -1074,7 +1066,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Scoping, "bare", None);
-        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new());
+        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "Untitled");
         assert_eq!(entries[0].sessions.len(), 1);
@@ -1086,7 +1078,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
-        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new());
+        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
         assert_eq!(
             most_recent_key(&entries),
             Some(SessionKey {
@@ -1103,7 +1095,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Landing, "m", Some("M"));
-        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new());
+        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 3);
         assert_eq!(
@@ -1142,7 +1134,7 @@ mod tests {
         live.working = true;
         live.approval = true;
         let sessions = HashMap::from([(key, live)]);
-        let entries = sorted_entries(root, &sessions, None, &HashMap::new());
+        let entries = sorted_entries(root, &sessions, &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 2);
         let executing = entries[0]
@@ -1168,7 +1160,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Cancelled, "c", Some("C"));
-        let entries = sorted_entries(root, &HashMap::new(), None, &HashMap::new());
+        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 1);
         assert_eq!(entries[0].sessions[0].role, SessionRole::Scoping);
@@ -1188,7 +1180,8 @@ mod tests {
             .path(root)
             .exists()
         );
-        let entries = sorted_entries(root, &HashMap::new(), Some(name), &HashMap::new());
+        let pending = HashMap::from([(name.to_string(), None)]);
+        let entries = sorted_entries(root, &HashMap::new(), &pending);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, name);
         assert_eq!(entries[0].title, "Untitled");
@@ -1198,12 +1191,40 @@ mod tests {
     }
 
     #[test]
+    fn multiple_pendings_sort_by_name_descending() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let pending = HashMap::from([
+            ("2026-09-26.08-41-03".to_string(), None),
+            ("2026-09-26.08-41-04".to_string(), None),
+        ]);
+        let entries = sorted_entries(root, &HashMap::new(), &pending);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "2026-09-26.08-41-04");
+        assert_eq!(entries[1].name, "2026-09-26.08-41-03");
+    }
+
+    #[test]
+    fn pending_with_title_renders() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let pending = HashMap::from([(name.to_string(), Some("Login flow fixes".to_string()))]);
+        let entries = sorted_entries(root, &HashMap::new(), &pending);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "Login flow fixes");
+    }
+
+    #[test]
     fn reserve_creates_no_dir_and_avoids_taken_names() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         plans::materialize_scoping(root, "2026-09-26.08-41-03").expect("materialize");
-        let reserved = reserve_scoping_name(root, Some("2026-09-26.08-41-04"));
+        let pending = HashMap::from([("2026-09-26.08-41-04".to_string(), None)]);
+        let reserved = reserve_scoping_name(root, &pending);
         assert_ne!(reserved, "2026-09-26.08-41-03");
         assert_ne!(reserved, "2026-09-26.08-41-04");
         assert!(
@@ -1284,7 +1305,7 @@ mod tests {
             role: SessionRole::Scoping,
         };
         let state = State {
-            pending_scoping: Some(name.to_string()),
+            pending_scoping: HashMap::from([(name.to_string(), None)]),
             ..Default::default()
         };
         let template = scoping_template_for(&state, root, &key)
@@ -1362,7 +1383,7 @@ mod tests {
         let name = "2026-09-26.08-41-03";
         plans::materialize_scoping(root, name).expect("materialize");
         let mut state = State {
-            pending_scoping: Some(name.to_string()),
+            pending_scoping: HashMap::from([(name.to_string(), None)]),
             ..Default::default()
         };
         state.prompted.insert(name.to_string());
@@ -1387,7 +1408,7 @@ mod tests {
         );
         assert!(state.sessions.is_empty());
         assert!(!state.prompted.contains(name));
-        assert_eq!(state.pending_scoping, None);
+        assert!(!state.pending_scoping.contains_key(name));
         vanish_scoping(&mut state, root, "2026-09-26.08-41-99");
     }
 
@@ -1397,14 +1418,14 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let mut state = State::default();
-        let name = reserve_scoping_name(root, state.pending_scoping.as_deref());
-        state.pending_scoping = Some(name.clone());
+        let name = reserve_scoping_name(root, &state.pending_scoping);
+        state.pending_scoping.insert(name.clone(), None);
         state.current = Some(SessionKey {
             plan: name.clone(),
             role: SessionRole::Scoping,
         });
         let reuse = state.current.clone().is_some_and(|current| {
-            state.pending_scoping.as_deref() == Some(current.plan.as_str())
+            state.pending_scoping.contains_key(&current.plan)
                 && current.role == SessionRole::Scoping
                 && is_empty_scoping(&state, root, &current.plan)
         });
@@ -1425,18 +1446,16 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let mut state = State {
-            pending_scoping: Some("2026-09-26.08-41-03".to_string()),
+            pending_scoping: HashMap::from([("2026-09-26.08-41-03".to_string(), None)]),
             ..Default::default()
         };
         let session = SessionKey {
             plan: "2026-09-26.08-41-03".to_string(),
             role: SessionRole::Scoping,
         };
-        assert!(state.pending_scoping.as_deref() == Some(session.plan.as_str()));
+        assert!(state.pending_scoping.contains_key(&session.plan));
         plans::materialize_scoping(root, &session.plan).expect("materialize");
-        if state.pending_scoping.as_deref() == Some(session.plan.as_str()) {
-            state.pending_scoping = None;
-        }
+        state.pending_scoping.remove(&session.plan);
         assert!(
             plans::PlanRef {
                 name: session.plan.clone(),
@@ -1445,7 +1464,7 @@ mod tests {
             .path(root)
             .is_dir()
         );
-        assert_eq!(state.pending_scoping, None);
+        assert!(!state.pending_scoping.contains_key(&session.plan));
     }
 
     #[test]
@@ -1455,7 +1474,7 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("target");
         let mut state = State {
-            pending_scoping: Some("2026-09-26.08-41-03".to_string()),
+            pending_scoping: HashMap::from([("2026-09-26.08-41-03".to_string(), None)]),
             current: Some(SessionKey {
                 plan: "2026-09-26.08-41-03".to_string(),
                 role: SessionRole::Scoping,
@@ -1474,7 +1493,7 @@ mod tests {
             vanish_scoping(&mut state, root, &prev.plan);
         }
         state.current = Some(target.clone());
-        assert_eq!(state.pending_scoping, None);
+        assert!(!state.pending_scoping.contains_key("2026-09-26.08-41-03"));
         assert!(
             plans::PlanRef {
                 name: target.plan.clone(),
@@ -1483,12 +1502,7 @@ mod tests {
             .path(root)
             .is_dir()
         );
-        let entries = sorted_entries(
-            root,
-            &state.sessions,
-            state.pending_scoping.as_deref(),
-            &state.pending_titles,
-        );
+        let entries = sorted_entries(root, &state.sessions, &state.pending_scoping);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, target.plan);
     }

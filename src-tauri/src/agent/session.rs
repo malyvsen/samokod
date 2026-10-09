@@ -409,8 +409,7 @@ impl AgentManager {
         };
         let is_pending = lock_state(&self.state)
             .map(|state| {
-                state.pending_scoping.as_deref() == Some(key.plan.as_str())
-                    && key.role == SessionRole::Scoping
+                state.pending_scoping.contains_key(&key.plan) && key.role == SessionRole::Scoping
             })
             .unwrap_or(false);
         if !plan_ref.path(&repo_root).is_dir() && !is_pending {
@@ -665,8 +664,7 @@ impl AgentManager {
                 state.sessions.clear();
                 state.current = None;
                 state.awake = None;
-                state.pending_scoping = None;
-                state.pending_titles.clear();
+                state.pending_scoping.clear();
                 state.worktrees.clear();
                 state.clear_start_claims();
             }

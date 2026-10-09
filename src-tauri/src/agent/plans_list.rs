@@ -23,12 +23,7 @@ impl AgentManager {
         let state = self.state.lock().expect("state poisoned");
         let repo_root = state.repo_root.clone().unwrap_or_default();
         let branch = state.checkout_branch.clone();
-        let plans = sorted_entries(
-            &repo_root,
-            &state.sessions,
-            state.pending_scoping.as_deref(),
-            &state.pending_titles,
-        );
+        let plans = sorted_entries(&repo_root, &state.sessions, &state.pending_scoping);
         let selected = most_recent_key(&plans).unwrap_or_else(|| SessionKey {
             plan: plans
                 .first()
@@ -51,12 +46,7 @@ impl AgentManager {
     pub(crate) fn plans_update(&self) -> PlansUpdate {
         let state = self.state.lock().expect("state poisoned");
         let repo_root = state.repo_root.clone().unwrap_or_default();
-        let plans = sorted_entries(
-            &repo_root,
-            &state.sessions,
-            state.pending_scoping.as_deref(),
-            &state.pending_titles,
-        );
+        let plans = sorted_entries(&repo_root, &state.sessions, &state.pending_scoping);
         let selected = state.current.clone().unwrap_or_else(|| {
             most_recent_key(&plans).unwrap_or_else(|| SessionKey {
                 plan: plans
@@ -116,25 +106,24 @@ impl AgentManager {
 }
 
 /// Plans sorted by phase, then phase-entry arrival newest first, then
-/// name descending. A reserved pending name appends a synthetic scoping
-/// `PlanRef` rendering like an on-disk bare plan; with no timestamp it
-/// orders by name, newest first.
+/// name descending. Each pending name missing on disk appends a synthetic
+/// scoping `PlanRef`; with no timestamp it orders by name, newest first.
 pub(crate) fn sorted_entries(
     repo_root: &Path,
     sessions: &HashMap<SessionKey, LiveSession>,
-    pending: Option<&str>,
-    pending_titles: &HashMap<String, String>,
+    pending: &HashMap<String, Option<String>>,
 ) -> Vec<PlanEntry> {
     let mut plans = plans::scan_plans(repo_root);
-    if let Some(name) = pending
-        && !plans
+    for name in pending.keys() {
+        if !plans
             .iter()
-            .any(|plan| plan.phase == plans::Phase::Scoping && plan.name == name)
-    {
-        plans.push(plans::PlanRef {
-            name: name.to_string(),
-            phase: plans::Phase::Scoping,
-        });
+            .any(|plan| plan.phase == plans::Phase::Scoping && &plan.name == name)
+        {
+            plans.push(plans::PlanRef {
+                name: name.clone(),
+                phase: plans::Phase::Scoping,
+            });
+        }
     }
     plans.sort_by(|left, right| {
         plans::phase_rank(left.phase)
@@ -150,7 +139,7 @@ pub(crate) fn sorted_entries(
         .map(|plan| PlanEntry {
             name: plan.name.clone(),
             phase: plan.phase,
-            title: entry_title(repo_root, plan, pending_titles),
+            title: entry_title(repo_root, plan, pending),
             has_plan_md: plan.has_plan_md(repo_root),
             sessions: session_statuses(repo_root, plan, sessions),
             manual: entry_manual(repo_root, plan),
@@ -159,11 +148,11 @@ pub(crate) fn sorted_entries(
 }
 
 /// Display title: `plan.md` heading first, else stored working title
-/// (disk or pending map), else `Untitled`. Pure except the reads.
+/// (disk or the pending-map value), else `Untitled`. Pure except the reads.
 fn entry_title(
     repo_root: &Path,
     plan: &plans::PlanRef,
-    pending_titles: &HashMap<String, String>,
+    pending: &HashMap<String, Option<String>>,
 ) -> String {
     let text = std::fs::read_to_string(plan.plan_md(repo_root)).unwrap_or_default();
     if let Some(heading) = plans::extract_title(&text) {
@@ -175,7 +164,7 @@ fn entry_title(
             return title;
         }
     }
-    if let Some(title) = pending_titles.get(&plan.name) {
+    if let Some(Some(title)) = pending.get(&plan.name) {
         return title.clone();
     }
     "Untitled".to_string()
@@ -284,12 +273,7 @@ pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
     let (plans, selected) = match state.lock() {
         Ok(guard) => {
             let repo_root = guard.repo_root.clone().unwrap_or_default();
-            let plans = sorted_entries(
-                &repo_root,
-                &guard.sessions,
-                guard.pending_scoping.as_deref(),
-                &guard.pending_titles,
-            );
+            let plans = sorted_entries(&repo_root, &guard.sessions, &guard.pending_scoping);
             let selected = guard.current.clone().or_else(|| most_recent_key(&plans));
             (plans, selected)
         }
@@ -358,9 +342,9 @@ mod tests {
             name: name.to_string(),
             phase: plans::Phase::Scoping,
         };
-        let empty = HashMap::new();
+        let empty: HashMap<String, Option<String>> = HashMap::new();
         assert_eq!(entry_title(root, &pending, &empty), "Untitled");
-        let titled = HashMap::from([(name.to_string(), "Login flow fixes".to_string())]);
+        let titled = HashMap::from([(name.to_string(), Some("Login flow fixes".to_string()))]);
         assert_eq!(entry_title(root, &pending, &titled), "Login flow fixes");
     }
 
