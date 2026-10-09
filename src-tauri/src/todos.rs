@@ -48,6 +48,23 @@ fn parse_status(raw: &str) -> Option<TodoStatus> {
     }
 }
 
+/// Remaining-time estimate from the completion rate: elapsed per completed
+/// todo times the todos left. `None` for empty, all-done, and
+/// nothing-completed-yet (no timing data). Pure.
+pub fn estimate_remaining(
+    done: usize,
+    total: usize,
+    started: std::time::SystemTime,
+    now: std::time::SystemTime,
+) -> Option<std::time::Duration> {
+    if total == 0 || done == 0 || done >= total {
+        return None;
+    }
+    let elapsed = now.duration_since(started).ok()?;
+    let remaining = (total - done) as u32;
+    elapsed.checked_div(done as u32)?.checked_mul(remaining)
+}
+
 /// Diff a fresh list against the previous one: added rows plus rows whose
 /// status changed, matched by content. Removed rows never surface. Pure.
 pub fn diff_todos(old: &[TodoView], new: &[TodoView]) -> Vec<TodoChangeView> {
@@ -200,5 +217,41 @@ mod tests {
     fn identical_lists_have_no_changes() {
         let list = vec![todo("a", TodoStatus::Pending)];
         assert!(diff_todos(&list, &list).is_empty());
+    }
+
+    #[test]
+    fn estimate_empty_returns_none() {
+        let now = std::time::SystemTime::now();
+        assert_eq!(estimate_remaining(0, 0, now, now), None);
+    }
+
+    #[test]
+    fn estimate_done_returns_none() {
+        let now = std::time::SystemTime::now();
+        assert_eq!(estimate_remaining(5, 5, now, now), None);
+    }
+
+    #[test]
+    fn estimate_nothing_completed_returns_none() {
+        let now = std::time::SystemTime::now();
+        assert_eq!(estimate_remaining(0, 5, now, now), None);
+    }
+
+    #[test]
+    fn estimate_partial_scales_elapsed_by_remaining() {
+        let started = std::time::SystemTime::now();
+        let now = started + std::time::Duration::from_secs(600);
+        assert_eq!(
+            estimate_remaining(2, 5, started, now),
+            Some(std::time::Duration::from_secs(900))
+        );
+    }
+
+    #[test]
+    fn estimate_zero_done_never_divides() {
+        let started = std::time::SystemTime::now();
+        let now = started + std::time::Duration::from_secs(60);
+        // Would divide by zero without the done == 0 guard.
+        assert_eq!(estimate_remaining(0, 3, started, now), None);
     }
 }

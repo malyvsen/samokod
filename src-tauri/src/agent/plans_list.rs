@@ -7,9 +7,10 @@ use std::sync::Mutex;
 use tauri::AppHandle;
 
 use crate::plans;
+use crate::todos::estimate_remaining;
 use crate::types::{
     AppEvent, OpenRepoResult, PlanEntry, PlansUpdate, RepoDefaults, SessionKey, SessionRole,
-    SessionStatusView,
+    SessionStatusView, TodoProgressView, TodoStatus,
 };
 
 use super::AgentManager;
@@ -211,9 +212,34 @@ pub(crate) fn session_statuses(
                 approval: live.map(|live| live.approval).unwrap_or(false),
                 failed: live.map(|live| live.failed).unwrap_or(false),
                 live: live.map(|live| live.is_live()).unwrap_or(false),
+                progress: live.and_then(progress_for),
             }
         })
         .collect()
+}
+
+/// Todo progress for one live session: `None` when it holds no todos.
+/// Every role reports uniformly; the frontend picks the executing one.
+/// Pure except the clock read.
+fn progress_for(live: &LiveSession) -> Option<TodoProgressView> {
+    if live.todos.is_empty() {
+        return None;
+    }
+    let done = live
+        .todos
+        .iter()
+        .filter(|todo| todo.status == TodoStatus::Completed)
+        .count();
+    let total = live.todos.len();
+    let eta_secs = live.todos_started_at.and_then(|started| {
+        estimate_remaining(done, total, started, std::time::SystemTime::now())
+            .map(|remaining| remaining.as_secs())
+    });
+    Some(TodoProgressView {
+        done,
+        total,
+        eta_secs,
+    })
 }
 
 /// Stored model/effort defaults for the instant picker paint. Pure file

@@ -509,7 +509,8 @@ fn split_scoping_replay(template: &str, text: &str) -> Option<(String, String)> 
 }
 
 /// Replace the held list with a fresh todo list and emit when it moved.
-/// Identical lists stay silent.
+/// Identical lists stay silent. Tracks when the current list started for
+/// the plans-payload ETA and refreshes headers live.
 fn update_todos(state: &Mutex<State>, app: &AppHandle, key: &SessionKey, fresh: Vec<TodoView>) {
     let Some(mut guard) = lock_state(state) else {
         return;
@@ -521,6 +522,13 @@ fn update_todos(state: &Mutex<State>, app: &AppHandle, key: &SessionKey, fresh: 
         return;
     }
     let changes = diff_todos(&session.todos, &fresh);
+    let was_empty = session.todos.is_empty();
+    let now_empty = fresh.is_empty();
+    if was_empty && !now_empty {
+        session.todos_started_at = Some(std::time::SystemTime::now());
+    } else if !was_empty && now_empty {
+        session.todos_started_at = None;
+    }
     session.todos = fresh.clone();
     drop(guard);
     emit_event(
@@ -531,6 +539,7 @@ fn update_todos(state: &Mutex<State>, app: &AppHandle, key: &SessionKey, fresh: 
             changes,
         },
     );
+    push_sorted(state, app);
 }
 
 #[cfg(test)]

@@ -156,6 +156,18 @@ pub struct SessionStatusView {
     pub approval: bool,
     pub failed: bool,
     pub live: bool,
+    #[serde(default)]
+    pub progress: Option<TodoProgressView>,
+}
+
+/// Per-session todo progress for the plans list. `eta_secs` is `None`
+/// when no ETA text shows (empty, estimating, or done).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TodoProgressView {
+    pub done: usize,
+    pub total: usize,
+    #[serde(default)]
+    pub eta_secs: Option<u64>,
 }
 
 /// One plan row for the plans list.
