@@ -42,6 +42,12 @@ impl AgentManager {
     /// pending scoping session materializes its directory here, before
     /// the `ensure_live` path.
     pub async fn send_prompt(&self, session: SessionKey, text: String) -> Result<(), AgentError> {
+        log::info!(
+            "send_prompt session {}::{:?} text_len {}",
+            session.plan,
+            session.role,
+            text.len()
+        );
         if session.role == SessionRole::Scoping {
             let repo_root = self
                 .reopen_snapshot()
@@ -110,6 +116,11 @@ impl AgentManager {
         {
             let mut state = self.state.lock().expect("state poisoned");
             if state.is_working(&key) {
+                log::warn!(
+                    "start_turn already running session {}::{:?}",
+                    key.plan,
+                    key.role
+                );
                 return Err(AgentError::RequestFailed {
                     raw: "a turn is already running".to_string(),
                 });
@@ -136,6 +147,7 @@ impl AgentManager {
                 Ok(_) => {
                     set_working(&state, &key, false);
                     set_failed(&state, &key, false);
+                    log::info!("TurnDone session {}::{:?}", key.plan, key.role);
                     emit_event(
                         &app,
                         AppEvent::TurnDone {
@@ -166,6 +178,7 @@ impl AgentManager {
                         }
                     }
                     let hint = classify_error(&raw);
+                    log::info!("TurnFailed session {}::{:?}", key.plan, key.role);
                     emit_event(
                         &app,
                         AppEvent::TurnFailed {

@@ -19,6 +19,10 @@ export interface SessionQueues {
 	setEditing: (key: SessionKey, id: string | null) => void;
 	move: (key: SessionKey, id: string, direction: QueueMoveDirection) => void;
 	takeNext: (key: SessionKey) => QueuedMessage | null;
+	peek: (key: SessionKey) => {
+		items: QueuedMessage[];
+		editingId: string | null;
+	};
 }
 
 export function useSessionQueues(
@@ -79,6 +83,14 @@ export function useSessionQueues(
 		return candidate;
 	}, []);
 
+	const peek = useCallback((key: SessionKey) => {
+		const current = queuesRef.current[sessionKeyOf(key)];
+		return {
+			items: current?.items ?? EMPTY,
+			editingId: current?.editingId ?? null,
+		};
+	}, []);
+
 	return {
 		items,
 		editingId,
@@ -88,6 +100,7 @@ export function useSessionQueues(
 		setEditing,
 		move,
 		takeNext,
+		peek,
 	};
 }
 

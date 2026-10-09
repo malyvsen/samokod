@@ -157,11 +157,26 @@ export function App() {
 
 	const maybeDrain = useCallback(
 		(key: SessionKey) => {
+			const sessionId = sessionKeyOf(key);
 			const head = queue.takeNext(key);
-			if (head === null) return;
+			if (head === null) {
+				const snapshot = queue.peek(key);
+				const headId = snapshot.items[0]?.id ?? null;
+				const reason =
+					snapshot.items.length === 0
+						? "empty-queue"
+						: snapshot.editingId !== null && snapshot.editingId === headId
+							? `editing-head:${headId}`
+							: "blocked";
+				console.info(`queue drain skip session=${sessionId} reason=${reason}`);
+				return;
+			}
+			console.info(
+				`queue drain session=${sessionId} headId=${head.id} textLen=${head.text.length}`,
+			);
 			void sendNow(key, head.text);
 		},
-		[queue.takeNext, sendNow],
+		[queue.takeNext, queue.peek, sendNow],
 	);
 
 	const handleEvent = useCallback(
@@ -174,6 +189,13 @@ export function App() {
 			if (event.type === "branch_changed") {
 				setBranch(event.branch);
 				return;
+			}
+			if (event.type === "turn_done" || event.type === "history_done") {
+				const selected = selectedRef.current;
+				const selectedId = selected === null ? "null" : sessionKeyOf(selected);
+				console.info(
+					`event ${event.type} session=${sessionKeyOf(event.session)} selected=${selectedId}`,
+				);
 			}
 			setChats((current) => applySessionEvent(current, event));
 			if (event.type === "turn_done") {
@@ -231,6 +253,12 @@ export function App() {
 	function handleQueueCommit(id: string, text: string) {
 		const key = selectedRef.current;
 		if (key === null) return;
+		const sessionId = sessionKeyOf(key);
+		const headId = queue.peek(key).items[0]?.id ?? null;
+		const isHead = headId !== null && headId === id;
+		console.info(
+			`queue commit session=${sessionId} id=${id} isHead=${isHead} textLen=${text.length} status=${status}`,
+		);
 		if (text === "") {
 			queue.remove(key, id);
 		} else {
@@ -323,10 +351,16 @@ export function App() {
 		const key = selectedRef.current;
 		if (text === "" || readOnly || key === null) return;
 		draft.onDraftSent();
+		const sessionId = sessionKeyOf(key);
 		if (busy) {
+			const queueLenAfter = queue.peek(key).items.length + 1;
+			console.info(
+				`queue enqueue session=${sessionId} queueLenAfter=${queueLenAfter} textLen=${text.length}`,
+			);
 			queue.enqueue(key, text);
 			return;
 		}
+		console.info(`queue sendNow session=${sessionId} textLen=${text.length}`);
 		await sendNow(key, text);
 	}
 
