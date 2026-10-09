@@ -1261,45 +1261,45 @@ body {
 	border: 1px solid rgba(255, 255, 255, 0.28);
 }
 
-.ptitle.sheen-idle,
-.ptitle.sheen-approval,
-.ptitle.sheen-failed {
+.ptitle:is(.sheen-idle, .sheen-approval, .sheen-failed) {
+	--sheen: #57c8ff;
+	background-image: linear-gradient(
+		100deg,
+		var(--sheen) 30%,
+		#fff 48%,
+		var(--sheen) 62%
+	);
+	background-size: 220% 100%;
+	background-repeat: no-repeat;
 	background-clip: text;
 	-webkit-background-clip: text;
 	color: transparent;
+	animation: sheen 2.8s linear infinite;
 }
 
 .ptitle.sheen-idle {
-	background-image: linear-gradient(100deg, #57c8ff 30%, #fff 48%, #57c8ff 62%);
-	background-size: 220% 100%;
-	animation: sheen 2.8s linear infinite;
+	--sheen: #57c8ff;
 }
 
 .ptitle.sheen-approval {
-	background-image: linear-gradient(100deg, #ffd98a 30%, #fff 48%, #ffd98a 62%);
-	background-size: 220% 100%;
-	animation: sheen 2.8s linear infinite;
+	--sheen: #ffd98a;
 }
 
 .ptitle.sheen-failed {
-	background-image: linear-gradient(100deg, #ff6b6b 30%, #fff 48%, #ff6b6b 62%);
-	background-size: 220% 100%;
-	animation: sheen 2.8s linear infinite;
+	--sheen: #ff6b6b;
 }
 
 @keyframes sheen {
 	from {
-		background-position: 120% 0;
+		background-position: 165% 0;
 	}
 	to {
-		background-position: -120% 0;
+		background-position: -75% 0;
 	}
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.ptitle.sheen-idle,
-	.ptitle.sheen-approval,
-	.ptitle.sheen-failed {
+	.ptitle:is(.sheen-idle, .sheen-approval, .sheen-failed) {
 		animation: none;
 		color: #fff;
 		background: none;
