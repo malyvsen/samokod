@@ -67,8 +67,14 @@ async fn refresh_branch(state: State<'_, AgentManager>) -> Result<String, String
 }
 
 #[tauri::command]
-async fn create_plan(state: State<'_, AgentManager>) -> Result<PlansUpdate, String> {
-    state.create_plan().await.map_err(|error| error.to_string())
+async fn create_plan(
+    state: State<'_, AgentManager>,
+    draft: Option<String>,
+) -> Result<PlansUpdate, String> {
+    state
+        .create_plan(draft)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -119,9 +125,10 @@ async fn cancel_plan(
 async fn select_plan(
     state: State<'_, AgentManager>,
     session: SessionKey,
+    draft: Option<String>,
 ) -> Result<PlansUpdate, String> {
     state
-        .select_plan(session)
+        .select_plan(session, draft)
         .await
         .map_err(|error| error.to_string())
 }

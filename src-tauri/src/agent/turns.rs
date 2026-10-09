@@ -51,7 +51,7 @@ impl AgentManager {
                 })?;
             // Working title from the user's text before the server prefix.
             // Set-once; headings win; empty stays `Untitled`.
-            store_working_title(&self.state, &repo_root, &session.plan, &text);
+            store_first_title(&self.state, &repo_root, &session.plan, &text);
             let pending_match = match self.state.lock() {
                 Ok(state) => state.pending_scoping.contains_key(&session.plan),
                 Err(error) => {
@@ -402,16 +402,17 @@ pub(crate) fn handle_notification(
     }
 }
 
-/// Store a working title from the scoping message text. Set-once: skips
-/// when a `plan.md` heading exists or a title is already stored (disk or
-/// the pending-map value). Stores to disk when materialized, to the
-/// pending-map entry otherwise. Empty prompts stay `Untitled` via
-/// extractor `None`.
-fn store_working_title(
-    state: &Mutex<State>,
+/// Shared title store: writes either the pending-map value (no dir) or
+/// `state.json:working_title` (dir exists), inserting on `Some` and
+/// clearing on `None`. `overwrite` gates existing titles: set-once skips,
+/// draft-keep overwrites. Headings win at display time; storing skips when
+/// a heading already exists. Caller owns any lock via `&mut State`.
+fn store_title(
+    state: &mut State,
     repo_root: &std::path::Path,
     plan_name: &str,
-    user_text: &str,
+    title: Option<String>,
+    overwrite: bool,
 ) {
     let plan_ref = plans::PlanRef {
         name: plan_name.to_string(),
@@ -426,35 +427,62 @@ fn store_working_title(
     }
     if plan_dir.is_dir() {
         let stored = plans::load_state(&plan_dir);
-        if stored.working_title.is_some() {
+        if !overwrite && stored.working_title.is_some() {
             return;
         }
-    }
-    if lock_state(state)
-        .map(|guard| {
-            guard
-                .pending_scoping
-                .get(plan_name)
-                .is_some_and(|title| title.is_some())
-        })
-        .unwrap_or(false)
-    {
+        if !overwrite && title.is_none() {
+            return;
+        }
+        let mut stored = stored;
+        stored.working_title = title;
+        plans::store_state(&plan_dir, &stored);
         return;
     }
-    let Some(title) = crate::working_title::extract_working_title(user_text) else {
+    let Some(slot) = state.pending_scoping.get_mut(plan_name) else {
         return;
     };
-    if plan_dir.is_dir() {
-        let mut stored = plans::load_state(&plan_dir);
-        if stored.working_title.is_none() {
-            stored.working_title = Some(title);
-            plans::store_state(&plan_dir, &stored);
-        }
-    } else if let Some(mut guard) = lock_state(state)
-        && let Some(slot) = guard.pending_scoping.get_mut(plan_name)
-    {
-        *slot = Some(title);
+    if !overwrite && slot.is_some() {
+        return;
     }
+    if !overwrite && title.is_none() {
+        return;
+    }
+    *slot = title;
+}
+
+/// Send-path title: set-once from the user's text. Never overwrites a
+/// draft-kept title; empty stays `Untitled` via extractor `None`.
+fn store_first_title(
+    state: &Mutex<State>,
+    repo_root: &std::path::Path,
+    plan_name: &str,
+    user_text: &str,
+) {
+    let trimmed = user_text.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let title = crate::working_title::extract_working_title(trimmed);
+    let Some(mut guard) = lock_state(state) else {
+        return;
+    };
+    store_title(&mut guard, repo_root, plan_name, title, false);
+}
+
+/// Keep-path title: overwrites from the switch-away draft on every keep.
+/// Extractor `None` clears to `Untitled`.
+pub(crate) fn store_draft_title(
+    state: &mut State,
+    repo_root: &std::path::Path,
+    plan_name: &str,
+    user_text: &str,
+) {
+    let trimmed = user_text.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let title = crate::working_title::extract_working_title(trimmed);
+    store_title(state, repo_root, plan_name, title, true);
 }
 
 /// Move a pending working title into `state.json` at materialize time.
@@ -627,7 +655,7 @@ mod tests {
         plans::materialize_scoping(root, name).expect("materialize");
         let state = Mutex::new(State::default());
         let first = "Fix the login flow login errors on login retry.";
-        store_working_title(&state, root, name, first);
+        store_first_title(&state, root, name, first);
         let stored = plans::load_state(
             &plans::PlanRef {
                 name: name.to_string(),
@@ -638,7 +666,7 @@ mod tests {
         let title = stored.working_title.clone().expect("title stored");
         assert!(title.to_lowercase().contains("login"));
         let second = "Fix the checkout flow checkout errors on checkout retry.";
-        store_working_title(&state, root, name, second);
+        store_first_title(&state, root, name, second);
         let kept = plans::load_state(
             &plans::PlanRef {
                 name: name.to_string(),
@@ -664,7 +692,7 @@ mod tests {
                 .insert(name.to_string(), None);
         }
         let text = "Fix the login flow login errors on login retry.";
-        store_working_title(&state, root, name, text);
+        store_first_title(&state, root, name, text);
         assert!(
             state
                 .lock()
@@ -707,7 +735,7 @@ mod tests {
         let name = "2026-09-26.08-41-03";
         plans::materialize_scoping(root, name).expect("materialize");
         let state = Mutex::new(State::default());
-        store_working_title(&state, root, name, "   \n  ");
+        store_first_title(&state, root, name, "   \n  ");
         let stored = plans::load_state(
             &plans::PlanRef {
                 name: name.to_string(),
@@ -716,5 +744,67 @@ mod tests {
             .path(root),
         );
         assert_eq!(stored.working_title, None);
+    }
+
+    #[test]
+    fn draft_title_overwrites_and_send_preserves_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let state = Mutex::new(State::default());
+        state
+            .lock()
+            .expect("state")
+            .pending_scoping
+            .insert(name.to_string(), None);
+        {
+            let mut guard = state.lock().expect("state");
+            store_draft_title(
+                &mut guard,
+                root,
+                name,
+                "Fix the login flow login errors on login retry.",
+            );
+        }
+        let first = state
+            .lock()
+            .expect("state")
+            .pending_scoping
+            .get(name)
+            .cloned()
+            .expect("pending");
+        assert!(first.is_some_and(|title| title.to_lowercase().contains("login")));
+        {
+            let mut guard = state.lock().expect("state");
+            store_draft_title(
+                &mut guard,
+                root,
+                name,
+                "Fix the checkout flow checkout errors on checkout retry.",
+            );
+        }
+        let second = state
+            .lock()
+            .expect("state")
+            .pending_scoping
+            .get(name)
+            .cloned()
+            .expect("pending");
+        assert!(second.is_some_and(|title| title.to_lowercase().contains("checkout")));
+        store_first_title(
+            &state,
+            root,
+            name,
+            "Fix the login flow login errors on login retry.",
+        );
+        let kept = state
+            .lock()
+            .expect("state")
+            .pending_scoping
+            .get(name)
+            .cloned()
+            .expect("pending");
+        assert!(kept.is_some_and(|title| title.to_lowercase().contains("checkout")));
     }
 }

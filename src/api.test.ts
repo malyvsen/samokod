@@ -45,9 +45,23 @@ describe("session commands", () => {
 			selected: testKey(),
 			config_defaults: { model: null, effort: null },
 		});
-		await selectPlan(testKey());
+		await selectPlan(testKey(), null);
 		expect(invoke).toHaveBeenCalledWith("select_plan", {
 			session: testKey(),
+			draft: null,
+		});
+	});
+
+	test("select_plan forwards the draft", async () => {
+		vi.mocked(invoke).mockResolvedValue({
+			plans: [],
+			selected: testKey(),
+			config_defaults: { model: null, effort: null },
+		});
+		await selectPlan(testKey(), "hello");
+		expect(invoke).toHaveBeenCalledWith("select_plan", {
+			session: testKey(),
+			draft: "hello",
 		});
 	});
 

@@ -26,8 +26,8 @@ export function refreshBranch(): Promise<string> {
 	return invoke<string>("refresh_branch");
 }
 
-export function createPlan(): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("create_plan");
+export function createPlan(draft: string | null): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("create_plan", { draft });
 }
 
 export function executePlan(session: SessionKey): Promise<PlansUpdate> {
@@ -38,8 +38,11 @@ export function cancelPlan(session: SessionKey): Promise<PlansUpdate> {
 	return invoke<PlansUpdate>("cancel_plan", { session });
 }
 
-export function selectPlan(session: SessionKey): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("select_plan", { session });
+export function selectPlan(
+	session: SessionKey,
+	draft: string | null,
+): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("select_plan", { session, draft });
 }
 
 export function setPlanMode(

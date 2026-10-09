@@ -27,7 +27,11 @@ import { SidePanel } from "./components/SidePanel";
 import { toSelectorModel } from "./components/selectors";
 import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
-import { hasUserMessage, useSessionDrafts } from "./sessions/drafts";
+import {
+	hasSentUserMessage,
+	shouldKeepOnSwitch,
+	useSessionDrafts,
+} from "./sessions/drafts";
 import { previewPromiseFor, useScopingPreview } from "./sessions/preview";
 import { type QueueMoveDirection, useSessionQueues } from "./sessions/queue";
 import { usePinnedTranscript } from "./sessions/scroll";
@@ -347,17 +351,28 @@ export function App() {
 	async function handleSelect(key: SessionKey) {
 		const prev = selectedRef.current;
 		if (sameSession(prev, key)) return;
-		const prevEmpty =
-			prev !== null && prev.role === "scoping" && !hasUserMessage(chats, prev);
+		const prevDraft = prev === null ? null : (draft.draftFor(prev) ?? null);
+		const keep =
+			prev === null
+				? true
+				: shouldKeepOnSwitch(
+						chats,
+						prevDraft === null
+							? draft.drafts
+							: { ...draft.drafts, [sessionKeyOf(prev)]: prevDraft },
+						prev,
+					);
 		try {
-			const update = await selectPlan(key);
-			if (prev !== null && prevEmpty) {
-				const prevId = sessionKeyOf(prev);
+			const update = await selectPlan(key, prevDraft);
+			if (prev !== null && !keep) {
+				const prevKey = prev;
+				const prevId = sessionKeyOf(prevKey);
 				setChats((current) => {
 					const next = { ...current };
 					delete next[prevId];
 					return next;
 				});
+				draft.clearDraft(prevKey);
 			}
 			applyPlans(update);
 		} catch (error) {
@@ -434,8 +449,30 @@ export function App() {
 	}
 
 	async function handleNewPlan() {
+		const current = selectedRef.current;
+		const currentDraft =
+			current === null ? null : (draft.draftFor(current) ?? null);
+		const keep =
+			current === null
+				? true
+				: shouldKeepOnSwitch(
+						chats,
+						currentDraft === null
+							? draft.drafts
+							: { ...draft.drafts, [sessionKeyOf(current)]: currentDraft },
+						current,
+					);
 		try {
-			const update = await createPlan();
+			const update = await createPlan(currentDraft);
+			if (current !== null && !sameSession(update.selected, current) && !keep) {
+				const vanished = current;
+				setChats((chats) => {
+					const next = { ...chats };
+					delete next[sessionKeyOf(vanished)];
+					return next;
+				});
+				draft.clearDraft(vanished);
+			}
 			applyPlans(update);
 		} catch (error) {
 			const key = selectedRef.current;
@@ -468,7 +505,7 @@ export function App() {
 	}
 
 	async function handleCancel(key: SessionKey) {
-		const wasEmpty = key.role === "scoping" && !hasUserMessage(chats, key);
+		const wasEmpty = key.role === "scoping" && !hasSentUserMessage(chats, key);
 		updateChat(key, (chat) => ({ ...chat, working: true }));
 		try {
 			const update = await cancelPlan(key);
@@ -478,6 +515,7 @@ export function App() {
 					delete next[sessionKeyOf(key)];
 					return next;
 				});
+				draft.clearDraft(key);
 			} else {
 				setChats((current) => carryChats(current, key, update, false));
 			}

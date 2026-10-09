@@ -213,6 +213,154 @@ describe("draft bubble in chat", () => {
 		expect(await screen.findByRole("textbox")).toHaveTextContent("hello");
 	});
 
+	test("keeps scoping draft across click-away and forwards it to selectPlan", async () => {
+		const first = testEntryWith("aaa", "scoping", "First", false, [
+			testStatus("scoping"),
+		]);
+		const second = testEntryWith("bbb", "scoping", "Second", false, [
+			testStatus("scoping"),
+		]);
+		const plans = [first, second];
+		api.selectPlan.mockImplementation(async (session: SessionKey) => ({
+			plans,
+			selected: session,
+			config_defaults: testDefaults(),
+		}));
+		const user = await openChat(api, {
+			plans,
+			selected: { plan: "aaa", role: "scoping" },
+		});
+		await user.keyboard("hello draft");
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Second, scoping, opens Scoping",
+			}),
+		);
+		expect(api.selectPlan).toHaveBeenCalledWith(
+			{ plan: "bbb", role: "scoping" },
+			"hello draft",
+		);
+		expect(await screen.findByRole("textbox")).toHaveTextContent("");
+		await user.click(
+			await screen.findByRole("button", {
+				name: "First, scoping, opens Scoping",
+			}),
+		);
+		expect(await screen.findByRole("textbox")).toHaveTextContent("hello draft");
+	});
+
+	test("kept title renders from mocked plans", async () => {
+		const kept = testEntryWith("aaa", "scoping", "hello draft title", false, [
+			testStatus("scoping"),
+		]);
+		const second = testEntryWith("bbb", "scoping", "Second", false, [
+			testStatus("scoping"),
+		]);
+		const before = [
+			testEntryWith("aaa", "scoping", "First", false, [testStatus("scoping")]),
+			second,
+		];
+		const after = [kept, second];
+		api.selectPlan.mockImplementation(async (session: SessionKey) => ({
+			plans: after,
+			selected: session,
+			config_defaults: testDefaults(),
+		}));
+		const user = await openChat(api, {
+			plans: before,
+			selected: { plan: "aaa", role: "scoping" },
+		});
+		await user.keyboard("hello draft title hello");
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Second, scoping, opens Scoping",
+			}),
+		);
+		await screen.findByText("hello draft title");
+	});
+
+	test("whitespace draft discards chats and draft", async () => {
+		const first = testEntryWith("aaa", "scoping", "First", false, [
+			testStatus("scoping"),
+		]);
+		const second = testEntryWith("bbb", "scoping", "Second", false, [
+			testStatus("scoping"),
+		]);
+		const plans = [first, second];
+		api.selectPlan.mockImplementation(async (session: SessionKey) => ({
+			plans,
+			selected: session,
+			config_defaults: testDefaults(),
+		}));
+		const user = await openChat(api, {
+			plans,
+			selected: { plan: "aaa", role: "scoping" },
+		});
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: { plan: "aaa", role: "scoping" },
+			chunk: "aaa ephemeral",
+		});
+		emitAppEvent(api, {
+			type: "turn_done",
+			session: { plan: "aaa", role: "scoping" },
+		});
+		expect(screen.getByText("aaa ephemeral")).toBeInTheDocument();
+		await user.keyboard("   ");
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Second, scoping, opens Scoping",
+			}),
+		);
+		expect(api.selectPlan).toHaveBeenCalledWith(
+			{ plan: "bbb", role: "scoping" },
+			"",
+		);
+		expect(screen.queryByText("aaa ephemeral")).not.toBeInTheDocument();
+		await user.click(
+			await screen.findByRole("button", {
+				name: "First, scoping, opens Scoping",
+			}),
+		);
+		expect(await screen.findByRole("textbox")).toHaveTextContent("");
+	});
+
+	test("new plan forwards current draft and preserves it", async () => {
+		const first = testEntryWith("aaa", "scoping", "First", false, [
+			testStatus("scoping"),
+		]);
+		const kept = testEntryWith("aaa", "scoping", "hello draft title", false, [
+			testStatus("scoping"),
+		]);
+		const fresh = testEntryWith("ccc", "scoping", "Untitled", false, [
+			testStatus("scoping"),
+		]);
+		api.createPlan.mockImplementation(async () => ({
+			plans: [kept, fresh],
+			selected: { plan: "ccc", role: "scoping" },
+			config_defaults: testDefaults(),
+		}));
+		api.selectPlan.mockImplementation(async (session: SessionKey) => ({
+			plans: [kept, fresh],
+			selected: session,
+			config_defaults: testDefaults(),
+		}));
+		const user = await openChat(api, {
+			plans: [first],
+			selected: { plan: "aaa", role: "scoping" },
+		});
+		await user.keyboard("hello draft");
+		await user.click(screen.getByRole("button", { name: "New plan" }));
+		expect(api.createPlan).toHaveBeenCalledWith("hello draft");
+		expect(await screen.findByRole("textbox")).toHaveTextContent("");
+		await user.click(
+			await screen.findByRole("button", {
+				name: "hello draft title, scoping, opens Scoping",
+			}),
+		);
+		expect(await screen.findByRole("textbox")).toHaveTextContent("hello draft");
+	});
+
 	test("stays visible with queue placeholder while working", async () => {
 		const user = await openChat(api);
 		api.sendPrompt.mockReturnValue(new Promise(() => {}));
@@ -224,5 +372,29 @@ describe("draft bubble in chat", () => {
 		expect(
 			screen.queryByRole("button", { name: "STOP" }),
 		).not.toBeInTheDocument();
+	});
+});
+
+describe("draft helpers", () => {
+	test("isBlankDraft trims", async () => {
+		const { isBlankDraft } = await import("./sessions/drafts");
+		expect(isBlankDraft(null)).toBe(true);
+		expect(isBlankDraft(undefined)).toBe(true);
+		expect(isBlankDraft("")).toBe(true);
+		expect(isBlankDraft("   ")).toBe(true);
+		expect(isBlankDraft("hello")).toBe(false);
+	});
+
+	test("shouldKeepOnSwitch keeps sent or drafted sessions", async () => {
+		const { shouldKeepOnSwitch, hasSentUserMessage } = await import(
+			"./sessions/drafts"
+		);
+		const { testKey } = await import("./fixtures");
+		expect(hasSentUserMessage({}, testKey())).toBe(false);
+		expect(shouldKeepOnSwitch({}, {}, testKey())).toBe(false);
+		const drafted = {
+			"2026-09-25.10-54-59::scoping": "hi",
+		};
+		expect(shouldKeepOnSwitch({}, drafted, testKey())).toBe(true);
 	});
 });

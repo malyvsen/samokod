@@ -242,7 +242,7 @@ describe("plan", () => {
 		await user.click(
 			screen.getByRole("button", { name: "Beta, scoping, opens Scoping" }),
 		);
-		expect(api.selectPlan).toHaveBeenCalledWith(bbb);
+		expect(api.selectPlan).toHaveBeenCalledWith(bbb, null);
 		await screen.findByText("bbb chat");
 		expect(screen.queryByText("aaa chat")).not.toBeInTheDocument();
 		expect(screen.getByText("Beta todo")).toBeInTheDocument();
@@ -285,10 +285,13 @@ describe("plan", () => {
 		await user.click(
 			screen.getByRole("button", { name: "Beta, scoping, opens Scoping" }),
 		);
-		expect(api.selectPlan).toHaveBeenCalledWith({
-			plan: "bbb",
-			role: "scoping",
-		});
+		expect(api.selectPlan).toHaveBeenCalledWith(
+			{
+				plan: "bbb",
+				role: "scoping",
+			},
+			null,
+		);
 		expect(screen.queryByText("aaa ephemeral")).not.toBeInTheDocument();
 		expect(
 			await screen.findByRole("textbox", { name: "Ask for a change…" }),

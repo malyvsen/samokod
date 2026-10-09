@@ -139,6 +139,32 @@ pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str) {
     state.pending_scoping.remove(name);
 }
 
+/// Keep an empty scoping session when its draft box holds non-blank text,
+/// inferring its working title from the draft (overwrite, `None` renders
+/// as `Untitled`). Returns true when kept; false means the caller should
+/// vanish it. Caller owns the lock; the pending entry stays diskless.
+pub(crate) fn keep_or_vanish_empty(
+    state: &mut State,
+    repo_root: &Path,
+    prev: &SessionKey,
+    draft: Option<String>,
+) -> bool {
+    if prev.role != SessionRole::Scoping {
+        return false;
+    }
+    if !is_empty_scoping(state, repo_root, &prev.plan) {
+        return false;
+    }
+    let Some(raw) = draft.as_deref() else {
+        return false;
+    };
+    if raw.trim().is_empty() {
+        return false;
+    }
+    turns::store_draft_title(state, repo_root, &prev.plan, raw.trim());
+    true
+}
+
 /// Scoping template for one session. Returns the rendered template
 /// only while the session is fresh under `is_empty_scoping`, `None` for
 /// non-fresh or non-scoping sessions, and an error when the plan is
@@ -250,10 +276,12 @@ impl AgentManager {
     }
 
     /// Reserve a fresh scoping session without touching disk. Reuses the
-    /// pending session when the selection is still on an empty one. The
-    /// start flow owns liveness: empty keys load history, non-empty keys
-    /// warm, so this path spawns neither.
-    pub async fn create_plan(&self) -> Result<PlansUpdate, AgentError> {
+    /// pending session when the selection is still on an empty one with a
+    /// blank draft; a non-blank draft keeps the old pending with its
+    /// inferred title and reserves a new one. The start flow owns liveness:
+    /// empty keys load history, non-empty keys warm, so this path spawns
+    /// neither. `draft` is the unsent text of `state.current` at call time.
+    pub async fn create_plan(&self, draft: Option<String>) -> Result<PlansUpdate, AgentError> {
         let repo_root = self.current_repo().ok_or_else(|| AgentError::NoSession {
             raw: "open a repository first".to_string(),
         })?;
@@ -263,17 +291,22 @@ impl AgentManager {
                 && current.role == SessionRole::Scoping
                 && state.pending_scoping.contains_key(&current.plan)
                 && is_empty_scoping(&state, &repo_root, &current.plan)
+                && draft.as_deref().map(str::trim).unwrap_or("").is_empty()
             {
                 drop(state);
                 return Ok(self.plans_update());
             }
         }
-        let name = {
-            let state = self.state.lock().expect("state poisoned");
-            reserve_scoping_name(&repo_root, &state.pending_scoping)
-        };
         match self.state.lock() {
             Ok(mut state) => {
+                if let Some(prev) = state.current.clone()
+                    && prev.role == SessionRole::Scoping
+                    && is_empty_scoping(&state, &repo_root, &prev.plan)
+                    && !keep_or_vanish_empty(&mut state, &repo_root, &prev, draft)
+                {
+                    vanish_scoping(&mut state, &repo_root, &prev.plan);
+                }
+                let name = reserve_scoping_name(&repo_root, &state.pending_scoping);
                 state.pending_scoping.insert(name.clone(), None);
                 state.current = Some(SessionKey {
                     plan: name,
@@ -514,11 +547,17 @@ impl AgentManager {
         Ok(self.plans_update())
     }
 
-    /// Select one session, discarding a previously-selected empty scoping
-    /// session the same way as cancel. Returns the target selection.
-    /// No `ensure_idle` gate: selection is allowed anytime, and an empty
-    /// previous session is never working.
-    pub async fn select_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
+    /// Select one session, keeping a previously-selected empty scoping
+    /// session when its draft holds text (with its inferred title) and
+    /// discarding it the same way as cancel otherwise. Returns the target
+    /// selection. `draft` is the unsent text of `state.current` at call
+    /// time. No `ensure_idle` gate: selection is allowed anytime, and an
+    /// empty previous session is never working.
+    pub async fn select_plan(
+        &self,
+        session: SessionKey,
+        draft: Option<String>,
+    ) -> Result<PlansUpdate, AgentError> {
         let (repo_root, _) = self
             .reopen_snapshot()
             .ok_or_else(|| AgentError::NoSession {
@@ -544,6 +583,7 @@ impl AgentManager {
                     && prev != session
                     && prev.role == SessionRole::Scoping
                     && is_empty_scoping(&state, &repo_root, &prev.plan)
+                    && !keep_or_vanish_empty(&mut state, &repo_root, &prev, draft)
                 {
                     vanish_scoping(&mut state, &repo_root, &prev.plan);
                 }
@@ -1505,6 +1545,196 @@ mod tests {
         let entries = sorted_entries(root, &state.sessions, &state.pending_scoping);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, target.plan);
+    }
+
+    #[test]
+    fn keep_with_draft_sets_title_via_extractor() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let mut state = State {
+            pending_scoping: HashMap::from([(name.to_string(), None)]),
+            ..Default::default()
+        };
+        let prev = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Scoping,
+        };
+        let draft = Some("Fix the login flow login errors on login retry.".to_string());
+        assert!(keep_or_vanish_empty(&mut state, root, &prev, draft));
+        let title = state
+            .pending_scoping
+            .get(name)
+            .expect("pending kept")
+            .clone()
+            .expect("title inferred");
+        assert!(title.to_lowercase().contains("login"));
+        assert!(
+            !plans::PlanRef {
+                name: name.to_string(),
+                phase: plans::Phase::Scoping,
+            }
+            .path(root)
+            .exists()
+        );
+    }
+
+    #[test]
+    fn keep_with_whitespace_discards() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let mut state = State {
+            pending_scoping: HashMap::from([(name.to_string(), None)]),
+            ..Default::default()
+        };
+        let prev = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert!(!keep_or_vanish_empty(
+            &mut state,
+            root,
+            &prev,
+            Some("   \n  ".to_string())
+        ));
+        assert!(!keep_or_vanish_empty(&mut state, root, &prev, None));
+        vanish_scoping(&mut state, root, name);
+        assert!(!state.pending_scoping.contains_key(name));
+    }
+
+    #[test]
+    fn second_keep_overwrites_title() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let mut state = State {
+            pending_scoping: HashMap::from([(name.to_string(), None)]),
+            ..Default::default()
+        };
+        let prev = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert!(keep_or_vanish_empty(
+            &mut state,
+            root,
+            &prev,
+            Some("Fix the login flow login errors on login retry.".to_string())
+        ));
+        assert!(keep_or_vanish_empty(
+            &mut state,
+            root,
+            &prev,
+            Some("Fix the checkout flow checkout errors on checkout retry.".to_string())
+        ));
+        let title = state
+            .pending_scoping
+            .get(name)
+            .expect("pending kept")
+            .clone()
+            .expect("title inferred");
+        assert!(title.to_lowercase().contains("checkout"));
+    }
+
+    #[test]
+    fn extractor_none_draft_keeps_untitled() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let mut state = State {
+            pending_scoping: HashMap::from([(
+                name.to_string(),
+                Some("Login flow fixes".to_string()),
+            )]),
+            ..Default::default()
+        };
+        let prev = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert!(keep_or_vanish_empty(
+            &mut state,
+            root,
+            &prev,
+            Some("... !!! ???".to_string())
+        ));
+        assert_eq!(state.pending_scoping.get(name), Some(&None));
+        let entries = sorted_entries(root, &state.sessions, &state.pending_scoping);
+        assert_eq!(entries[0].title, "Untitled");
+    }
+
+    #[test]
+    fn create_with_draft_keeps_old_and_selects_new() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let mut state = State {
+            pending_scoping: HashMap::from([("2026-09-26.08-41-03".to_string(), None)]),
+            current: Some(SessionKey {
+                plan: "2026-09-26.08-41-03".to_string(),
+                role: SessionRole::Scoping,
+            }),
+            ..Default::default()
+        };
+        let prev = state.current.clone().expect("current");
+        let draft = Some("Fix the login flow login errors on login retry.".to_string());
+        assert!(keep_or_vanish_empty(&mut state, root, &prev, draft));
+        let name = reserve_scoping_name(root, &state.pending_scoping);
+        assert_ne!(name, "2026-09-26.08-41-03");
+        state.pending_scoping.insert(name.clone(), None);
+        state.current = Some(SessionKey {
+            plan: name.clone(),
+            role: SessionRole::Scoping,
+        });
+        assert!(
+            state
+                .pending_scoping
+                .get("2026-09-26.08-41-03")
+                .is_some_and(|title| title.is_some())
+        );
+        assert_eq!(
+            state.pending_scoping.get(&name),
+            Some(&None),
+            "new pending starts untitled"
+        );
+        assert!(
+            !plans::PlanRef {
+                name: name.clone(),
+                phase: plans::Phase::Scoping,
+            }
+            .path(root)
+            .exists()
+        );
+    }
+
+    #[test]
+    fn cancel_on_draft_kept_pending_still_vanishes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let mut state = State {
+            pending_scoping: HashMap::from([(name.to_string(), None)]),
+            ..Default::default()
+        };
+        let prev = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert!(keep_or_vanish_empty(
+            &mut state,
+            root,
+            &prev,
+            Some("Fix the login flow login errors on login retry.".to_string())
+        ));
+        assert!(is_empty_scoping(&state, root, name));
+        vanish_scoping(&mut state, root, name);
+        assert!(!state.pending_scoping.contains_key(name));
     }
 
     async fn open_test_session(
