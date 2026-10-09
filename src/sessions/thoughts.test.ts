@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
+import type { TranscriptItem } from "../types";
 import {
 	BURST_SILENCE_MS,
 	freezeBurst,
+	hasRunningTools,
 	liveForThought,
 	secondsForBurst,
 	WAITING_DELAY_MS,
@@ -73,5 +75,53 @@ describe("freezeBurst", () => {
 	test("leaves waiting and idle untouched", () => {
 		expect(freezeBurst([], null)).toEqual([]);
 		expect(freezeBurst([], { kind: "waiting" })).toEqual([]);
+	});
+});
+
+describe("hasRunningTools", () => {
+	test("empty transcript has nothing running", () => {
+		expect(hasRunningTools([])).toBe(false);
+	});
+
+	test("pending and in-progress tools count as running", () => {
+		const pending: TranscriptItem[] = [
+			{
+				kind: "tool",
+				id: "t1",
+				line: { id: "l1", text: "edit", status: "pending" },
+			},
+		];
+		const running: TranscriptItem[] = [
+			{
+				kind: "tool",
+				id: "t1",
+				line: { id: "l1", text: "edit", status: "in_progress" },
+			},
+		];
+		expect(hasRunningTools(pending)).toBe(true);
+		expect(hasRunningTools(running)).toBe(true);
+	});
+
+	test("completed mix with no running tools reads idle", () => {
+		const transcript: TranscriptItem[] = [
+			{
+				kind: "tool",
+				id: "t1",
+				line: { id: "l1", text: "edit", status: "completed" },
+			},
+			{ kind: "agent", id: "a1", text: "done" },
+		];
+		expect(hasRunningTools(transcript)).toBe(false);
+	});
+
+	test("failed only reads idle", () => {
+		const transcript: TranscriptItem[] = [
+			{
+				kind: "tool",
+				id: "t1",
+				line: { id: "l1", text: "edit", status: "failed" },
+			},
+		];
+		expect(hasRunningTools(transcript)).toBe(false);
 	});
 });

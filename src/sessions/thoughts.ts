@@ -41,6 +41,14 @@ export function secondsForBurst(burstStart: number, updatedAt: number): number {
 	return Math.max(1, Math.round((updatedAt - burstStart) / 1000));
 }
 
+export function hasRunningTools(transcript: TranscriptItem[]): boolean {
+	return transcript.some(
+		(item) =>
+			item.kind === "tool" &&
+			(item.line.status === "pending" || item.line.status === "in_progress"),
+	);
+}
+
 export function useThoughtTimers(
 	selectedKey: SessionKey | null,
 	chat: ChatState | null,
