@@ -6,13 +6,20 @@ import { PlansPanel } from "./components/PlansPanel";
 import { testEntryWith, testStatus } from "./fixtures";
 import type { PlanEntry } from "./types";
 
-const SECTIONS = ["SCOPING", "EXECUTING", "LANDING", "COMPLETED", "CANCELLED"];
+const SECTIONS = [
+	"SCOPING",
+	"EXECUTING",
+	"EVERGREENING",
+	"LANDING",
+	"COMPLETED",
+	"CANCELLED",
+];
 
 function panelProps(
 	plans: PlanEntry[],
 	selected: {
 		plan: string;
-		role: "scoping" | "executing" | "landing";
+		role: "scoping" | "executing" | "evergreening" | "landing";
 	} | null = null,
 ) {
 	return {
@@ -23,7 +30,36 @@ function panelProps(
 		onExecute: vi.fn(),
 		onCancel: vi.fn(),
 		onSetMode: vi.fn(),
+		onSetEvergreen: vi.fn(),
 	};
+}
+
+async function openMenu(
+	user: ReturnType<typeof userEvent.setup>,
+	planTitle: string,
+) {
+	await user.click(
+		screen.getByRole("button", { name: `Plan options for ${planTitle}` }),
+	);
+}
+
+function menuOf(planTitle: string) {
+	const group = planGroupFor(planTitle);
+	const menu = group.querySelector(".pdrop");
+	if (menu === null) throw new Error(`menu missing for ${planTitle}`);
+	return menu as HTMLElement;
+}
+
+function planGroupFor(planTitle: string) {
+	const header = screen
+		.getAllByRole("button")
+		.find((node) => node.textContent?.includes(planTitle)) as
+		| HTMLElement
+		| undefined;
+	if (header === undefined) throw new Error(`plan missing: ${planTitle}`);
+	const group = header.closest(".plan-group");
+	if (group === null) throw new Error("plan missing");
+	return group as HTMLElement;
 }
 
 function scopingPlan() {
@@ -49,13 +85,34 @@ function landingPlan() {
 		"landing",
 		"Shiny",
 		true,
-		[testStatus("scoping"), testStatus("executing"), testStatus("landing")],
+		[
+			testStatus("scoping"),
+			testStatus("executing"),
+			testStatus("evergreening"),
+			testStatus("landing"),
+		],
+	);
+}
+
+function evergreeningPlan() {
+	return testEntryWith(
+		"2026-09-25.10-54-59.green",
+		"evergreening",
+		"Shiny",
+		true,
+		[
+			testStatus("scoping"),
+			testStatus("executing"),
+			testStatus("evergreening"),
+		],
 	);
 }
 
 function sectionHeaders() {
 	return screen
-		.getAllByText(/^(SCOPING|EXECUTING|LANDING|COMPLETED|CANCELLED)$/)
+		.getAllByText(
+			/^(SCOPING|EXECUTING|EVERGREENING|LANDING|COMPLETED|CANCELLED)$/,
+		)
 		.map((node) => node.textContent);
 }
 
@@ -83,7 +140,7 @@ describe("plans panel", () => {
 			expect(props.onNewPlan).toHaveBeenCalledTimes(1);
 		});
 
-		test("renders all five sections in fixed order", () => {
+		test("renders all six sections in fixed order", () => {
 			render(
 				<PlansPanel
 					{...panelProps([executingPlan(), scopingPlan(), landingPlan()])}
@@ -130,6 +187,7 @@ describe("plans panel", () => {
 			for (const [plan, role, name] of [
 				[scopingPlan(), "scoping", /opens scoping$/i],
 				[executingPlan(), "executing", /executing, No todos yet$/i],
+				[evergreeningPlan(), "evergreening", /evergreening, No todos yet$/i],
 				[landingPlan(), "landing", /opens landing$/i],
 			] as const) {
 				const props = panelProps([plan], null);
@@ -156,7 +214,7 @@ describe("plans panel", () => {
 			expect(header.className).toBe("plan-name");
 		});
 
-		test("scoping headers offer cancel and execute instead of a switch", () => {
+		test("headers expose a single options trigger instead of buttons", () => {
 			const plan = scopingPlan();
 			render(
 				<PlansPanel
@@ -164,22 +222,99 @@ describe("plans panel", () => {
 				/>,
 			);
 			const group = planGroup("Parallel sessions, scoping, opens Scoping");
-			const buttons = within(group).getAllByRole("button");
-			const cancel = within(group).getByRole("button", {
-				name: "Cancel Parallel sessions",
-			});
-			const execute = within(group).getByRole("button", {
-				name: "Send Parallel sessions to execution",
-			});
-			expect(execute.textContent).toBe(">");
-			expect(execute.className).toContain("execute");
-			expect(buttons.indexOf(cancel)).toBeLessThan(buttons.indexOf(execute));
 			expect(
-				within(group).queryByRole("button", { name: /Switch to/ }),
+				within(group).getByRole("button", {
+					name: "Plan options for Parallel sessions",
+				}).textContent,
+			).toBe("...");
+			expect(group.querySelector(".sbtn.execute")).toBeNull();
+			expect(group.querySelector(".sbtn.mode")).toBeNull();
+			expect(group.querySelector(".sbtn.cancel")).toBeNull();
+			expect(
+				within(group).queryByRole("menuitem", { name: "Execute" }),
 			).toBeNull();
 		});
 
-		test("execute stays disabled without plan.md", () => {
+		test("scoping menus hold evergreen, execute, and cancel", async () => {
+			const plan = scopingPlan();
+			const props = panelProps([plan], {
+				plan: plan.name,
+				role: "scoping",
+			});
+			const user = userEvent.setup();
+			render(<PlansPanel {...props} />);
+			await openMenu(user, "Parallel sessions");
+			const menu = menuOf("Parallel sessions");
+			const rows = within(menu)
+				.getAllByRole("menuitemcheckbox")
+				.map((row) => row.textContent);
+			expect(rows).toEqual(["[x]Evergreen"]);
+			expect(
+				within(menu).getByRole("menuitem", { name: "Execute" }),
+			).toBeInTheDocument();
+			expect(
+				within(menu).getByRole("menuitem", { name: "Cancel" }),
+			).toBeInTheDocument();
+			expect(
+				within(menu).queryByRole("menuitemcheckbox", {
+					name: "Auto-advance",
+				}),
+			).toBeNull();
+		});
+
+		test("executing menus hold auto-advance, evergreen, and cancel", async () => {
+			const plan = executingPlan();
+			const props = panelProps([plan], {
+				plan: plan.name,
+				role: "executing",
+			});
+			const user = userEvent.setup();
+			render(<PlansPanel {...props} />);
+			await openMenu(user, "Shiny");
+			const menu = menuOf("Shiny");
+			expect(
+				within(menu).getByRole("menuitemcheckbox", { name: "Auto-advance" }),
+			).toBeInTheDocument();
+			expect(
+				within(menu).getByRole("menuitemcheckbox", { name: "Evergreen" }),
+			).toBeInTheDocument();
+			expect(
+				within(menu).getByRole("menuitem", { name: "Cancel" }),
+			).toBeInTheDocument();
+			expect(
+				within(menu).queryByRole("menuitem", { name: "Execute" }),
+			).toBeNull();
+		});
+
+		test("evergreening and landing menus skip the evergreen row", async () => {
+			const user = userEvent.setup();
+			for (const plan of [evergreeningPlan(), landingPlan()]) {
+				const props = panelProps([plan], {
+					plan: plan.name,
+					role: plan.phase === "landing" ? "landing" : "evergreening",
+				});
+				const { unmount } = render(<PlansPanel {...props} />);
+				await openMenu(user, "Shiny");
+				const menu = menuOf("Shiny");
+				expect(
+					within(menu).getByRole("menuitemcheckbox", {
+						name: "Auto-advance",
+					}),
+				).toBeInTheDocument();
+				expect(
+					within(menu).queryByRole("menuitemcheckbox", {
+						name: "Evergreen",
+					}),
+				).toBeNull();
+				expect(
+					within(menu).getByRole("menuitem", { name: "Cancel" }),
+				).toBeInTheDocument();
+				unmount();
+			}
+		});
+
+		test("execute stays disabled without plan.md", async () => {
+			const user = userEvent.setup();
 			render(
 				<PlansPanel
 					{...panelProps(
@@ -192,38 +327,48 @@ describe("plans panel", () => {
 					)}
 				/>,
 			);
+			await openMenu(user, "Bare");
 			expect(
-				screen.getByRole("button", {
-					name: "Send Bare to execution",
-				}),
+				within(menuOf("Bare")).getByRole("menuitem", { name: "Execute" }),
 			).toBeDisabled();
 		});
 
-		test("executing headers offer cancel and the mode switch", () => {
+		test("toggles keep the menu open while actions close it", async () => {
 			const plan = executingPlan();
-			render(
-				<PlansPanel
-					{...panelProps([plan], { plan: plan.name, role: "executing" })}
-				/>,
+			const props = panelProps([plan], {
+				plan: plan.name,
+				role: "executing",
+			});
+			const user = userEvent.setup();
+			render(<PlansPanel {...props} />);
+			await openMenu(user, "Shiny");
+			await user.click(
+				screen.getByRole("menuitemcheckbox", { name: "Auto-advance" }),
 			);
-			const group = planGroup("Shiny, executing, No todos yet");
-			const buttons = within(group).getAllByRole("button");
-			const cancel = within(group).getByRole("button", {
-				name: "Cancel Shiny",
-			});
-			const mode = within(group).getByRole("button", {
-				name: "Switch to manual",
-			});
-			expect(mode.textContent).toBe("A");
-			expect(mode.className).toContain("mode");
-			expect(mode.className).not.toContain("manual");
-			expect(buttons.indexOf(cancel)).toBeLessThan(buttons.indexOf(mode));
+			expect(props.onSetMode).toHaveBeenCalledWith(plan.name, true);
 			expect(
-				within(group).queryByRole("button", { name: /to execution/ }),
+				within(menuOf("Shiny")).getByRole("menuitemcheckbox", {
+					name: "Evergreen",
+				}),
+			).toBeInTheDocument();
+			await user.click(
+				screen.getByRole("menuitemcheckbox", { name: "Evergreen" }),
+			);
+			expect(props.onSetEvergreen).toHaveBeenCalledWith(plan.name, false);
+			expect(
+				within(menuOf("Shiny")).getByRole("menuitem", { name: "Cancel" }),
+			).toBeInTheDocument();
+			await user.click(screen.getByRole("menuitem", { name: "Cancel" }));
+			expect(props.onCancel).toHaveBeenCalledWith({
+				plan: plan.name,
+				role: "executing",
+			});
+			expect(
+				planGroup("Shiny, executing, No todos yet").querySelector(".pdrop"),
 			).toBeNull();
 		});
 
-		test("shows a manual switch with the reverse label", async () => {
+		test("toggling auto-advance back calls back with the plan", async () => {
 			const plan = testEntryWith(
 				"2026-09-25.10-54-59.slug",
 				"executing",
@@ -238,28 +383,127 @@ describe("plans panel", () => {
 			});
 			const user = userEvent.setup();
 			render(<PlansPanel {...props} />);
-			const mode = screen.getByRole("button", { name: "Switch to auto" });
-			expect(mode.textContent).toBe("M");
-			expect(mode.className).toContain("manual");
-			await user.click(mode);
+			await openMenu(user, "Shiny");
+			const toggle = screen.getByRole("menuitemcheckbox", {
+				name: "Auto-advance",
+			});
+			expect(toggle.textContent).toBe("[ ]Auto-advance");
+			await user.click(toggle);
 			expect(props.onSetMode).toHaveBeenCalledWith(plan.name, false);
 		});
 
-		test("flipping to manual calls back with the plan", async () => {
-			const plan = executingPlan();
-			const props = panelProps([plan], {
-				plan: plan.name,
-				role: "executing",
-			});
+		test("evergreen marks follow intent", async () => {
 			const user = userEvent.setup();
-			render(<PlansPanel {...props} />);
-			await user.click(
-				screen.getByRole("button", { name: "Switch to manual" }),
+			const on = testEntryWith(
+				"on",
+				"executing",
+				"On",
+				true,
+				[testStatus("scoping"), testStatus("executing")],
+				false,
+				true,
 			);
-			expect(props.onSetMode).toHaveBeenCalledWith(plan.name, true);
+			const off = testEntryWith(
+				"off",
+				"executing",
+				"Off",
+				true,
+				[testStatus("scoping"), testStatus("executing")],
+				false,
+				false,
+			);
+			const props = panelProps([on, off], null);
+			render(<PlansPanel {...props} />);
+			await openMenu(user, "On");
+			expect(
+				within(menuOf("On")).getByRole("menuitemcheckbox", {
+					name: "Evergreen",
+				}).textContent,
+			).toBe("[x]Evergreen");
+			await user.click(
+				screen.getByRole("button", { name: "Plan options for On" }),
+			);
+			await openMenu(user, "Off");
+			const toggle = within(menuOf("Off")).getByRole("menuitemcheckbox", {
+				name: "Evergreen",
+			});
+			expect(toggle.textContent).toBe("[ ]Evergreen");
+			await user.click(toggle);
+			expect(props.onSetEvergreen).toHaveBeenCalledWith("off", true);
 		});
 
-		test("executing from the header uses the scoping session", async () => {
+		test("menus stay per-row", async () => {
+			const props = panelProps([scopingPlan(), executingPlan()], null);
+			const user = userEvent.setup();
+			render(<PlansPanel {...props} />);
+			await openMenu(user, "Parallel sessions");
+			expect(
+				planGroupFor("Parallel sessions").querySelector(".pdrop"),
+			).not.toBeNull();
+			expect(
+				planGroup("Shiny, executing, No todos yet").querySelector(".pdrop"),
+			).toBeNull();
+			await user.click(
+				screen.getByRole("menuitemcheckbox", { name: "Evergreen" }),
+			);
+			expect(props.onSetEvergreen).toHaveBeenCalledWith(
+				scopingPlan().name,
+				false,
+			);
+			await openMenu(user, "Shiny");
+			expect(
+				planGroupFor("Parallel sessions").querySelector(".pdrop"),
+			).toBeNull();
+			expect(
+				planGroup("Shiny, executing, No todos yet").querySelector(".pdrop"),
+			).not.toBeNull();
+			await user.click(
+				screen.getByRole("menuitemcheckbox", { name: "Auto-advance" }),
+			);
+			expect(props.onSetMode).toHaveBeenCalledWith(executingPlan().name, true);
+			expect(props.onSetEvergreen).toHaveBeenCalledTimes(1);
+		});
+
+		test("escape closes the menu", async () => {
+			const user = userEvent.setup();
+			render(
+				<PlansPanel
+					{...panelProps([scopingPlan()], {
+						plan: scopingPlan().name,
+						role: "scoping",
+					})}
+				/>,
+			);
+			await openMenu(user, "Parallel sessions");
+			expect(
+				planGroupFor("Parallel sessions").querySelector(".pdrop"),
+			).not.toBeNull();
+			await user.keyboard("{Escape}");
+			expect(
+				planGroupFor("Parallel sessions").querySelector(".pdrop"),
+			).toBeNull();
+		});
+
+		test("outside clicks close the menu", async () => {
+			const user = userEvent.setup();
+			render(
+				<PlansPanel {...panelProps([scopingPlan(), executingPlan()], null)} />,
+			);
+			await openMenu(user, "Parallel sessions");
+			expect(
+				planGroupFor("Parallel sessions").querySelector(".pdrop"),
+			).not.toBeNull();
+			await user.click(
+				screen.getByRole("button", {
+					name: "Shiny, executing, No todos yet",
+				}),
+			);
+			expect(
+				planGroupFor("Parallel sessions").querySelector(".pdrop"),
+			).toBeNull();
+		});
+
+		test("executing from the menu uses the scoping session", async () => {
 			const plan = scopingPlan();
 			const props = panelProps([plan], {
 				plan: plan.name,
@@ -267,11 +511,8 @@ describe("plans panel", () => {
 			});
 			const user = userEvent.setup();
 			render(<PlansPanel {...props} />);
-			await user.click(
-				screen.getByRole("button", {
-					name: "Send Parallel sessions to execution",
-				}),
-			);
+			await openMenu(user, "Parallel sessions");
+			await user.click(screen.getByRole("menuitem", { name: "Execute" }));
 			expect(props.onExecute).toHaveBeenCalledWith({
 				plan: plan.name,
 				role: "scoping",
@@ -279,7 +520,7 @@ describe("plans panel", () => {
 			expect(props.onSetMode).not.toHaveBeenCalled();
 		});
 
-		test("cancelling from the header uses the latest role", async () => {
+		test("cancelling from the menu uses the latest role", async () => {
 			const plan = executingPlan();
 			const props = panelProps([plan], {
 				plan: plan.name,
@@ -287,7 +528,8 @@ describe("plans panel", () => {
 			});
 			const user = userEvent.setup();
 			render(<PlansPanel {...props} />);
-			await user.click(screen.getByRole("button", { name: "Cancel Shiny" }));
+			await openMenu(user, "Shiny");
+			await user.click(screen.getByRole("menuitem", { name: "Cancel" }));
 			expect(props.onCancel).toHaveBeenCalledWith({
 				plan: plan.name,
 				role: "executing",
@@ -462,7 +704,7 @@ describe("plans panel", () => {
 			expect(screen.getByText("Executing")).toBeInTheDocument();
 		});
 
-		test("expanded landing plans list three sessions without buttons", () => {
+		test("expanded landing plans list four sessions without buttons", () => {
 			const plan = landingPlan();
 			const { container } = render(
 				<PlansPanel
@@ -471,8 +713,22 @@ describe("plans panel", () => {
 			);
 			expect(screen.getByText("Scoping")).toBeInTheDocument();
 			expect(screen.getByText("Executing")).toBeInTheDocument();
+			expect(screen.getByText("Evergreening")).toBeInTheDocument();
 			expect(screen.getByText("Landing")).toBeInTheDocument();
 			expect(container.querySelectorAll(".sbody .sbtn").length).toBe(0);
+		});
+
+		test("expanded evergreening plans list three sessions", () => {
+			const plan = evergreeningPlan();
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "evergreening" })}
+				/>,
+			);
+			expect(screen.getByText("Scoping")).toBeInTheDocument();
+			expect(screen.getByText("Executing")).toBeInTheDocument();
+			expect(screen.getByText("Evergreening")).toBeInTheDocument();
+			expect(screen.queryByText("Landing")).toBeNull();
 		});
 
 		test("shows session rows only on the expanded plan", () => {
@@ -494,7 +750,9 @@ describe("plans panel", () => {
 			expect(
 				within(
 					planGroup("Parallel sessions, scoping, opens Scoping"),
-				).getByRole("button", { name: "Cancel Parallel sessions" }),
+				).getByRole("button", {
+					name: "Plan options for Parallel sessions",
+				}),
 			).toBeInTheDocument();
 		});
 
@@ -736,7 +994,7 @@ describe("plans panel", () => {
 	});
 
 	describe("actions", () => {
-		test("header cancel calls back with the latest session", async () => {
+		test("menu cancel calls back with the latest session", async () => {
 			const plan = executingPlan();
 			const props = panelProps([plan], {
 				plan: plan.name,
@@ -744,7 +1002,8 @@ describe("plans panel", () => {
 			});
 			const user = userEvent.setup();
 			render(<PlansPanel {...props} />);
-			await user.click(screen.getByRole("button", { name: "Cancel Shiny" }));
+			await openMenu(user, "Shiny");
+			await user.click(screen.getByRole("menuitem", { name: "Cancel" }));
 			expect(props.onCancel).toHaveBeenCalledWith({
 				plan: plan.name,
 				role: "executing",
@@ -779,13 +1038,7 @@ describe("plans panel", () => {
 			);
 			for (const button of container.querySelectorAll(".sbtn")) {
 				expect(button.getAttribute("title")).toBeNull();
-				expect(
-					button.textContent === "✕" ||
-						button.textContent === ">" ||
-						button.textContent === "A" ||
-						button.textContent === "M" ||
-						button.textContent === "+",
-				).toBe(true);
+				expect(button.textContent).toBe("+");
 			}
 		});
 	});
@@ -828,6 +1081,19 @@ describe("plans panel", () => {
 			expect(css).not.toContain(".plan-group.sel .hact");
 			expect(css).toContain(".plan-group:hover .pmeta");
 			expect(css).toContain(".plan-group:focus-within .pmeta");
+		});
+
+		test("plan menus float a bordered dropdown", () => {
+			const css = appCss();
+			const top = /\.phead-top\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(top).toContain("position: relative");
+			const drop = /\.pdrop\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(drop).toContain("position: absolute");
+			expect(drop).toContain("rgba(8, 8, 12, 0.96)");
+			const sep = /\.dsep\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(sep).toContain("rgba(255, 255, 255, 0.12)");
+			const mark = /\.pdrop\s+\.mark\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(mark).toContain("26px");
 		});
 
 		test("executing headers stack an ETA and a 3px bar", () => {

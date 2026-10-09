@@ -15,6 +15,7 @@ import {
 	selectPlan,
 	sendPrompt,
 	setGlobalConfigOption,
+	setPlanEvergreen,
 	setPlanMode,
 	validateRepo,
 } from "./api";
@@ -652,6 +653,23 @@ export function App() {
 		}
 	}
 
+	async function handleSetEvergreen(plan: string, evergreen: boolean) {
+		try {
+			const update = await setPlanEvergreen(plan, evergreen);
+			applyPlans(update);
+		} catch (error) {
+			const key = selectedRef.current;
+			if (key !== null) {
+				appendError(
+					key,
+					error instanceof Error ? error.message : String(error),
+					"couldn't switch evergreen intent - try again",
+					false,
+				);
+			}
+		}
+	}
+
 	const repoLabel = repoRoot === null ? "no repo" : shortPath(repoRoot);
 
 	return (
@@ -704,6 +722,9 @@ export function App() {
 								onExecute={(key) => void handleExecute(key)}
 								onCancel={(key) => void handleCancel(key)}
 								onSetMode={(plan, manual) => void handleSetMode(plan, manual)}
+								onSetEvergreen={(plan, evergreen) =>
+									void handleSetEvergreen(plan, evergreen)
+								}
 							/>
 						) : (
 							<SettingsPanel

@@ -20,6 +20,7 @@ export const api = {
 	answerPermission: vi.fn(),
 	setGlobalConfigOption: vi.fn(),
 	setPlanMode: vi.fn(),
+	setPlanEvergreen: vi.fn(),
 	warmSession: vi.fn(),
 	loadHistory: vi.fn(),
 	scopingTemplate: vi.fn(),

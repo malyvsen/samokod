@@ -1178,10 +1178,42 @@ button.brand:hover {
 }
 
 .phead-top {
+	position: relative;
 	display: flex;
 	align-items: center;
 	gap: 8px;
 	min-width: 0;
+}
+
+.pdrop {
+	position: absolute;
+	top: 100%;
+	right: 0;
+	z-index: 5;
+	min-width: 200px;
+	max-width: 320px;
+	background: rgba(8, 8, 12, 0.96);
+	border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.pdrop .mark {
+	width: 26px;
+	flex: none;
+	color: #8f8c85;
+}
+
+.pdrop .dopt.on .mark {
+	color: #7dffc4;
+}
+
+.pdrop .dopt:hover .mark {
+	color: inherit;
+}
+
+.dsep {
+	height: 1px;
+	background: rgba(255, 255, 255, 0.12);
+	margin: 4px 0;
 }
 
 .pmeta {
@@ -1470,6 +1502,7 @@ button.brand:hover {
 	color: #e8e6e1;
 }
 
+/* biome-ignore lint/style/noDescendingSpecificity: pdrop and sess-tip marks live in disjoint subtrees, order is irrelevant */
 .sess-tip .trow .mark {
 	flex: none;
 	width: 26px;

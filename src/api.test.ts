@@ -6,6 +6,7 @@ import {
 	onAppEvent,
 	selectPlan,
 	setGlobalConfigOption,
+	setPlanEvergreen,
 	setPlanMode,
 	warmSession,
 } from "./api";
@@ -86,6 +87,19 @@ describe("session commands", () => {
 		expect(invoke).toHaveBeenCalledWith("set_plan_mode", {
 			plan: "2026-09-25.10-54-59",
 			manual: true,
+		});
+	});
+
+	test("set_plan_evergreen targets the plan", async () => {
+		vi.mocked(invoke).mockResolvedValue({
+			plans: [],
+			selected: testKey(),
+			config_defaults: { model: null, effort: null },
+		});
+		await setPlanEvergreen("2026-09-25.10-54-59", false);
+		expect(invoke).toHaveBeenCalledWith("set_plan_evergreen", {
+			plan: "2026-09-25.10-54-59",
+			evergreen: false,
 		});
 	});
 

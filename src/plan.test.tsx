@@ -54,7 +54,15 @@ describe("plan", () => {
 		expect(screen.getByText("Executing")).toBeInTheDocument();
 	});
 
-	test("header execute shows the live first prompt without sending", async () => {
+	async function openPlanMenu(user: Awaited<ReturnType<typeof openChat>>) {
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Plan options for Parallel sessions",
+			}),
+		);
+	}
+
+	test("menu execute shows the live first prompt without sending", async () => {
 		api.openRepo.mockResolvedValue({
 			repo_root: "/repo",
 			branch: "feature",
@@ -77,11 +85,8 @@ describe("plan", () => {
 			config_defaults: testDefaults(),
 		});
 		const user = await openChat(api);
-		await user.click(
-			await screen.findByRole("button", {
-				name: "Send Parallel sessions to execution",
-			}),
-		);
+		await openPlanMenu(user);
+		await user.click(await screen.findByRole("menuitem", { name: "Execute" }));
 		expect(api.executePlan).toHaveBeenCalledWith({
 			plan: "2026-09-25.10-54-59",
 			role: "scoping",
@@ -107,11 +112,8 @@ describe("plan", () => {
 		});
 		api.executePlan.mockRejectedValue(new Error("nope"));
 		const user = await openChat(api);
-		await user.click(
-			await screen.findByRole("button", {
-				name: "Send Parallel sessions to execution",
-			}),
-		);
+		await openPlanMenu(user);
+		await user.click(await screen.findByRole("menuitem", { name: "Execute" }));
 		expect(
 			await screen.findByText("couldn't start execution - try again"),
 		).toBeInTheDocument();
@@ -120,7 +122,7 @@ describe("plan", () => {
 		).not.toBeInTheDocument();
 	});
 
-	test("header cancel cancels and keeps the transcript", async () => {
+	test("menu cancel cancels and keeps the transcript", async () => {
 		api.cancelPlan.mockResolvedValue({
 			plans: [
 				testEntry("2026-09-25.10-54-59.draft-idea", "cancelled", "Draft idea"),
@@ -137,11 +139,8 @@ describe("plan", () => {
 			chunk: "old chat",
 		});
 		emitAppEvent(api, { type: "turn_done", session: testKey() });
-		await user.click(
-			await screen.findByRole("button", {
-				name: "Cancel Parallel sessions",
-			}),
-		);
+		await openPlanMenu(user);
+		await user.click(await screen.findByRole("menuitem", { name: "Cancel" }));
 		expect(api.cancelPlan).toHaveBeenCalledTimes(1);
 		await screen.findByText("Draft idea");
 		expect(screen.getByText("old chat")).toBeInTheDocument();
@@ -162,11 +161,8 @@ describe("plan", () => {
 		});
 		emitAppEvent(api, { type: "turn_done", session: testKey() });
 		expect(screen.getByText("ephemeral")).toBeInTheDocument();
-		await user.click(
-			await screen.findByRole("button", {
-				name: "Cancel Parallel sessions",
-			}),
-		);
+		await openPlanMenu(user);
+		await user.click(await screen.findByRole("menuitem", { name: "Cancel" }));
 		expect(api.cancelPlan).toHaveBeenCalledTimes(1);
 		await vi.waitFor(() =>
 			expect(screen.queryByText("ephemeral")).not.toBeInTheDocument(),
@@ -374,11 +370,8 @@ describe("plan", () => {
 			chunk: "old chat",
 		});
 		emitAppEvent(api, { type: "turn_done", session: testKey() });
-		await user.click(
-			await screen.findByRole("button", {
-				name: "Cancel Parallel sessions",
-			}),
-		);
+		await openPlanMenu(user);
+		await user.click(await screen.findByRole("menuitem", { name: "Cancel" }));
 		expect(
 			await screen.findByText("couldn't cancel plan - try again"),
 		).toBeInTheDocument();
@@ -386,6 +379,14 @@ describe("plan", () => {
 			screen.queryByRole("button", { name: "retry" }),
 		).not.toBeInTheDocument();
 	});
+
+	async function openShinyMenu(user: Awaited<ReturnType<typeof openChat>>) {
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Plan options for Shiny",
+			}),
+		);
+	}
 
 	test("mode switch flips the plan to manual", async () => {
 		api.openRepo.mockResolvedValue({
@@ -403,8 +404,9 @@ describe("plan", () => {
 			config_defaults: testDefaults(),
 		});
 		const user = await openChat(api);
+		await openShinyMenu(user);
 		await user.click(
-			await screen.findByRole("button", { name: "Switch to manual" }),
+			await screen.findByRole("menuitemcheckbox", { name: "Auto-advance" }),
 		);
 		expect(api.setPlanMode).toHaveBeenCalledWith(
 			"2026-09-25.10-54-59.slug",
@@ -424,11 +426,62 @@ describe("plan", () => {
 		});
 		api.setPlanMode.mockRejectedValue(new Error("denied"));
 		const user = await openChat(api);
+		await openShinyMenu(user);
 		await user.click(
-			await screen.findByRole("button", { name: "Switch to manual" }),
+			await screen.findByRole("menuitemcheckbox", { name: "Auto-advance" }),
 		);
 		expect(
 			await screen.findByText("couldn't switch plan mode - try again"),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "retry" }),
+		).not.toBeInTheDocument();
+	});
+
+	test("evergreen toggle skips cleanup for the plan", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [
+				testEntry("2026-09-25.10-54-59.slug", "executing", "Shiny", true),
+			],
+			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
+			config_defaults: testDefaults(),
+		});
+		api.setPlanEvergreen.mockResolvedValue({
+			plans: [testEntry()],
+			selected: testKey(),
+			config_defaults: testDefaults(),
+		});
+		const user = await openChat(api);
+		await openShinyMenu(user);
+		await user.click(
+			await screen.findByRole("menuitemcheckbox", { name: "Evergreen" }),
+		);
+		expect(api.setPlanEvergreen).toHaveBeenCalledWith(
+			"2026-09-25.10-54-59.slug",
+			false,
+		);
+	});
+
+	test("failed evergreen switch surfaces its own hint without retry", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [
+				testEntry("2026-09-25.10-54-59.slug", "executing", "Shiny", true),
+			],
+			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
+			config_defaults: testDefaults(),
+		});
+		api.setPlanEvergreen.mockRejectedValue(new Error("denied"));
+		const user = await openChat(api);
+		await openShinyMenu(user);
+		await user.click(
+			await screen.findByRole("menuitemcheckbox", { name: "Evergreen" }),
+		);
+		expect(
+			await screen.findByText("couldn't switch evergreen intent - try again"),
 		).toBeInTheDocument();
 		expect(
 			screen.queryByRole("button", { name: "retry" }),

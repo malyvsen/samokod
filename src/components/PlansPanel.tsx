@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import type { PlanEntry, PlanPhase, SessionKey } from "../types";
+import { PlanMenu } from "./plans/PlanMenu";
 import {
 	type AttentionKind,
 	attentionFor,
@@ -21,6 +22,7 @@ export function PlansPanel({
 	onExecute,
 	onCancel,
 	onSetMode,
+	onSetEvergreen,
 }: {
 	plans: PlanEntry[];
 	selected: SessionKey | null;
@@ -29,6 +31,7 @@ export function PlansPanel({
 	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
 	onSetMode: (plan: string, manual: boolean) => void;
+	onSetEvergreen: (plan: string, evergreen: boolean) => void;
 }) {
 	const byPhase = groupByPhase(plans);
 	return (
@@ -57,6 +60,7 @@ export function PlansPanel({
 							onExecute={onExecute}
 							onCancel={onCancel}
 							onSetMode={onSetMode}
+							onSetEvergreen={onSetEvergreen}
 						/>
 					))}
 				</Fragment>
@@ -72,6 +76,7 @@ function PlanGroup({
 	onExecute,
 	onCancel,
 	onSetMode,
+	onSetEvergreen,
 }: {
 	plan: PlanEntry;
 	selected: SessionKey | null;
@@ -79,6 +84,7 @@ function PlanGroup({
 	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
 	onSetMode: (plan: string, manual: boolean) => void;
+	onSetEvergreen: (plan: string, evergreen: boolean) => void;
 }) {
 	const target = headerKey(plan);
 	const attention = attentionFor(plan);
@@ -112,6 +118,7 @@ function PlanGroup({
 				onExecute={onExecute}
 				onCancel={onCancel}
 				onSetMode={onSetMode}
+				onSetEvergreen={onSetEvergreen}
 			/>
 			{expanded
 				? plan.sessions.map((status, index) => (
@@ -139,6 +146,7 @@ function PlanHeader({
 	onExecute,
 	onCancel,
 	onSetMode,
+	onSetEvergreen,
 }: {
 	plan: PlanEntry;
 	target: SessionKey;
@@ -147,51 +155,19 @@ function PlanHeader({
 	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
 	onSetMode: (plan: string, manual: boolean) => void;
+	onSetEvergreen: (plan: string, evergreen: boolean) => void;
 }) {
 	const progress = executingProgress(plan);
-	const scopingWorking =
-		plan.sessions.find((status) => status.role === "scoping")?.working ?? false;
 	const controls =
 		plan.phase === "completed" || plan.phase === "cancelled" ? null : (
-			<span className="hact">
-				<button
-					className="sbtn cancel"
-					type="button"
-					aria-label={`Cancel ${plan.title}`}
-					onClick={(event) => {
-						event.stopPropagation();
-						onCancel(target);
-					}}
-				>
-					✕
-				</button>
-				{plan.phase === "scoping" ? (
-					<button
-						className="sbtn execute"
-						type="button"
-						aria-label={`Send ${plan.title} to execution`}
-						disabled={scopingWorking || !plan.has_plan_md}
-						onClick={(event) => {
-							event.stopPropagation();
-							onExecute(target);
-						}}
-					>
-						&gt;
-					</button>
-				) : (
-					<button
-						className={`sbtn mode${plan.manual ? " manual" : ""}`}
-						type="button"
-						aria-label={plan.manual ? "Switch to auto" : "Switch to manual"}
-						onClick={(event) => {
-							event.stopPropagation();
-							onSetMode(plan.name, !plan.manual);
-						}}
-					>
-						{plan.manual ? "M" : "A"}
-					</button>
-				)}
-			</span>
+			<PlanMenu
+				plan={plan}
+				target={target}
+				onExecute={onExecute}
+				onCancel={onCancel}
+				onSetMode={onSetMode}
+				onSetEvergreen={onSetEvergreen}
+			/>
 		);
 	if (progress === null) {
 		return (
@@ -221,7 +197,7 @@ function PlanHeader({
 					className="plan-name"
 					type="button"
 					onClick={() => onSelect(target)}
-					aria-label={`${plan.title}, executing, ${meta.tip}`}
+					aria-label={`${plan.title}, ${plan.phase}, ${meta.tip}`}
 					data-full={`${plan.title} - ${meta.tip}`}
 				>
 					<span

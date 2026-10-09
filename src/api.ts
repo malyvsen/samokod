@@ -52,6 +52,13 @@ export function setPlanMode(
 	return invoke<PlansUpdate>("set_plan_mode", { plan, manual });
 }
 
+export function setPlanEvergreen(
+	plan: string,
+	evergreen: boolean,
+): Promise<PlansUpdate> {
+	return invoke<PlansUpdate>("set_plan_evergreen", { plan, evergreen });
+}
+
 export function sendPrompt(session: SessionKey, text: string): Promise<void> {
 	return invoke("send_prompt", { session, text });
 }
