@@ -165,6 +165,22 @@ describe("scoping preview", () => {
 	test("empty chat starts with no preview", () => {
 		expect(emptyChat().scopingPreview).toBeNull();
 	});
+
+	test("history_begin clears scopingPreview while keeping the transcript", () => {
+		let chats = updateEntry(withChat(), testKey(), (chat) => ({
+			...chat,
+			scopingPreview: "TEMPLATE",
+			transcript: [{ kind: "user", id: "u1", text: "hello" }],
+		}));
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
+		const chat = chatOf(chats);
+		expect(chat.scopingPreview).toBeNull();
+		expect(chat.transcript).toHaveLength(1);
+		expect(chat.transcript[0]).toMatchObject({ kind: "user", text: "hello" });
+	});
 });
 
 describe("replayed updates", () => {

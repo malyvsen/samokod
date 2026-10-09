@@ -154,6 +154,27 @@ describe("draft bubble in chat", () => {
 		expect(screen.getAllByText("hello")).toHaveLength(1);
 	});
 
+	test("stale preview plus replayed template shows exactly once", async () => {
+		api.scopingTemplate.mockResolvedValue("TEMPLATE");
+		await openChat(api);
+		await screen.findByText("TEMPLATE");
+		emitAppEvent(api, { type: "history_begin", session: testKey() });
+		emitAppEvent(api, {
+			type: "user_text",
+			session: testKey(),
+			chunk: "TEMPLATE",
+		});
+		emitAppEvent(api, {
+			type: "user_text",
+			session: testKey(),
+			chunk: "hello",
+		});
+		emitAppEvent(api, { type: "history_done", session: testKey() });
+		await screen.findByText("hello");
+		expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);
+		expect(screen.getAllByText("hello")).toHaveLength(1);
+	});
+
 	test("preserves per-session user drafts across switches", async () => {
 		const first = testEntryWith("aaa", "scoping", "First", false, [
 			testStatus("scoping"),

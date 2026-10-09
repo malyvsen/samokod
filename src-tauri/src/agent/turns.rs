@@ -484,6 +484,9 @@ fn prefixed_first_message(template: &str, user_text: &str) -> String {
 /// Replayed user text as display bubbles: a scoping first prompt carries
 /// its template, so it splits back into template and message; anything
 /// else is one bubble. Pure.
+/// Executing and landing intentionally stay combined: no lead preview
+/// exists for them, so no duplicate is possible. Their live-versus-reload
+/// asymmetry is server-side prefixing, which stays out of scope.
 fn replay_bubbles(key: &SessionKey, chunk: &str) -> Vec<String> {
     if key.role != SessionRole::Scoping {
         return vec![chunk.to_string()];
@@ -578,6 +581,33 @@ mod tests {
         let template = opencode::scoping_template(display);
         assert!(split_scoping_replay(&template, "edited template text").is_none());
         assert!(split_scoping_replay(&template, &template).is_none());
+    }
+
+    #[test]
+    fn executing_replay_stays_single_bubble() {
+        let template = opencode::executing_first_message(".samokod/plans/executing/ts");
+        let full = prefixed_first_message(&template, "do things");
+        let key = SessionKey {
+            plan: "ts".to_string(),
+            role: SessionRole::Executing,
+        };
+        assert_eq!(replay_bubbles(&key, &full), vec![full]);
+    }
+
+    #[test]
+    fn landing_replay_stays_single_bubble() {
+        let template = opencode::landing_first_message(
+            "samokod-ts",
+            "main",
+            "/repo/.samokod/worktrees/ts",
+            "/repo/.samokod/plans/landing/ts/plan.md",
+        );
+        let full = prefixed_first_message(&template, "do things");
+        let key = SessionKey {
+            plan: "ts".to_string(),
+            role: SessionRole::Landing,
+        };
+        assert_eq!(replay_bubbles(&key, &full), vec![full]);
     }
 
     #[test]

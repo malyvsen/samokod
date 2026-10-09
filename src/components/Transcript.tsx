@@ -33,11 +33,14 @@ export function Transcript({
 	live?: LiveStatus | null;
 	children?: ReactNode;
 }) {
+	const showLead =
+		lead !== null &&
+		!items.some((item) => item.kind === "user" && item.text === lead);
 	return (
 		<>
 			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
 			<div className="tcol">
-				{lead !== null && (
+				{showLead && (
 					<div className="msg user">
 						<div className="who">YOU</div>
 						{lead}

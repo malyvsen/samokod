@@ -286,6 +286,7 @@ export function applySessionEvent(
 					},
 					{ kind: "replaying" },
 				),
+				scopingPreview: null,
 				live: null,
 			}));
 		case "history_done":
