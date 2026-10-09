@@ -269,17 +269,39 @@ export function App() {
 		const key = selectedRef.current;
 		if (key === null) return;
 		const sessionId = sessionKeyOf(key);
-		const headId = queue.peek(key).items[0]?.id ?? null;
+		const currentItems = queue.items;
+		const headId = currentItems[0]?.id ?? null;
 		const isHead = headId !== null && headId === id;
+		const commitStatus = drainStatusFor(chatsRef.current, key);
 		console.info(
-			`queue commit session=${sessionId} id=${id} isHead=${isHead} textLen=${text.length} status=${status}`,
+			`queue commit session=${sessionId} id=${id} isHead=${isHead} textLen=${text.length} status=${commitStatus}`,
 		);
+		if (text === "" && !isHead) {
+			queue.remove(key, id);
+			queue.setEditing(key, null);
+			return;
+		}
+		const nextItems =
+			text === ""
+				? currentItems.filter((item) => item.id !== id)
+				: currentItems.map((item) =>
+						item.id === id ? { ...item, text } : item,
+					);
+		const decision = resolveDrain(nextItems, null, commitStatus);
 		if (text === "") {
 			queue.remove(key, id);
 		} else {
 			queue.setText(key, id, text);
 		}
 		queue.setEditing(key, null);
+		if (decision.kind === "drain") {
+			const head = decision.head;
+			queue.remove(key, head.id);
+			console.info(
+				`queue drain session=${sessionId} headId=${head.id} textLen=${head.text.length}`,
+			);
+			void sendNow(key, head.text);
+		}
 	}
 
 	function handleQueueCancel() {
@@ -369,6 +391,30 @@ export function App() {
 		const sessionId = sessionKeyOf(key);
 		if (busy) {
 			const queueLenAfter = queue.peek(key).items.length + 1;
+			console.info(
+				`queue enqueue session=${sessionId} queueLenAfter=${queueLenAfter} textLen=${text.length}`,
+			);
+			queue.enqueue(key, text);
+			return;
+		}
+		const idleStatus = drainStatusFor(chatsRef.current, key);
+		const decision = resolveDrain(queue.items, queue.editingId, idleStatus);
+		if (decision.kind === "drain") {
+			const head = decision.head;
+			const queueLenAfter = queue.items.length + 1;
+			console.info(
+				`queue enqueue session=${sessionId} queueLenAfter=${queueLenAfter} textLen=${text.length}`,
+			);
+			queue.enqueue(key, text);
+			queue.remove(key, head.id);
+			console.info(
+				`queue drain session=${sessionId} headId=${head.id} textLen=${head.text.length}`,
+			);
+			await sendNow(key, head.text);
+			return;
+		}
+		if (queue.items.length > 0) {
+			const queueLenAfter = queue.items.length + 1;
 			console.info(
 				`queue enqueue session=${sessionId} queueLenAfter=${queueLenAfter} textLen=${text.length}`,
 			);

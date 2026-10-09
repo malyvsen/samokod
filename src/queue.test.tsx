@@ -247,6 +247,37 @@ describe("message queue", () => {
 		expect(screen.getByText("aaa followup")).toBeInTheDocument();
 		expect(screen.getByText("QUEUED")).toBeInTheDocument();
 	});
+
+	test("idle composer send with queued head sends head first", async () => {
+		const user = await startWorking();
+		await user.keyboard("first{Enter}");
+		await user.keyboard("second{Enter}");
+		await user.click(screen.getByText("first"));
+		emitAppEvent(api, { type: "turn_done", session: testKey() });
+		expect(api.sendPrompt).toHaveBeenCalledTimes(1);
+		await user.keyboard("{Escape}");
+		await screen.findByRole("textbox", { name: "Ask for a change…" });
+		expect(screen.getByText("first")).toBeInTheDocument();
+		await user.click(
+			screen.getByRole("textbox", { name: "Ask for a change…" }),
+		);
+		await user.keyboard("third{Enter}");
+		await vi.waitFor(() =>
+			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "first"),
+		);
+		expect(screen.getByText("second")).toBeInTheDocument();
+		expect(screen.getByText("third")).toBeInTheDocument();
+		expect(screen.getAllByText("QUEUED")).toHaveLength(2);
+	});
+
+	test("idle composer send with empty queue sends directly", async () => {
+		const user = await openChat(api);
+		await user.keyboard("hello{Enter}");
+		await vi.waitFor(() =>
+			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello"),
+		);
+		expect(screen.queryByText("QUEUED")).not.toBeInTheDocument();
+	});
 });
 
 describe("queued editing", () => {
@@ -348,6 +379,42 @@ describe("queued editing", () => {
 		expect(
 			screen.getByRole("textbox", { name: "Edit queued message" }),
 		).toBeInTheDocument();
+	});
+
+	test("edit-commit on idle stranded head sends it", async () => {
+		const user = await startWorking();
+		await user.keyboard("first{Enter}");
+		await user.keyboard("second{Enter}");
+		await user.click(screen.getByText("first"));
+		emitAppEvent(api, { type: "turn_done", session: testKey() });
+		expect(api.sendPrompt).toHaveBeenCalledTimes(1);
+		await user.keyboard(" edited{Enter}");
+		await vi.waitFor(() =>
+			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "first edited"),
+		);
+		expect(screen.getByText("first edited")).toBeInTheDocument();
+		expect(screen.getByText("second")).toBeInTheDocument();
+		expect(screen.getAllByText("QUEUED")).toHaveLength(1);
+	});
+
+	test("edit-commit non-head while idle sends head", async () => {
+		const user = await startWorking();
+		await user.keyboard("first{Enter}");
+		await user.keyboard("second{Enter}");
+		await user.click(screen.getByText("first"));
+		emitAppEvent(api, { type: "turn_done", session: testKey() });
+		expect(api.sendPrompt).toHaveBeenCalledTimes(1);
+		await user.keyboard("{Escape}");
+		expect(
+			screen.queryByRole("textbox", { name: "Edit queued message" }),
+		).not.toBeInTheDocument();
+		await user.click(screen.getByText("second"));
+		await user.keyboard(" edited{Enter}");
+		await vi.waitFor(() =>
+			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "first"),
+		);
+		expect(screen.getByText("second edited")).toBeInTheDocument();
+		expect(screen.getByText("QUEUED")).toBeInTheDocument();
 	});
 });
 
