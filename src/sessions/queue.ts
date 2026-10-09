@@ -10,6 +10,25 @@ export interface QueuedMessage {
 
 export type QueueMoveDirection = "up" | "down";
 
+type DrainBlockReason = "empty-queue" | "non-idle" | "editing-head";
+
+export type DrainDecision =
+	| { kind: "drain"; head: QueuedMessage }
+	| { kind: "blocked"; reason: DrainBlockReason };
+
+export function resolveDrain(
+	items: QueuedMessage[],
+	editingId: string | null,
+	status: AgentStatus,
+): DrainDecision {
+	if (status !== "idle") return { kind: "blocked", reason: "non-idle" };
+	const head = items[0] ?? null;
+	if (head === null) return { kind: "blocked", reason: "empty-queue" };
+	if (editingId !== null && editingId === head.id)
+		return { kind: "blocked", reason: "editing-head" };
+	return { kind: "drain", head };
+}
+
 export interface SessionQueues {
 	items: QueuedMessage[];
 	editingId: string | null;
@@ -18,7 +37,7 @@ export interface SessionQueues {
 	setText: (key: SessionKey, id: string, text: string) => void;
 	setEditing: (key: SessionKey, id: string | null) => void;
 	move: (key: SessionKey, id: string, direction: QueueMoveDirection) => void;
-	takeNext: (key: SessionKey) => QueuedMessage | null;
+	takeNext: (key: SessionKey, status: AgentStatus) => QueuedMessage | null;
 	peek: (key: SessionKey) => {
 		items: QueuedMessage[];
 		editingId: string | null;
@@ -69,18 +88,17 @@ export function useSessionQueues(
 		[],
 	);
 
-	const takeNext = useCallback((key: SessionKey) => {
+	const takeNext = useCallback((key: SessionKey, status: AgentStatus) => {
 		const sessionId = sessionKeyOf(key);
 		const current = queuesRef.current[sessionId];
-		const candidate = drainCandidate(
+		const decision = resolveDrain(
 			current?.items ?? EMPTY,
 			current?.editingId ?? null,
-			"idle",
+			status,
 		);
-		if (candidate !== null) {
-			dispatch({ type: "remove", sessionId, id: candidate.id });
-		}
-		return candidate;
+		if (decision.kind === "blocked") return null;
+		dispatch({ type: "remove", sessionId, id: decision.head.id });
+		return decision.head;
 	}, []);
 
 	const peek = useCallback((key: SessionKey) => {
@@ -130,11 +148,8 @@ export function drainCandidate(
 	editingId: string | null,
 	status: AgentStatus,
 ): QueuedMessage | null {
-	if (status !== "idle") return null;
-	const head = items[0] ?? null;
-	if (head === null) return null;
-	if (editingId !== null && editingId === head.id) return null;
-	return head;
+	const decision = resolveDrain(items, editingId, status);
+	return decision.kind === "drain" ? decision.head : null;
 }
 
 export function moveQueuedItem(

@@ -33,10 +33,15 @@ import {
 	useSessionDrafts,
 } from "./sessions/drafts";
 import { previewPromiseFor, useScopingPreview } from "./sessions/preview";
-import { type QueueMoveDirection, useSessionQueues } from "./sessions/queue";
+import {
+	type QueueMoveDirection,
+	resolveDrain,
+	useSessionQueues,
+} from "./sessions/queue";
 import { usePinnedTranscript } from "./sessions/scroll";
 import {
 	agentStatusOf,
+	drainStatusFor,
 	isReadOnly,
 	isSessionBusy,
 	selectedChat,
@@ -53,6 +58,7 @@ import {
 } from "./sessions/store";
 import { useThoughtTimers } from "./sessions/thoughts";
 import type {
+	AgentStatus,
 	AppEvent,
 	PlanEntry,
 	PlansUpdate,
@@ -93,6 +99,8 @@ export function App() {
 
 	const selectedRef = useRef<SessionKey | null>(null);
 	selectedRef.current = selectedKey;
+	const chatsRef = useRef<Chats>({});
+	chatsRef.current = chats;
 
 	const updateChat = useCallback(
 		(key: SessionKey, next: (chat: ChatState) => ChatState) => {
@@ -156,18 +164,18 @@ export function App() {
 	);
 
 	const maybeDrain = useCallback(
-		(key: SessionKey) => {
+		(key: SessionKey, status: AgentStatus) => {
 			const sessionId = sessionKeyOf(key);
-			const head = queue.takeNext(key);
+			const head = queue.takeNext(key, status);
 			if (head === null) {
 				const snapshot = queue.peek(key);
-				const headId = snapshot.items[0]?.id ?? null;
+				const decision = resolveDrain(
+					snapshot.items,
+					snapshot.editingId,
+					status,
+				);
 				const reason =
-					snapshot.items.length === 0
-						? "empty-queue"
-						: snapshot.editingId !== null && snapshot.editingId === headId
-							? `editing-head:${headId}`
-							: "blocked";
+					decision.kind === "blocked" ? decision.reason : "blocked";
 				console.info(`queue drain skip session=${sessionId} reason=${reason}`);
 				return;
 			}
@@ -197,11 +205,18 @@ export function App() {
 					`event ${event.type} session=${sessionKeyOf(event.session)} selected=${selectedId}`,
 				);
 			}
-			setChats((current) => applySessionEvent(current, event));
+			const next = applySessionEvent(chatsRef.current, event);
+			setChats(next);
 			if (event.type === "turn_done") {
-				const selected = selectedRef.current;
-				if (selected === null || !sameSession(selected, event.session)) return;
-				maybeDrain(event.session);
+				maybeDrain(event.session, drainStatusFor(next, event.session));
+			}
+			if (event.type === "history_done") {
+				const status = drainStatusFor(next, event.session);
+				if (status === "idle") maybeDrain(event.session, status);
+				else
+					console.info(
+						`queue drain skip session=${sessionKeyOf(event.session)} reason=non-idle`,
+					);
 			}
 		},
 		[maybeDrain],
@@ -376,10 +391,10 @@ export function App() {
 				approval: false,
 			}));
 		}
-		const current = selectedChat(chats, key);
+		const current = selectedChat(chatsRef.current, key);
 		if (current?.failed) return;
 		if (current?.start.kind === "replaying") return;
-		maybeDrain(key);
+		maybeDrain(key, "idle");
 	}
 
 	async function handleSelect(key: SessionKey) {

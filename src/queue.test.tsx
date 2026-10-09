@@ -146,15 +146,66 @@ describe("message queue", () => {
 		expect(screen.getByText("QUEUED")).toBeInTheDocument();
 	});
 
-	test("history replay never auto-drains", async () => {
+	test("history replay drains the queued head", async () => {
 		const user = await openChat(api);
 		emitAppEvent(api, { type: "history_begin", session: testKey() });
 		await screen.findByRole("textbox", { name: "Queue a follow-up…" });
 		await user.keyboard("followup{Enter}");
 		expect(api.sendPrompt).not.toHaveBeenCalled();
 		emitAppEvent(api, { type: "history_done", session: testKey() });
+		await vi.waitFor(() =>
+			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "followup"),
+		);
+		expect(screen.queryByText("QUEUED")).not.toBeInTheDocument();
+	});
+
+	test("history_done with empty queue sends nothing", async () => {
+		await openChat(api);
+		emitAppEvent(api, { type: "history_begin", session: testKey() });
+		await screen.findByRole("textbox", { name: "Queue a follow-up…" });
+		emitAppEvent(api, { type: "history_done", session: testKey() });
 		expect(api.sendPrompt).not.toHaveBeenCalled();
-		expect(screen.getByText("QUEUED")).toBeInTheDocument();
+		expect(screen.queryByText("QUEUED")).not.toBeInTheDocument();
+	});
+
+	test("background turn_done drains that session head", async () => {
+		const first = testEntryWith("aaa", "scoping", "First", false, [
+			testStatus("scoping"),
+		]);
+		const second = testEntryWith("bbb", "scoping", "Second", false, [
+			testStatus("scoping"),
+		]);
+		const plans = [first, second];
+		api.selectPlan.mockImplementation(async (session: SessionKey) => ({
+			plans,
+			selected: session,
+			config_defaults: testDefaults(),
+		}));
+		api.sendPrompt.mockReturnValue(new Promise(() => {}));
+		const user = await openChat(api, {
+			plans,
+			selected: { plan: "aaa", role: "scoping" },
+		});
+		await user.keyboard("do it{Enter}");
+		await screen.findByRole("textbox", { name: "Queue a follow-up…" });
+		await user.keyboard("aaa followup{Enter}");
+		expect(screen.getByText("aaa followup")).toBeInTheDocument();
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Second, scoping, opens Scoping",
+			}),
+		);
+		expect(screen.queryByText("aaa followup")).not.toBeInTheDocument();
+		emitAppEvent(api, {
+			type: "turn_done",
+			session: { plan: "aaa", role: "scoping" },
+		});
+		await vi.waitFor(() =>
+			expect(api.sendPrompt).toHaveBeenCalledWith(
+				{ plan: "aaa", role: "scoping" },
+				"aaa followup",
+			),
+		);
 	});
 
 	test("queue is per-session across plan switches", async () => {

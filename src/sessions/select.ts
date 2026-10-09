@@ -24,6 +24,17 @@ export function agentStatusOf(chat: ChatState | null): AgentStatus {
 	return "idle";
 }
 
+/// Drain gate for one session: busy (working, approval, replaying) never
+/// drains, failed never drains, otherwise idle drains.
+export function drainStatusFor(
+	chats: Record<string, ChatState>,
+	key: SessionKey,
+): AgentStatus {
+	const chat = selectedChat(chats, key);
+	if (isSessionBusy(chat)) return "working";
+	return agentStatusOf(chat);
+}
+
 export function selectedEntry(
 	plans: PlanEntry[],
 	selectedKey: SessionKey | null,
