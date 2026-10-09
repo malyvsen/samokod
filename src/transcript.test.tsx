@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import { Transcript } from "./components/Transcript";
 import type { SessionStart } from "./sessions/store";
@@ -133,7 +133,7 @@ describe("transcript retry", () => {
 describe("transcript user messages", () => {
 	test("renders user text as Markdown with newlines intact", () => {
 		const { container } = render(transcript(multiline));
-		const bubble = screen.getByText("YOU").parentElement as HTMLElement;
+		const bubble = screen.getByText("YOU").closest(".msg.user") as HTMLElement;
 		expect(bubble.textContent).toContain("first line");
 		expect(bubble.textContent).toContain("second line");
 		expect(bubble.textContent).toContain("third");
@@ -384,5 +384,60 @@ describe("transcript tool lines", () => {
 		const rule =
 			/\.tool\[data-status="failed"\][^{]*\{[^}]*\}/.exec(css)?.[0] ?? "";
 		expect(rule).toContain("#ff6b6b");
+	});
+});
+
+describe("transcript collapse", () => {
+	const longUser = `${"long line\n".repeat(11)}final`;
+	const longAgent = `${"agent line\n".repeat(11)}final`;
+
+	test("long user starts collapsed and expands on click", () => {
+		const { container } = render(transcript(longUser));
+		const bubble = container.querySelector(".msg.user");
+		expect(bubble?.classList.contains("collapsed")).toBe(true);
+		const toggle = screen.getByRole("button", { name: "Expand message" });
+		expect(toggle.textContent).toBe("+");
+		fireEvent.click(toggle);
+		expect(bubble?.classList.contains("collapsed")).toBe(false);
+		expect(
+			screen.getByRole("button", { name: "Collapse message" }).textContent,
+		).toBe("-");
+	});
+
+	test("long agent starts expanded and collapses on click", () => {
+		const { container } = render(agentTranscript(longAgent));
+		const bubble = container.querySelector(".msg.agent");
+		expect(bubble?.classList.contains("collapsed")).toBe(false);
+		const toggle = screen.getByRole("button", { name: "Collapse message" });
+		expect(toggle.textContent).toBe("-");
+		fireEvent.click(toggle);
+		expect(bubble?.classList.contains("collapsed")).toBe(true);
+		expect(
+			screen.getByRole("button", { name: "Expand message" }).textContent,
+		).toBe("+");
+	});
+
+	test("short messages show no collapse button", () => {
+		const { container } = render(transcript("hello"));
+		expect(container.querySelector(".msg.user")).not.toBeNull();
+		expect(
+			container.querySelector(".msg.user")?.classList.contains("collapsed"),
+		).toBe(false);
+		expect(
+			screen.queryByRole("button", { name: "Expand message" }),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "Collapse message" }),
+		).not.toBeInTheDocument();
+	});
+
+	test("collapsed CSS caps the body with a fade", () => {
+		const css = readFileSync("src/App.css", "utf8");
+		const collapsedRule =
+			/\.msg\.collapsed \.body\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(collapsedRule).toContain("max-height");
+		expect(collapsedRule).toContain("overflow: hidden");
+		expect(css).toContain(".msg.collapsed .body::after");
+		expect(css).toContain(".msg .who .right");
 	});
 });

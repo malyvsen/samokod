@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import type { QueuedMessage, QueueMoveDirection } from "../sessions/queue";
+import { CollapseControl, isLongMessage, useCollapsed } from "./collapsible";
 import {
 	extractText,
 	insertPlainText,
@@ -81,10 +82,12 @@ function QueuedBubble({
 	controls: QueuedHeaderControls;
 	onEdit: () => void;
 }) {
+	const [collapsed, toggle] = useCollapsed("queued", text);
+	const long = isLongMessage(text);
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: queued edit is click-to-edit like the draft - a button element would bring native button metrics.
 		<div
-			className="msg user queued"
+			className={collapsed ? "msg user queued collapsed" : "msg user queued"}
 			title="Click to edit"
 			role="button"
 			tabIndex={0}
@@ -96,7 +99,14 @@ function QueuedBubble({
 				onEdit();
 			}}
 		>
-			<QueuedHeader controls={controls} />
+			<QueuedHeader
+				controls={controls}
+				collapse={
+					long ? (
+						<CollapseControl collapsed={collapsed} onToggle={toggle} />
+					) : null
+				}
+			/>
 			<div className="body">
 				<MessageMarkdown text={text} />
 			</div>
@@ -179,18 +189,27 @@ function QueuedBubbleEditor({
 	);
 }
 
-function QueuedHeader({ controls }: { controls: QueuedHeaderControls }) {
+function QueuedHeader({
+	controls,
+	collapse = null,
+}: {
+	controls: QueuedHeaderControls;
+	collapse?: ReactNode;
+}) {
 	return (
 		<div className="who">
 			<span>QUEUED</span>
-			{controls.kind === "movable" && (
-				<QueuedMoveControls
-					id={controls.id}
-					disableUp={controls.disableUp}
-					disableDown={controls.disableDown}
-					onMove={controls.onMove}
-				/>
-			)}
+			<span className="right">
+				{controls.kind === "movable" && (
+					<QueuedMoveControls
+						id={controls.id}
+						disableUp={controls.disableUp}
+						disableDown={controls.disableDown}
+						onMove={controls.onMove}
+					/>
+				)}
+				{collapse}
+			</span>
 		</div>
 	);
 }

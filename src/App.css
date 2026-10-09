@@ -473,6 +473,54 @@ body {
 	margin-bottom: 6px;
 }
 
+.msg .who .right {
+	margin-left: auto;
+	display: flex;
+	gap: 4px;
+	align-items: center;
+}
+
+.msg .body {
+	overflow: hidden;
+}
+
+.msg.collapsed .body {
+	max-height: 96px;
+	overflow: hidden;
+	position: relative;
+}
+
+.msg.collapsed .body::after {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 44px;
+	background: linear-gradient(transparent, rgba(5, 5, 8, 0.9));
+	pointer-events: none;
+}
+
+.msg.user.collapsed .body::after {
+	background: linear-gradient(transparent, rgba(18, 18, 22, 0.95));
+}
+
+.mctl {
+	font: inherit;
+	font-size: 11px;
+	letter-spacing: 0.14em;
+	color: #8f8c85;
+	background: transparent;
+	border: 0;
+	padding: 0 4px;
+	cursor: pointer;
+	line-height: 1;
+}
+
+.mctl:hover {
+	color: #fff;
+}
+
 .msg.user {
 	align-self: flex-end;
 	border: 1px solid rgba(255, 255, 255, 0.28);
@@ -519,7 +567,6 @@ body {
 
 /* hover-reveal mirrors .plans .sbtn */
 .qmove {
-	margin-left: auto;
 	display: flex;
 	gap: 4px;
 	opacity: 0;

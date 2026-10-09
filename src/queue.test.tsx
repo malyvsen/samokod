@@ -1,5 +1,6 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { QueuedBubbleList } from "./components/QueuedBubble";
 import {
 	testDefaults,
 	testEntry,
@@ -425,5 +426,73 @@ describe("queued reorder", () => {
 		expect(document.activeElement?.getAttribute("aria-label")).toContain(
 			"Move queued message",
 		);
+	});
+});
+
+describe("queued collapse", () => {
+	const longText = `${"queued long line\n".repeat(11)}final`;
+
+	function collapsedQueuedOrder(): string[] {
+		return Array.from(document.querySelectorAll(".msg.user.queued")).map(
+			(node) => node.textContent ?? "",
+		);
+	}
+
+	test("long queued shows move arrows plus plus-minus together", () => {
+		const { container } = render(
+			<QueuedBubbleList
+				items={[
+					{ id: "q1", text: longText },
+					{ id: "q2", text: longText },
+				]}
+				editingId={null}
+				editingBlocked={false}
+				onEdit={vi.fn()}
+				onCommit={vi.fn()}
+				onCancel={vi.fn()}
+				onMove={vi.fn()}
+			/>,
+		);
+		const bubbles = container.querySelectorAll(".msg.user.queued");
+		expect(bubbles).toHaveLength(2);
+		expect(bubbles[0]?.classList.contains("collapsed")).toBe(true);
+		expect(
+			screen.getAllByRole("button", { name: "Move queued message up" }),
+		).toHaveLength(2);
+		expect(
+			screen.getAllByRole("button", { name: "Move queued message down" }),
+		).toHaveLength(2);
+		const toggles = screen.getAllByRole("button", {
+			name: "Expand message",
+		});
+		expect(toggles).toHaveLength(2);
+		expect(toggles[0]?.textContent).toBe("+");
+		const header = bubbles[0]?.querySelector(".who .right");
+		expect(header?.textContent).toContain("↑");
+		expect(header?.textContent).toContain("+");
+		expect(collapsedQueuedOrder()[0]).toContain("queued long line");
+	});
+
+	test("long queued expands on toggle without entering edit", () => {
+		const onEdit = vi.fn();
+		const { container } = render(
+			<QueuedBubbleList
+				items={[{ id: "q1", text: longText }]}
+				editingId={null}
+				editingBlocked={false}
+				onEdit={onEdit}
+				onCommit={vi.fn()}
+				onCancel={vi.fn()}
+				onMove={vi.fn()}
+			/>,
+		);
+		const bubble = container.querySelector(".msg.user.queued");
+		expect(bubble?.classList.contains("collapsed")).toBe(true);
+		fireEvent.click(screen.getByRole("button", { name: "Expand message" }));
+		expect(bubble?.classList.contains("collapsed")).toBe(false);
+		expect(onEdit).not.toHaveBeenCalled();
+		expect(
+			screen.getByRole("button", { name: "Collapse message" }).textContent,
+		).toBe("-");
 	});
 });
