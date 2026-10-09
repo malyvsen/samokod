@@ -40,12 +40,19 @@ export function sameSession(
 	return left.plan === right.plan && left.role === right.role;
 }
 
+export interface TodoProgressView {
+	done: number;
+	total: number;
+	eta_secs: number | null;
+}
+
 export interface SessionStatusView {
 	role: SessionRole;
 	working: boolean;
 	approval: boolean;
 	failed: boolean;
 	live: boolean;
+	progress: TodoProgressView | null;
 }
 
 /// Phase of one plan: where its directory lives under `.samokod/plans/`.

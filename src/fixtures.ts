@@ -30,6 +30,7 @@ export function testStatus(
 		approval: false,
 		failed: false,
 		live: false,
+		progress: null,
 		...overrides,
 	};
 }

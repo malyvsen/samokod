@@ -120,25 +120,21 @@ describe("plans panel", () => {
 			render(<PlansPanel {...panelProps([executingPlan()], null)} />);
 			expect(
 				screen.getByRole("button", {
-					name: "Shiny, executing, opens Executing",
+					name: "Shiny, executing, No todos yet",
 				}),
 			).toBeInTheDocument();
 		});
 
 		test("selects the latest role", async () => {
 			const user = userEvent.setup();
-			for (const [plan, role] of [
-				[scopingPlan(), "scoping"],
-				[executingPlan(), "executing"],
-				[landingPlan(), "landing"],
+			for (const [plan, role, name] of [
+				[scopingPlan(), "scoping", /opens scoping$/i],
+				[executingPlan(), "executing", /executing, No todos yet$/i],
+				[landingPlan(), "landing", /opens landing$/i],
 			] as const) {
 				const props = panelProps([plan], null);
 				const { unmount } = render(<PlansPanel {...props} />);
-				await user.click(
-					screen.getByRole("button", {
-						name: new RegExp(`opens ${role}$`, "i"),
-					}),
-				);
+				await user.click(screen.getByRole("button", { name }));
 				expect(props.onSelect).toHaveBeenCalledWith({
 					plan: plan.name,
 					role,
@@ -155,7 +151,7 @@ describe("plans panel", () => {
 				/>,
 			);
 			const header = screen.getByRole("button", {
-				name: "Shiny, executing, opens Executing",
+				name: "Shiny, executing, No todos yet",
 			});
 			expect(header.className).toBe("plan-name");
 		});
@@ -210,7 +206,7 @@ describe("plans panel", () => {
 					{...panelProps([plan], { plan: plan.name, role: "executing" })}
 				/>,
 			);
-			const group = planGroup("Shiny, executing, opens Executing");
+			const group = planGroup("Shiny, executing, No todos yet");
 			const buttons = within(group).getAllByRole("button");
 			const cancel = within(group).getByRole("button", {
 				name: "Cancel Shiny",
@@ -314,6 +310,136 @@ describe("plans panel", () => {
 			);
 			expect(screen.queryByRole("button", { name: /Switch to/ })).toBeNull();
 			expect(screen.queryByRole("button", { name: /Cancel Done/ })).toBeNull();
+		});
+
+		test("partial headers show an ETA and a green bar", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing", {
+						working: true,
+						progress: { done: 2, total: 5, eta_secs: 480 },
+					}),
+				],
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const header = screen.getByRole("button", {
+				name: "Shiny, executing, 2 of 5 todos done, 8m left",
+			});
+			expect(header).toHaveAttribute(
+				"data-full",
+				"Shiny - 2 of 5 todos done, 8m left",
+			);
+			const group = header.closest(".plan-group") as HTMLElement;
+			expect(within(group).getByText("8m").className).toContain("pmeta");
+			expect(within(group).getByText("8m").getAttribute("title")).toBe(
+				"2 of 5 todos done, 8m left",
+			);
+			const bar = group.querySelector(".hbar-in") as HTMLElement;
+			expect(bar).not.toBeNull();
+			expect(bar.className).not.toContain("paused");
+			expect(bar.querySelector("i")?.getAttribute("style")).toContain("40%");
+		});
+
+		test("empty headers show no ETA and an empty track", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[testStatus("scoping"), testStatus("executing", { working: true })],
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const header = screen.getByRole("button", {
+				name: "Shiny, executing, No todos yet",
+			});
+			expect(header).toHaveAttribute("data-full", "Shiny - No todos yet");
+			const group = header.closest(".plan-group") as HTMLElement;
+			expect(group.querySelector(".pmeta")).toBeNull();
+			expect(
+				group.querySelector(".hbar-in i")?.getAttribute("style"),
+			).toContain("0%");
+		});
+
+		test("estimating headers show no ETA and an empty track", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing", {
+						working: true,
+						progress: { done: 0, total: 5, eta_secs: null },
+					}),
+				],
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const header = screen.getByRole("button", {
+				name: "Shiny, executing, 0 of 5 todos done, estimating time",
+			});
+			expect(header).toHaveAttribute(
+				"data-full",
+				"Shiny - 0 of 5 todos done, estimating time",
+			);
+			const group = header.closest(".plan-group") as HTMLElement;
+			expect(group.querySelector(".pmeta")).toBeNull();
+			expect(
+				group.querySelector(".hbar-in i")?.getAttribute("style"),
+			).toContain("0%");
+		});
+
+		test("done headers show a full green bar with no ETA", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing", {
+						progress: { done: 5, total: 5, eta_secs: null },
+					}),
+				],
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const header = screen.getByRole("button", {
+				name: "Shiny, executing, 5 of 5 todos done",
+			});
+			expect(header).toHaveAttribute("data-full", "Shiny - 5 of 5 todos done");
+			const group = header.closest(".plan-group") as HTMLElement;
+			expect(group.querySelector(".pmeta")).toBeNull();
+			const bar = group.querySelector(".hbar-in") as HTMLElement;
+			expect(bar.className).not.toContain("paused");
+			expect(bar.querySelector("i")?.getAttribute("style")).toContain("100%");
+		});
+
+		test("waiting headers dim the bar but keep the ETA", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing", {
+						approval: true,
+						progress: { done: 2, total: 5, eta_secs: 480 },
+					}),
+				],
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const header = screen.getByRole("button", {
+				name: "Shiny, executing, 2 of 5 todos done, 8m left",
+			});
+			const group = header.closest(".plan-group") as HTMLElement;
+			expect(within(group).getByText("8m")).toBeInTheDocument();
+			expect(group.querySelector(".hbar-in")?.className).toContain("paused");
 		});
 	});
 
@@ -617,19 +743,32 @@ describe("plans panel", () => {
 			expect(row).toContain("align-self: stretch");
 		});
 
-		test("header controls stay hover-only except on the selected plan", () => {
+		test("header controls stay hover-only without reserving space", () => {
 			const css = appCss();
-			const hidden = /\.plans\s+\.sbtn\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
-			expect(hidden).toContain("opacity: 0");
-			for (const selector of [
-				".plan-group:hover .hact .sbtn",
-				".plan-group.sel .hact .sbtn",
-				".plan-group:focus-within .hact .sbtn",
-				".sect-head:hover .sbtn",
-				".sect-head:focus-within .sbtn",
-			]) {
-				expect(css).toContain(selector);
-			}
+			const hact = /\.hact\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(hact).toContain("display: none");
+			expect(css).toContain(".plan-group:hover .hact");
+			expect(css).toContain(".plan-group:focus-within .hact");
+			expect(css).not.toContain(".plan-group.sel .hact");
+			expect(css).toContain(".plan-group:hover .pmeta");
+			expect(css).toContain(".plan-group:focus-within .pmeta");
+		});
+
+		test("executing headers stack an ETA and a 3px bar", () => {
+			const css = appCss();
+			const stack = /\.phead\.stack\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(stack).toContain("column");
+			const top = /\.phead-top\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(top).toContain("display: flex");
+			const meta = /\.pmeta\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(meta).toContain("#6f6c66");
+			const bar = /\.hbar-in\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(bar).toContain("3px");
+			expect(bar).toContain("rgba(255, 255, 255, 0.14)");
+			const fill = /\.hbar-in\s+i\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(fill).toContain("#7dffc4");
+			const paused = /\.hbar-in\.paused\s+i\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(paused).toContain("#9d9a92");
 		});
 
 		test("mode switch uses green auto and amber manual", () => {
@@ -666,7 +805,7 @@ describe("plans panel", () => {
 					{...panelProps([plan], { plan: plan.name, role: "executing" })}
 				/>,
 			);
-			const group = planGroup("Shiny, executing, opens Executing");
+			const group = planGroup("Shiny, executing, No todos yet");
 			expect(group.querySelectorAll(".ngutter").length).toBe(2);
 			expect(group.querySelectorAll(".mgutter").length).toBe(1);
 			const gutters = group.querySelectorAll(".ngutter");
@@ -711,7 +850,7 @@ describe("plans panel", () => {
 					{...panelProps([plan], { plan: "broke", role: "scoping" })}
 				/>,
 			);
-			const group = planGroup("Broke, executing, opens Executing");
+			const group = planGroup("Broke, executing, No todos yet");
 			expect(group.querySelector(".mk-failed")).not.toBeNull();
 			expect(group.querySelector(".mgutter .v.c-sel")).not.toBeNull();
 			expect(group.querySelector(".ngutter .nd.sel")).not.toBeNull();

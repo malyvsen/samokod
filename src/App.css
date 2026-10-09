@@ -1096,12 +1096,62 @@ body {
 	min-width: 0;
 }
 
-.hact {
+.phead.stack {
+	flex-direction: column;
+	align-items: stretch;
+	gap: 0;
+}
+
+.phead-top {
 	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.pmeta {
+	flex: none;
+	font-size: 11px;
+	letter-spacing: 0;
+	color: #6f6c66;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.hbar-in {
+	height: 3px;
+	background: rgba(255, 255, 255, 0.14);
+	margin: 3px 2px 1px;
+	border-radius: 2px;
+	overflow: hidden;
+}
+
+.hbar-in i {
+	display: block;
+	height: 100%;
+	background: #7dffc4;
+}
+
+.hbar-in.paused i {
+	background: #9d9a92;
+}
+
+.hact {
+	display: none;
 	gap: 6px;
 	align-items: center;
 	margin-left: auto;
 	flex: none;
+}
+
+.plan-group:hover .hact,
+.plan-group:focus-within .hact {
+	display: flex;
+}
+
+.plan-group:hover .pmeta,
+.plan-group:focus-within .pmeta {
+	display: none;
 }
 
 .plan-name {
@@ -1431,10 +1481,7 @@ body {
 }
 
 .plans .sect-head:hover .sbtn,
-.plans .sect-head:focus-within .sbtn,
-.plans .plan-group:hover .hact .sbtn,
-.plans .plan-group.sel .hact .sbtn,
-.plans .plan-group:focus-within .hact .sbtn {
+.plans .sect-head:focus-within .sbtn {
 	opacity: 1;
 }
 
@@ -1508,7 +1555,7 @@ body {
 }
 
 /* biome-ignore lint/style/noDescendingSpecificity: hidden opacity is overridden by higher-specificity tree visibility regardless of order */
-.plans .sbtn {
+.plans .sect-head .sbtn {
 	opacity: 0;
 }
 

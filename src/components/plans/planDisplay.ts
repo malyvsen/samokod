@@ -3,6 +3,7 @@ import type {
 	PlanPhase,
 	SessionKey,
 	SessionRole,
+	TodoProgressView,
 } from "../../types";
 
 export const PHASES: PlanPhase[] = [
@@ -46,6 +47,83 @@ export function attentionFor(plan: PlanEntry): AttentionKind | null {
 		return "approval";
 	}
 	return "idle";
+}
+
+export interface ExecutingProgress {
+	done: number;
+	total: number;
+	etaSecs: number | null;
+}
+
+export function executingProgress(plan: PlanEntry): ExecutingProgress | null {
+	if (plan.phase !== "executing") {
+		return null;
+	}
+	const status = plan.sessions.find(
+		(candidate) => candidate.role === "executing",
+	);
+	const progress: TodoProgressView | null = status?.progress ?? null;
+	if (progress === null) {
+		return { done: 0, total: 0, etaSecs: null };
+	}
+	return {
+		done: progress.done,
+		total: progress.total,
+		etaSecs: progress.eta_secs ?? null,
+	};
+}
+
+export function formatEta(secs: number): string {
+	if (secs >= 3600) {
+		return `${Math.floor(secs / 3600)}h`;
+	}
+	return `${Math.max(1, Math.floor(secs / 60))}m`;
+}
+
+export interface HeaderMeta {
+	text: string | null;
+	pct: number;
+	barClass: string;
+	tip: string;
+}
+
+export function headerMeta(
+	progress: ExecutingProgress,
+	attention: AttentionKind | null,
+): HeaderMeta {
+	if (progress.total === 0) {
+		return {
+			text: null,
+			pct: 0,
+			barClass: attention === null ? "" : "paused",
+			tip: "No todos yet",
+		};
+	}
+	const done = progress.done >= progress.total;
+	if (done) {
+		return {
+			text: null,
+			pct: 100,
+			barClass: "",
+			tip: `${progress.done} of ${progress.total} todos done`,
+		};
+	}
+	const pct = Math.round((progress.done / progress.total) * 100);
+	if (progress.etaSecs === null) {
+		return {
+			text: null,
+			pct,
+			barClass: attention === null ? "" : "paused",
+			tip: `${progress.done} of ${progress.total} todos done, estimating time`,
+		};
+	}
+	const text = formatEta(progress.etaSecs);
+	return {
+		text,
+		pct,
+		barClass: attention === null ? "" : "paused",
+		tip: `${progress.done} of ${progress.total} todos done, ${text} left`,
+	};
 }
 
 const ATTENTION_TITLES: Record<AttentionKind, string> = {

@@ -4,7 +4,10 @@ import type { PlanEntry, PlanPhase, SessionStatusView } from "../../types";
 import {
 	attentionFor,
 	attentionTitle,
+	executingProgress,
+	formatEta,
 	headerKey,
+	headerMeta,
 	latestRole,
 	openPathFor,
 	roleLabel,
@@ -193,5 +196,109 @@ describe("roleLabel", () => {
 		expect(roleLabel("scoping")).toBe("Scoping");
 		expect(roleLabel("executing")).toBe("Executing");
 		expect(roleLabel("landing")).toBe("Landing");
+	});
+});
+
+describe("executingProgress", () => {
+	test("returns null outside executing", () => {
+		expect(
+			executingProgress(plan("a", "scoping", [testStatus("scoping")])),
+		).toBeNull();
+		expect(
+			executingProgress(
+				plan("a", "landing", [
+					testStatus("scoping"),
+					testStatus("executing"),
+					testStatus("landing"),
+				]),
+			),
+		).toBeNull();
+	});
+
+	test("missing progress counts as empty", () => {
+		expect(
+			executingProgress(
+				plan("a", "executing", [
+					testStatus("scoping"),
+					testStatus("executing"),
+				]),
+			),
+		).toEqual({ done: 0, total: 0, etaSecs: null });
+	});
+
+	test("maps the executing session progress", () => {
+		const entry = plan("a", "executing", [
+			testStatus("scoping"),
+			testStatus("executing", {
+				progress: { done: 2, total: 5, eta_secs: 480 },
+			}),
+		]);
+		expect(executingProgress(entry)).toEqual({
+			done: 2,
+			total: 5,
+			etaSecs: 480,
+		});
+	});
+});
+
+describe("formatEta", () => {
+	test("floors to one minute minimum", () => {
+		expect(formatEta(0)).toBe("1m");
+		expect(formatEta(30)).toBe("1m");
+		expect(formatEta(90)).toBe("1m");
+		expect(formatEta(480)).toBe("8m");
+	});
+
+	test("shows hours above an hour", () => {
+		expect(formatEta(3600)).toBe("1h");
+		expect(formatEta(7200)).toBe("2h");
+	});
+});
+
+describe("headerMeta", () => {
+	test("empty shows no text and an empty track", () => {
+		expect(headerMeta({ done: 0, total: 0, etaSecs: null }, null)).toEqual({
+			text: null,
+			pct: 0,
+			barClass: "",
+			tip: "No todos yet",
+		});
+	});
+
+	test("estimating shows no text and an empty track", () => {
+		expect(headerMeta({ done: 0, total: 5, etaSecs: null }, null)).toEqual({
+			text: null,
+			pct: 0,
+			barClass: "",
+			tip: "0 of 5 todos done, estimating time",
+		});
+	});
+
+	test("partial shows ETA and a green bar", () => {
+		expect(headerMeta({ done: 2, total: 5, etaSecs: 480 }, null)).toEqual({
+			text: "8m",
+			pct: 40,
+			barClass: "",
+			tip: "2 of 5 todos done, 8m left",
+		});
+	});
+
+	test("waiting dims the bar but keeps the ETA", () => {
+		for (const attention of ["idle", "approval", "failed"] as const) {
+			const meta = headerMeta({ done: 2, total: 5, etaSecs: 480 }, attention);
+			expect(meta.text).toBe("8m");
+			expect(meta.pct).toBe(40);
+			expect(meta.barClass).toBe("paused");
+			expect(meta.tip).toBe("2 of 5 todos done, 8m left");
+		}
+	});
+
+	test("done shows a full green bar with no text even when idle", () => {
+		expect(headerMeta({ done: 5, total: 5, etaSecs: null }, "idle")).toEqual({
+			text: null,
+			pct: 100,
+			barClass: "",
+			tip: "5 of 5 todos done",
+		});
 	});
 });
