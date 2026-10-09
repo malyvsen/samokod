@@ -771,12 +771,12 @@ describe("plans panel", () => {
 			expect(paused).toContain("#9d9a92");
 		});
 
-		test("mode switch uses green auto and amber manual", () => {
+		test("mode switch uses green auto and blue manual", () => {
 			const css = appCss();
 			const auto = /\.sbtn\.mode\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(auto).toContain("#7dffc4");
 			const manual = /\.sbtn\.mode\.manual\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
-			expect(manual).toContain("#ffd98a");
+			expect(manual).toContain("#57c8ff");
 		});
 
 		test("execute uses the same green as new plan", () => {
