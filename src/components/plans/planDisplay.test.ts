@@ -10,6 +10,7 @@ import {
 	headerMeta,
 	latestRole,
 	openPathFor,
+	PHASES,
 	roleLabel,
 } from "./planDisplay";
 
@@ -22,16 +23,26 @@ function plan(
 }
 
 describe("latestRole", () => {
-	test("prefers landing over executing over scoping", () => {
+	test("prefers landing over evergreening over executing over scoping", () => {
 		expect(
 			latestRole(
 				plan("a", "landing", [
 					testStatus("scoping"),
 					testStatus("executing"),
+					testStatus("evergreening"),
 					testStatus("landing"),
 				]),
 			),
 		).toBe("landing");
+		expect(
+			latestRole(
+				plan("a", "evergreening", [
+					testStatus("scoping"),
+					testStatus("executing"),
+					testStatus("evergreening"),
+				]),
+			),
+		).toBe("evergreening");
 		expect(
 			latestRole(
 				plan("a", "executing", [
@@ -47,6 +58,17 @@ describe("latestRole", () => {
 
 	test("falls back to scoping without sessions", () => {
 		expect(latestRole(plan("empty", "scoping", []))).toBe("scoping");
+	});
+
+	test("orders evergreening between executing and landing", () => {
+		expect(PHASES).toEqual([
+			"scoping",
+			"executing",
+			"evergreening",
+			"landing",
+			"completed",
+			"cancelled",
+		]);
 	});
 });
 
@@ -195,12 +217,13 @@ describe("roleLabel", () => {
 	test("capitalizes roles", () => {
 		expect(roleLabel("scoping")).toBe("Scoping");
 		expect(roleLabel("executing")).toBe("Executing");
+		expect(roleLabel("evergreening")).toBe("Evergreening");
 		expect(roleLabel("landing")).toBe("Landing");
 	});
 });
 
 describe("executingProgress", () => {
-	test("returns null outside executing", () => {
+	test("returns null outside executing and evergreening", () => {
 		expect(
 			executingProgress(plan("a", "scoping", [testStatus("scoping")])),
 		).toBeNull();
@@ -209,6 +232,7 @@ describe("executingProgress", () => {
 				plan("a", "landing", [
 					testStatus("scoping"),
 					testStatus("executing"),
+					testStatus("evergreening"),
 					testStatus("landing"),
 				]),
 			),
@@ -221,6 +245,15 @@ describe("executingProgress", () => {
 				plan("a", "executing", [
 					testStatus("scoping"),
 					testStatus("executing"),
+				]),
+			),
+		).toEqual({ done: 0, total: 0, etaSecs: null });
+		expect(
+			executingProgress(
+				plan("a", "evergreening", [
+					testStatus("scoping"),
+					testStatus("executing"),
+					testStatus("evergreening"),
 				]),
 			),
 		).toEqual({ done: 0, total: 0, etaSecs: null });
@@ -237,6 +270,21 @@ describe("executingProgress", () => {
 			done: 2,
 			total: 5,
 			etaSecs: 480,
+		});
+	});
+
+	test("maps the evergreening session progress", () => {
+		const entry = plan("a", "evergreening", [
+			testStatus("scoping"),
+			testStatus("executing"),
+			testStatus("evergreening", {
+				progress: { done: 1, total: 4, eta_secs: 120 },
+			}),
+		]);
+		expect(executingProgress(entry)).toEqual({
+			done: 1,
+			total: 4,
+			etaSecs: 120,
 		});
 	});
 });

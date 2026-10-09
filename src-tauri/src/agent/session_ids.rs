@@ -79,6 +79,7 @@ pub(crate) fn locate(repo_root: &Path, plan_name: &str) -> Option<PathBuf> {
     for phase in [
         crate::plans::Phase::Scoping,
         crate::plans::Phase::Executing,
+        crate::plans::Phase::Evergreening,
         crate::plans::Phase::Landing,
         crate::plans::Phase::Completed,
         crate::plans::Phase::Cancelled,
@@ -143,6 +144,7 @@ fn recover(
     let claimed: HashSet<String> = [
         SessionRole::Scoping,
         SessionRole::Executing,
+        SessionRole::Evergreening,
         SessionRole::Landing,
     ]
     .into_iter()
@@ -306,6 +308,7 @@ mod tests {
         let state = plans::load_state(&plan);
         assert_eq!(state.session(SessionRole::Scoping), None);
         assert_eq!(state.session(SessionRole::Executing), None);
+        assert_eq!(state.session(SessionRole::Evergreening), None);
         assert_eq!(state.session(SessionRole::Landing), None);
     }
 
@@ -363,7 +366,12 @@ mod tests {
     fn locate_searches_every_phase() {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");
-        for phase in [Phase::Executing, Phase::Completed, Phase::Cancelled] {
+        for phase in [
+            Phase::Executing,
+            Phase::Evergreening,
+            Phase::Completed,
+            Phase::Cancelled,
+        ] {
             let name = format!("plan-{}", phase.dir_name());
             plan_dir(dir.path(), phase, &name);
             let found = locate(dir.path(), &name).expect("found");
@@ -379,6 +387,7 @@ mod tests {
         for phase in [
             Phase::Scoping,
             Phase::Executing,
+            Phase::Evergreening,
             Phase::Landing,
             Phase::Completed,
             Phase::Cancelled,
@@ -394,7 +403,12 @@ mod tests {
     fn is_finished_only_for_completed_and_cancelled() {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");
-        for phase in [Phase::Scoping, Phase::Executing, Phase::Landing] {
+        for phase in [
+            Phase::Scoping,
+            Phase::Executing,
+            Phase::Evergreening,
+            Phase::Landing,
+        ] {
             let name = format!("active-{}", phase.dir_name());
             plan_dir(dir.path(), phase, &name);
             assert!(!is_finished(dir.path(), &name), "{phase:?} active");

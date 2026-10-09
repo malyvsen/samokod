@@ -249,7 +249,7 @@ fn defaults_for(repo_root: &Path) -> RepoDefaults {
 }
 
 /// Most-recent session across the sorted plans: the landing session when
-/// the plan owns one, else executing, else scoping.
+/// the plan owns one, else evergreening, else executing, else scoping.
 pub(crate) fn most_recent_key(plans: &[PlanEntry]) -> Option<SessionKey> {
     plans.first().map(|entry| {
         let role = if entry
@@ -258,6 +258,12 @@ pub(crate) fn most_recent_key(plans: &[PlanEntry]) -> Option<SessionKey> {
             .any(|status| status.role == SessionRole::Landing)
         {
             SessionRole::Landing
+        } else if entry
+            .sessions
+            .iter()
+            .any(|status| status.role == SessionRole::Evergreening)
+        {
+            SessionRole::Evergreening
         } else if entry
             .sessions
             .iter()

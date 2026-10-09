@@ -43,12 +43,26 @@ export function testEntry(
 	title = "Parallel sessions",
 	has_plan_md = false,
 	manual = false,
+	evergreen = true,
 ): PlanEntry {
 	const sessions =
 		phase === "scoping"
 			? [testStatus("scoping")]
-			: [testStatus("scoping"), testStatus("executing")];
-	return { name, phase, title, has_plan_md, sessions, manual };
+			: phase === "evergreening"
+				? [
+						testStatus("scoping"),
+						testStatus("executing"),
+						testStatus("evergreening"),
+					]
+				: phase === "landing"
+					? [
+							testStatus("scoping"),
+							testStatus("executing"),
+							testStatus("evergreening"),
+							testStatus("landing"),
+						]
+					: [testStatus("scoping"), testStatus("executing")];
+	return { name, phase, title, has_plan_md, sessions, manual, evergreen };
 }
 
 export function testEntryWith(
@@ -58,6 +72,7 @@ export function testEntryWith(
 	has_plan_md: boolean,
 	statuses: SessionStatusView[],
 	manual = false,
+	evergreen = true,
 ): PlanEntry {
 	return {
 		name,
@@ -66,5 +81,6 @@ export function testEntryWith(
 		has_plan_md,
 		sessions: statuses,
 		manual,
+		evergreen,
 	};
 }

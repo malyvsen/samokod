@@ -128,13 +128,14 @@ pub struct PermissionView {
 }
 
 /// Role of one session inside a plan. A plan owns one scoping session,
-/// plus one executing session once approved, plus one landing session on
-/// the conflict path.
+/// plus one executing session once approved, plus one evergreening session
+/// on the cleanup path, plus one landing session on the conflict path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionRole {
     Scoping,
     Executing,
+    Evergreening,
     Landing,
 }
 

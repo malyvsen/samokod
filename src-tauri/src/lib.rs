@@ -146,6 +146,18 @@ async fn set_plan_mode(
 }
 
 #[tauri::command]
+async fn set_plan_evergreen(
+    state: State<'_, AgentManager>,
+    plan: String,
+    evergreen: bool,
+) -> Result<PlansUpdate, String> {
+    state
+        .set_plan_evergreen(plan, evergreen)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn send_prompt(
     state: State<'_, AgentManager>,
     session: SessionKey,
@@ -281,6 +293,7 @@ pub fn run() {
             cancel_plan,
             select_plan,
             set_plan_mode,
+            set_plan_evergreen,
             send_prompt,
             scoping_template,
             plan_md_text,

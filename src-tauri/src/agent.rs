@@ -220,6 +220,7 @@ pub(crate) fn plan_md_text_for(
     for phase in [
         plans::Phase::Scoping,
         plans::Phase::Executing,
+        plans::Phase::Evergreening,
         plans::Phase::Landing,
         plans::Phase::Completed,
         plans::Phase::Cancelled,
@@ -271,7 +272,10 @@ impl AgentManager {
             // derived names; the landing target stays live.
             let scanned = plans::scan_plans(&repo_root);
             for plan in &scanned {
-                if plan.phase != plans::Phase::Executing {
+                if !matches!(
+                    plan.phase,
+                    plans::Phase::Executing | plans::Phase::Evergreening
+                ) {
                     continue;
                 }
                 let path = crate::worktrees::worktree_path(&repo_root, &plan.name);
@@ -447,11 +451,14 @@ impl AgentManager {
     }
 
     /// Finish a plan via the shared transition core: a clean
-    /// fast-forwardable executing plan completes directly, a clean landing
-    /// plan finishes the same way once it lands.
+    /// fast-forwardable executing or evergreening plan completes directly,
+    /// a clean landing plan finishes the same way once it lands.
     pub async fn finish_landing(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
         let action = match session.role {
             SessionRole::Executing => advance::Transition::FinishExecuting { plan: session.plan },
+            SessionRole::Evergreening => {
+                advance::Transition::FinishEvergreening { plan: session.plan }
+            }
             SessionRole::Landing => advance::Transition::FinishLanding { plan: session.plan },
             SessionRole::Scoping => {
                 return Err(AgentError::RequestFailed {
@@ -530,7 +537,10 @@ impl AgentManager {
                 raw: "no active plan to cancel".to_string(),
             });
         }
-        if matches!(phase, plans::Phase::Executing | plans::Phase::Landing) {
+        if matches!(
+            phase,
+            plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Landing
+        ) {
             self.remove_worktree(&repo_root, &from.name, true)?;
         }
         let next = plans::cancel(&repo_root, &from)?;
@@ -570,6 +580,34 @@ impl AgentManager {
         state.manual = manual;
         plans::store_state(&plan_dir, &state);
         if !manual {
+            self.pump().await;
+        }
+        Ok(self.plans_update())
+    }
+
+    /// Flip one plan's evergreen intent. Persists `evergreen` into
+    /// `state.json` and returns the refreshed list. Never touches live
+    /// sessions. Pumps only when the plan is on auto, so flipping intent
+    /// while paused never fires: the held plan joins the flow on resume.
+    pub async fn set_plan_evergreen(
+        &self,
+        plan: String,
+        evergreen: bool,
+    ) -> Result<PlansUpdate, AgentError> {
+        let (repo_root, _) = self
+            .reopen_snapshot()
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
+        let Some(plan_dir) = session_ids::locate(&repo_root, &plan) else {
+            return Err(AgentError::NoSession {
+                raw: "plan is gone".to_string(),
+            });
+        };
+        let mut state = plans::load_state(&plan_dir);
+        state.evergreen = evergreen;
+        plans::store_state(&plan_dir, &state);
+        if !state.manual {
             self.pump().await;
         }
         Ok(self.plans_update())
@@ -681,19 +719,25 @@ impl AgentManager {
         };
         let dirty = crate::worktrees::is_dirty(&path)?;
         let ffable = crate::worktrees::is_ffable(repo_root, &target_branch, &worktree_branch)?;
+        let commits = crate::worktrees::commits(repo_root, &target_branch, &worktree_branch)?;
         Ok(WorktreeLive {
             path,
             worktree_branch,
             target_branch,
             dirty,
             ffable,
+            commits,
         })
     }
 
     /// Drop every live session a plan owns. Finishes and cancels land on
     /// history rows; the transcripts stay frontend-side.
     async fn drop_plan_lives(&self, plan_name: &str) {
-        for role in [SessionRole::Executing, SessionRole::Landing] {
+        for role in [
+            SessionRole::Executing,
+            SessionRole::Evergreening,
+            SessionRole::Landing,
+        ] {
             self.drop_live(&SessionKey {
                 plan: plan_name.to_string(),
                 role,
@@ -742,13 +786,16 @@ impl AgentManager {
     }
 }
 
-/// Live worktree coordinates plus landing state for one plan.
-struct WorktreeLive {
-    path: PathBuf,
-    worktree_branch: String,
-    target_branch: String,
-    dirty: bool,
-    ffable: bool,
+/// Live worktree coordinates plus landing state for one plan. `commits`
+/// lists the worktree branch commits on top of the target, oldest first;
+/// empty means nothing changed.
+pub(crate) struct WorktreeLive {
+    pub path: PathBuf,
+    pub worktree_branch: String,
+    pub target_branch: String,
+    pub dirty: bool,
+    pub ffable: bool,
+    pub commits: Vec<String>,
 }
 
 /// Which landing step the user asked for.
@@ -1098,6 +1145,7 @@ mod tests {
         write_plan_dir(root, plans::Phase::Cancelled, "c", Some("C"));
         write_plan_dir(root, plans::Phase::Completed, "b", Some("B"));
         write_plan_dir(root, plans::Phase::Landing, "m", Some("M"));
+        write_plan_dir(root, plans::Phase::Evergreening, "g", Some("G"));
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
         write_plan_dir(root, plans::Phase::Scoping, "s", Some("S"));
         let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
@@ -1107,6 +1155,7 @@ mod tests {
             vec![
                 plans::Phase::Scoping,
                 plans::Phase::Executing,
+                plans::Phase::Evergreening,
                 plans::Phase::Landing,
                 plans::Phase::Completed,
                 plans::Phase::Cancelled,
@@ -1179,12 +1228,30 @@ mod tests {
         write_plan_dir(root, plans::Phase::Landing, "m", Some("M"));
         let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].sessions.len(), 3);
+        assert_eq!(entries[0].sessions.len(), 4);
         assert_eq!(
             most_recent_key(&entries),
             Some(SessionKey {
                 plan: "m".to_string(),
                 role: SessionRole::Landing,
+            })
+        );
+    }
+
+    #[test]
+    fn most_recent_prefers_evergreening_session() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        write_plan_dir(root, plans::Phase::Evergreening, "g", Some("G"));
+        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].sessions.len(), 3);
+        assert_eq!(
+            most_recent_key(&entries),
+            Some(SessionKey {
+                plan: "g".to_string(),
+                role: SessionRole::Evergreening,
             })
         );
     }

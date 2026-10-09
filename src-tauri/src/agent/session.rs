@@ -35,6 +35,7 @@ pub(crate) fn role_phase(role: SessionRole) -> plans::Phase {
     match role {
         SessionRole::Scoping => plans::Phase::Scoping,
         SessionRole::Executing => plans::Phase::Executing,
+        SessionRole::Evergreening => plans::Phase::Evergreening,
         SessionRole::Landing => plans::Phase::Landing,
     }
 }
@@ -44,9 +45,10 @@ pub(crate) fn role_phase(role: SessionRole) -> plans::Phase {
 pub(crate) struct ActivePlan {
     pub(crate) name: String,
     pub(crate) phase: plans::Phase,
-    /// Role already delivered for this ACP conversation. Executing and
-    /// landing send once, as the full first turn or prefixed to it;
-    /// scoping prefixes its template server-side to the first prompt.
+    /// Role already delivered for this ACP conversation. Executing,
+    /// evergreening, and landing send once, as the full first turn or
+    /// prefixed to it; scoping prefixes its template server-side to the
+    /// first prompt.
     pub(crate) prefixed: bool,
 }
 
@@ -75,11 +77,20 @@ impl ActivePlan {
         }
     }
 
+    pub(crate) fn evergreening(name: String) -> Self {
+        ActivePlan {
+            name,
+            phase: plans::Phase::Evergreening,
+            prefixed: false,
+        }
+    }
+
     /// Plan for one session key: the role decides the phase. Pure.
     pub(crate) fn for_session(session: &SessionKey) -> Self {
         match session.role {
             SessionRole::Scoping => ActivePlan::scoping(session.plan.clone()),
             SessionRole::Executing => ActivePlan::executing(session.plan.clone()),
+            SessionRole::Evergreening => ActivePlan::evergreening(session.plan.clone()),
             SessionRole::Landing => ActivePlan::landing(session.plan.clone()),
         }
     }
@@ -88,6 +99,7 @@ impl ActivePlan {
         let role = match self.phase {
             plans::Phase::Scoping => SessionRole::Scoping,
             plans::Phase::Executing => SessionRole::Executing,
+            plans::Phase::Evergreening => SessionRole::Evergreening,
             plans::Phase::Landing => SessionRole::Landing,
             plans::Phase::Completed | plans::Phase::Cancelled => return None,
         };
@@ -97,12 +109,13 @@ impl ActivePlan {
         })
     }
 
-    /// Working directory for the session: the plan worktree for executing
-    /// and landing plans, the main root for scoping plans. Plan files
-    /// always stay in the main checkout; only the agent's cwd moves.
+    /// Working directory for the session: the plan worktree for executing,
+    /// evergreening, and landing plans, the main root for scoping plans.
+    /// Plan files always stay in the main checkout; only the agent's cwd
+    /// moves.
     pub(crate) fn cwd(&self, repo_root: &Path) -> PathBuf {
         match self.phase {
-            plans::Phase::Executing | plans::Phase::Landing => {
+            plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Landing => {
                 crate::worktrees::worktree_path(repo_root, &self.name)
             }
             plans::Phase::Scoping | plans::Phase::Completed | plans::Phase::Cancelled => {
@@ -428,9 +441,9 @@ impl AgentManager {
         let mut plan = ActivePlan::for_session(key);
         // A known session keeps its prefix state across transport deaths;
         // anything without an entry starts with the caller's flag.
-        // Eager executing sessions bypass this path: the transition core
-        // marks their prefixed flag, since their role already went out as
-        // the full first turn.
+        // Eager executing, evergreening, and landing sessions bypass this
+        // path: the transition core marks their prefixed flag, since their
+        // role already went out as the full first turn.
         plan.prefixed = stored_prefixed.unwrap_or(plan.prefixed);
         let agent = opencode::agent_for(plan.phase);
         let (connection, session_id, _) =

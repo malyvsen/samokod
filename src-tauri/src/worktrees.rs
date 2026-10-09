@@ -60,6 +60,27 @@ pub fn is_dirty(path: &Path) -> Result<bool, WorktreeError> {
     Ok(!output.trim().is_empty())
 }
 
+/// Commits the worktree branch added on top of the target, oldest first,
+/// as `short-hash subject` lines. Empty when nothing changed. Fails loud
+/// with git stderr preserved.
+pub fn commits(
+    repo_root: &Path,
+    target_branch: &str,
+    worktree_branch: &str,
+) -> Result<Vec<String>, WorktreeError> {
+    let range = format!("{target_branch}..{worktree_branch}");
+    let output = run_git(
+        repo_root,
+        &["log", "--format=%h %s", "--reverse", range.as_str()],
+    )?;
+    Ok(output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 /// Whether `target_branch` is an ancestor of `worktree_branch`: the fast path.
 /// Exit 0 means ancestor, exit 1 means diverged; other failures are loud.
 pub fn is_ffable(
@@ -324,6 +345,25 @@ mod tests {
         assert!(is_ffable(root, &target, &branch).expect("ffable"));
         commit_file(root, "target.txt", "target\n", "target moves on");
         assert!(!is_ffable(root, &target, &branch).expect("diverged"));
+        remove(root, &record.path, &record.worktree_branch, true).expect("remove");
+    }
+
+    #[test]
+    fn commits_lists_branch_work_oldest_first() {
+        let dir = git_repo();
+        let root = dir.path();
+        let target = current_branch(root);
+        let base = head_commit(root).expect("head");
+        let name = "2026-09-26.14-53-26.ever-check";
+        let branch = branch_name(name);
+        let record = create(root, name, &base).expect("create");
+        assert!(commits(root, &target, &branch).expect("commits").is_empty());
+        commit_file(&record.path, "work.txt", "work\n", "plan work");
+        commit_file(&record.path, "more.txt", "more\n", "more work");
+        let listed = commits(root, &target, &branch).expect("commits");
+        assert_eq!(listed.len(), 2);
+        assert!(listed[0].ends_with("plan work"));
+        assert!(listed[1].ends_with("more work"));
         remove(root, &record.path, &record.worktree_branch, true).expect("remove");
     }
 

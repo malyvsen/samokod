@@ -216,9 +216,10 @@ impl AgentManager {
 
     /// Claim the one-time role prefix for the first message of one ACP
     /// conversation. One locked check-and-mark, so a retried turn never
-    /// prefixes twice. Every active role prefixes; scoping uses the
-    /// repo-relative display path since it runs with cwd at the repo root,
-    /// while executing and landing use absolute paths into the checkout.
+    /// prefixes twice. Scoping uses the repo-relative display path since it
+    /// runs with cwd at the repo root, while executing and landing use
+    /// absolute paths into the checkout. Evergreening never prefixes here:
+    /// the transition core sends its full first turn at spawn.
     fn claim_role_prefix(&self, key: &SessionKey, user_text: &str) -> Option<String> {
         let mut state = lock_state(&self.state)?;
         let repo_root = state.repo_root.clone()?;
@@ -262,7 +263,9 @@ impl AgentManager {
                     user_text,
                 )
             }
-            _ => return None,
+            plans::Phase::Evergreening | plans::Phase::Completed | plans::Phase::Cancelled => {
+                return None;
+            }
         };
         state.sessions.get_mut(key)?.plan.prefixed = true;
         Some(text)

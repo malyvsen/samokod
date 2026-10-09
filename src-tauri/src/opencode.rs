@@ -8,6 +8,7 @@ use crate::plans::{Phase, PlanRef};
 
 pub const SCOPING_AGENT: &str = "samokod-scoping";
 pub const EXECUTING_AGENT: &str = "samokod-executing";
+pub const EVERGREENING_AGENT: &str = "samokod-evergreening";
 pub const LANDING_AGENT: &str = "samokod-landing";
 
 /// Matches every plan's state file. Each agent's edit rules deny it last.
@@ -18,6 +19,7 @@ pub fn agent_for(phase: Phase) -> &'static str {
     match phase {
         Phase::Scoping => SCOPING_AGENT,
         Phase::Executing => EXECUTING_AGENT,
+        Phase::Evergreening => EVERGREENING_AGENT,
         Phase::Landing => LANDING_AGENT,
         Phase::Completed | Phase::Cancelled => EXECUTING_AGENT,
     }
@@ -28,6 +30,7 @@ pub const CONFIG_CONTENT_ENV: &str = "OPENCODE_CONFIG_CONTENT";
 
 const SCOPING_PROMPT: &str = include_str!("prompts/scoping.md");
 const EXECUTING_PROMPT: &str = include_str!("prompts/executing.md");
+const EVERGREENING_PROMPT: &str = include_str!("prompts/evergreening.md");
 const LANDING_PROMPT: &str = include_str!("prompts/landing.md");
 
 /// Extra spawn env pinning all agents. Pure: JSON only, no process access.
@@ -50,6 +53,11 @@ pub fn agent_config(plan: &PlanRef) -> String {
                 "mode": "primary",
                 "description": "Executes one approved plan.",
                 "permission": executing_permissions(),
+            },
+            EVERGREENING_AGENT: {
+                "mode": "primary",
+                "description": "Cleans up one executed plan.",
+                "permission": evergreening_permissions(),
             },
             LANDING_AGENT: {
                 "mode": "primary",
@@ -106,6 +114,26 @@ const EXECUTING_EDIT_RULES: [(&str, &str); 4] = [
     (STATE_DENY_GLOB, "deny"),
 ];
 
+/// Evergreening runs in the same worktree as executing, so it shares the
+/// executing edit shape: everything editable except the state file, with
+/// the `.samokod` ask guard and no permission questions.
+fn evergreening_permissions() -> Value {
+    serde_json::json!({
+        "read": "allow",
+        "external_directory": "allow",
+        "edit": rules_object(&EVERGREENING_EDIT_RULES),
+        "bash": "allow",
+        "question": "deny",
+    })
+}
+
+const EVERGREENING_EDIT_RULES: [(&str, &str); 4] = [
+    ("*", "allow"),
+    (".samokod", "ask"),
+    (".samokod/**", "ask"),
+    (STATE_DENY_GLOB, "deny"),
+];
+
 /// Landing resolves one plan branch onto its target, so every worktree
 /// file is editable except the state file: a landed commit must cover
 /// files the target branch added on top. No permission questions and no
@@ -149,6 +177,24 @@ pub fn scoping_template(plan_dir: &str) -> String {
 /// otherwise. Pure.
 pub fn executing_first_message(plan_dir: &str) -> String {
     EXECUTING_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
+}
+
+/// Evergreening role and instruction. Sent as the full first turn when
+/// the cleanup path starts the evergreening agent in the same worktree.
+/// Pure.
+pub fn evergreening_first_message(
+    worktree_path: &str,
+    worktree_branch: &str,
+    plan_md_abs_path: &str,
+    target_branch: &str,
+    commits: &str,
+) -> String {
+    EVERGREENING_PROMPT
+        .replace("{{WORKTREE_PATH}}", worktree_path)
+        .replace("{{WORKTREE_BRANCH}}", worktree_branch)
+        .replace("{{PLAN_MD_ABS_PATH}}", plan_md_abs_path)
+        .replace("{{TARGET_BRANCH}}", target_branch)
+        .replace("{{COMMITS}}", commits)
 }
 
 /// Landing role and instruction. Sent as the full first turn when the
@@ -238,7 +284,12 @@ mod tests {
     #[test]
     fn all_agents_are_primary_without_prompt_field() {
         let config = config(&test_plan());
-        for agent in [SCOPING_AGENT, EXECUTING_AGENT, LANDING_AGENT] {
+        for agent in [
+            SCOPING_AGENT,
+            EXECUTING_AGENT,
+            EVERGREENING_AGENT,
+            LANDING_AGENT,
+        ] {
             let entry = config
                 .pointer(&format!("/agent/{agent}"))
                 .expect("agent present");
@@ -346,6 +397,15 @@ mod tests {
             ]
         );
         assert_eq!(
+            keys_of(&config, EVERGREENING_AGENT, "edit"),
+            vec![
+                "*".to_string(),
+                ".samokod".to_string(),
+                ".samokod/**".to_string(),
+                STATE_DENY_GLOB.to_string()
+            ]
+        );
+        assert_eq!(
             keys_of(&config, LANDING_AGENT, "edit"),
             vec!["*".to_string(), STATE_DENY_GLOB.to_string()]
         );
@@ -360,6 +420,10 @@ mod tests {
         );
         assert_eq!(
             config["agent"][EXECUTING_AGENT]["permission"]["question"],
+            "deny"
+        );
+        assert_eq!(
+            config["agent"][EVERGREENING_AGENT]["permission"]["question"],
             "deny"
         );
         assert_eq!(
@@ -398,8 +462,22 @@ mod tests {
     #[test]
     fn landing_plans_run_the_landing_agent() {
         assert_eq!(agent_for(Phase::Landing), LANDING_AGENT);
+        assert_eq!(agent_for(Phase::Evergreening), EVERGREENING_AGENT);
         assert_eq!(agent_for(Phase::Executing), EXECUTING_AGENT);
         assert_eq!(agent_for(Phase::Scoping), SCOPING_AGENT);
+    }
+
+    #[test]
+    fn evergreening_allows_edits_and_bash() {
+        let config = config(&test_plan());
+        assert_eq!(
+            effect_of(&config, EVERGREENING_AGENT, "edit", "src/App.tsx"),
+            "allow"
+        );
+        assert_eq!(
+            effect_of(&config, EVERGREENING_AGENT, "bash", "cargo test"),
+            "allow"
+        );
     }
 
     #[test]
@@ -411,6 +489,7 @@ mod tests {
         for resource in [
             format!(".samokod/plans/scoping/other/{STATE_FILE}"),
             format!(".samokod/plans/executing/x/{STATE_FILE}"),
+            format!(".samokod/plans/evergreening/x/{STATE_FILE}"),
         ] {
             assert_eq!(
                 effect_of(&config, SCOPING_AGENT, "edit", &resource),
@@ -423,11 +502,41 @@ mod tests {
                 "{resource} should deny for executing"
             );
             assert_eq!(
+                effect_of(&config, EVERGREENING_AGENT, "edit", &resource),
+                "deny",
+                "{resource} should deny for evergreening"
+            );
+            assert_eq!(
                 effect_of(&config, LANDING_AGENT, "edit", &resource),
                 "deny",
                 "{resource} should deny for landing"
             );
         }
+    }
+
+    #[test]
+    fn evergreening_message_fills_every_placeholder() {
+        let message = evergreening_first_message(
+            "/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature",
+            "samokod/shiny-feature",
+            "/repo/.samokod/plans/evergreening/2026-09-26.14-53-26.shiny-feature/plan.md",
+            "feature",
+            "0923748 feat: blabla\n009fb12 fix: blabla",
+        );
+        assert!(message.contains("/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature"));
+        assert!(message.contains("samokod/shiny-feature"));
+        assert!(message.contains(
+            "/repo/.samokod/plans/evergreening/2026-09-26.14-53-26.shiny-feature/plan.md"
+        ));
+        assert!(message.contains("feature"));
+        assert!(message.contains("0923748 feat: blabla"));
+        assert!(message.contains("009fb12 fix: blabla"));
+        assert!(message.contains("Use TODOs to track progress"));
+        assert!(!message.contains("{{WORKTREE_PATH}}"));
+        assert!(!message.contains("{{WORKTREE_BRANCH}}"));
+        assert!(!message.contains("{{PLAN_MD_ABS_PATH}}"));
+        assert!(!message.contains("{{TARGET_BRANCH}}"));
+        assert!(!message.contains("{{COMMITS}}"));
     }
 
     #[test]

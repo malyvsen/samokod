@@ -21,7 +21,7 @@ export interface ToolLineView {
 }
 
 /// Role of one session inside a plan: which chat the user is talking to.
-export type SessionRole = "scoping" | "executing" | "landing";
+export type SessionRole = "scoping" | "executing" | "evergreening" | "landing";
 
 export interface SessionKey {
 	plan: string;
@@ -66,6 +66,7 @@ interface SessionSpend {
 export type PlanPhase =
 	| "scoping"
 	| "executing"
+	| "evergreening"
 	| "landing"
 	| "completed"
 	| "cancelled";
@@ -77,6 +78,7 @@ export interface PlanEntry {
 	has_plan_md: boolean;
 	sessions: SessionStatusView[];
 	manual: boolean;
+	evergreen: boolean;
 }
 
 export interface RepoDefaults {

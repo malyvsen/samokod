@@ -9,6 +9,7 @@ import type {
 export const PHASES: PlanPhase[] = [
 	"scoping",
 	"executing",
+	"evergreening",
 	"landing",
 	"completed",
 	"cancelled",
@@ -20,6 +21,9 @@ export function latestRole(plan: PlanEntry): SessionRole {
 	const roles = new Set(plan.sessions.map((status) => status.role));
 	if (roles.has("landing")) {
 		return "landing";
+	}
+	if (roles.has("evergreening")) {
+		return "evergreening";
 	}
 	if (roles.has("executing")) {
 		return "executing";
@@ -56,12 +60,12 @@ export interface ExecutingProgress {
 }
 
 export function executingProgress(plan: PlanEntry): ExecutingProgress | null {
-	if (plan.phase !== "executing") {
+	if (plan.phase !== "executing" && plan.phase !== "evergreening") {
 		return null;
 	}
-	const status = plan.sessions.find(
-		(candidate) => candidate.role === "executing",
-	);
+	const role: SessionRole =
+		plan.phase === "evergreening" ? "evergreening" : "executing";
+	const status = plan.sessions.find((candidate) => candidate.role === role);
 	const progress: TodoProgressView | null = status?.progress ?? null;
 	if (progress === null) {
 		return { done: 0, total: 0, etaSecs: null };
@@ -150,6 +154,7 @@ export function openPathFor(
 const ROLE_LABELS: Record<SessionRole, string> = {
 	scoping: "Scoping",
 	executing: "Executing",
+	evergreening: "Evergreening",
 	landing: "Landing",
 };
 
