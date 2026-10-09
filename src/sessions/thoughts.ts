@@ -56,6 +56,9 @@ export function useThoughtTimers(
 ): void {
 	const live = chat?.live ?? null;
 	const working = chat?.working ?? false;
+	const transcript = chat?.transcript;
+	const approval = chat?.approval ?? false;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: transcript and approval re-arm the quiet gap; values come from current inside the timeout.
 	useEffect(() => {
 		if (selectedKey === null) return;
 		const key = selectedKey;
@@ -86,14 +89,18 @@ export function useThoughtTimers(
 					}
 					if (now - updatedAt < BURST_SILENCE_MS) return current;
 					const seconds = secondsForBurst(burstStart, updatedAt);
-					const transcript: TranscriptItem[] = [
+					const nextTranscript: TranscriptItem[] = [
 						...current.transcript,
 						{ kind: "thought", id: crypto.randomUUID(), seconds },
 					];
+					const waiting =
+						current.working &&
+						!current.approval &&
+						!hasRunningTools(current.transcript);
 					return {
 						...current,
-						transcript,
-						live: current.working ? { kind: "waiting" } : null,
+						transcript: nextTranscript,
+						live: waiting ? { kind: "waiting" } : null,
 					};
 				});
 			}, BURST_SILENCE_MS);
@@ -105,6 +112,9 @@ export function useThoughtTimers(
 			const timer = setTimeout(() => {
 				updateChat(key, (current) => {
 					if (current.live !== null || !current.working) return current;
+					if (current.approval || hasRunningTools(current.transcript)) {
+						return current;
+					}
 					return { ...current, live: { kind: "waiting" } };
 				});
 			}, WAITING_DELAY_MS);
@@ -113,5 +123,5 @@ export function useThoughtTimers(
 			};
 		}
 		return;
-	}, [selectedKey, live, working, updateChat]);
+	}, [selectedKey, live, working, transcript, approval, updateChat]);
 }

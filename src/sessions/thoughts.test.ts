@@ -1,11 +1,15 @@
-import { describe, expect, test } from "vitest";
-import type { TranscriptItem } from "../types";
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { testKey } from "../fixtures";
+import type { SessionKey, TranscriptItem } from "../types";
+import { type ChatState, emptyChat } from "./store";
 import {
 	BURST_SILENCE_MS,
 	freezeBurst,
 	hasRunningTools,
 	liveForThought,
 	secondsForBurst,
+	useThoughtTimers,
 	WAITING_DELAY_MS,
 } from "./thoughts";
 
@@ -123,5 +127,66 @@ describe("hasRunningTools", () => {
 			},
 		];
 		expect(hasRunningTools(transcript)).toBe(false);
+	});
+});
+
+describe("useThoughtTimers waiting gate", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	function runWaitingTimer(chat: ChatState) {
+		const updateChat = vi.fn(
+			(_key: SessionKey, _next: (current: ChatState) => ChatState) => {},
+		);
+		const hook = renderHook(
+			({ current }: { current: ChatState }) =>
+				useThoughtTimers(testKey(), current, updateChat),
+			{ initialProps: { current: chat } },
+		);
+		act(() => {
+			vi.advanceTimersByTime(WAITING_DELAY_MS);
+		});
+		const updater = updateChat.mock.calls[0]?.[1] as
+			| ((current: ChatState) => ChatState)
+			| undefined;
+		const next = updater?.(chat) ?? chat;
+		hook.unmount();
+		return next;
+	}
+
+	test("quiet working turn flips to waiting", () => {
+		const chat: ChatState = { ...emptyChat(), working: true, live: null };
+		expect(runWaitingTimer(chat).live).toEqual({ kind: "waiting" });
+	});
+
+	test("running tool stays quiet past the delay", () => {
+		const chat: ChatState = {
+			...emptyChat(),
+			working: true,
+			live: null,
+			transcript: [
+				{
+					kind: "tool",
+					id: "t1",
+					line: { id: "l1", text: "edit", status: "in_progress" },
+				},
+			],
+		};
+		expect(runWaitingTimer(chat).live).toBeNull();
+	});
+
+	test("pending approval never flips to waiting", () => {
+		const chat: ChatState = {
+			...emptyChat(),
+			working: true,
+			approval: true,
+			live: null,
+		};
+		expect(runWaitingTimer(chat).live).toBeNull();
 	});
 });

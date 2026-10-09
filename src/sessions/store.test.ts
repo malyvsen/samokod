@@ -315,7 +315,28 @@ describe("thought bursts", () => {
 		const chat = chatOf(chats);
 		expect(chat.transcript[0]).toMatchObject({ kind: "thought", seconds: 1 });
 		expect(chat.transcript[1]).toMatchObject({ kind: "agent", text: "answer" });
-		expect(chat.live).toEqual({ kind: "waiting" });
+		expect(chat.live).toBeNull();
+	});
+
+	test("tool activity freezes the burst without waiting", () => {
+		let chats = applySessionEvent(
+			withChat(),
+			{ type: "agent_thought", session: testKey(), chunk: "hello" },
+			1000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{
+				type: "tool_line",
+				session: testKey(),
+				line: { id: "t1", text: "edit file.md", status: "in_progress" },
+			},
+			2000,
+		);
+		const chat = chatOf(chats);
+		expect(chat.transcript[0]).toMatchObject({ kind: "thought", seconds: 1 });
+		expect(chat.transcript[1]).toMatchObject({ kind: "tool" });
+		expect(chat.live).toBeNull();
 	});
 
 	test("turn end freezes the burst and clears live", () => {

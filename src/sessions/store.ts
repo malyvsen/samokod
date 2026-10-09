@@ -123,7 +123,7 @@ export function applySessionEvent(
 				if (chat.start.kind === "replaying") return { ...chat, transcript };
 				return {
 					...withTranscript(chat, transcript),
-					live: { kind: "waiting" },
+					live: null,
 				};
 			});
 		}
@@ -171,7 +171,7 @@ export function applySessionEvent(
 				if (chat.start.kind === "replaying") return { ...chat, transcript };
 				return {
 					...withTranscript(chat, transcript),
-					live: { kind: "waiting" },
+					live: null,
 				};
 			});
 		}
@@ -215,7 +215,7 @@ export function applySessionEvent(
 					...chat,
 					approval: replaying ? chat.approval : true,
 					transcript,
-					live: replaying ? chat.live : { kind: "waiting" },
+					live: replaying ? chat.live : null,
 				};
 			});
 		case "permission_resolved":
@@ -251,11 +251,7 @@ export function applySessionEvent(
 					...chat,
 					todos: event.todos,
 					transcript,
-					live: replaying
-						? chat.live
-						: chat.working
-							? { kind: "waiting" }
-							: null,
+					live: replaying ? chat.live : null,
 				};
 			});
 		case "spend_tick":
