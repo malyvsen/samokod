@@ -6,6 +6,7 @@ import {
 	moveCaretToEnd,
 	shouldCommitEnter,
 } from "./editableText";
+import { MessageMarkdown } from "./MessageMarkdown";
 
 type QueuedHeaderControls =
 	| { kind: "hidden" }
@@ -96,7 +97,9 @@ function QueuedBubble({
 			}}
 		>
 			<QueuedHeader controls={controls} />
-			{text}
+			<div className="body">
+				<MessageMarkdown text={text} />
+			</div>
 		</div>
 	);
 }

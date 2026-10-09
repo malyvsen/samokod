@@ -10,7 +10,7 @@ import type {
 	ToolStatus,
 	TranscriptItem,
 } from "../types";
-import { AgentMarkdown } from "./AgentMarkdown";
+import { MessageMarkdown } from "./MessageMarkdown";
 
 export function Transcript({
 	items,
@@ -43,7 +43,9 @@ export function Transcript({
 				{showLead && (
 					<div className="msg user">
 						<div className="who">YOU</div>
-						{lead}
+						<div className="body">
+							<MessageMarkdown text={lead} />
+						</div>
 					</div>
 				)}
 				{items.map((item) => {
@@ -51,7 +53,9 @@ export function Transcript({
 						return (
 							<div className="msg user" key={item.id}>
 								<div className="who">YOU</div>
-								{item.text}
+								<div className="body">
+									<MessageMarkdown text={item.text} />
+								</div>
 							</div>
 						);
 					}
@@ -59,7 +63,9 @@ export function Transcript({
 						return (
 							<div className="msg agent" key={item.id}>
 								<div className="who">AI</div>
-								<AgentMarkdown text={item.text} />
+								<div className="body">
+									<MessageMarkdown text={item.text} />
+								</div>
 							</div>
 						);
 					}

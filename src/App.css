@@ -653,21 +653,21 @@ body {
 	z-index: 10;
 }
 
-.msg.agent p {
+.msg .body p {
 	margin: 0 0 10px;
 }
 
-.msg.agent p:last-child {
+.msg .body p:last-child {
 	margin-bottom: 0;
 }
 
-.msg code {
+.msg .body code {
 	font-size: 0.86em;
 	background: rgba(255, 255, 255, 0.09);
 	padding: 1px 5px;
 }
 
-.msg.agent pre {
+.msg .body pre {
 	margin: 10px 0;
 	padding: 10px 12px;
 	font-size: 12.5px;
@@ -676,36 +676,36 @@ body {
 	overflow-x: auto;
 }
 
-.msg.agent pre code {
+.msg .body pre code {
 	background: none;
 	padding: 0;
 }
 
-.msg.agent ol,
-.msg.agent ul {
+.msg .body ol,
+.msg .body ul {
 	margin: 8px 0 10px;
 	padding-left: 22px;
 }
 
-.msg.agent li {
+.msg .body li {
 	margin-bottom: 4px;
 }
 
-.msg.agent .md-table-wrap {
+.msg .body .md-table-wrap {
 	margin: 10px 0;
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	background: rgba(0, 0, 0, 0.35);
 	overflow-x: auto;
 }
 
-.msg.agent table {
+.msg .body table {
 	border-collapse: collapse;
 	width: 100%;
 	font-size: 12.5px;
 }
 
-.msg.agent th,
-.msg.agent td {
+.msg .body th,
+.msg .body td {
 	border: 1px solid rgba(255, 255, 255, 0.12);
 	padding: 6px 8px;
 	vertical-align: top;
@@ -713,13 +713,13 @@ body {
 	overflow-wrap: anywhere;
 }
 
-.msg.agent th {
+.msg .body th {
 	background: rgba(255, 255, 255, 0.06);
 	color: #fff;
 	font-weight: 600;
 }
 
-.msg.agent td {
+.msg .body td {
 	color: #e8e6e1;
 }
 

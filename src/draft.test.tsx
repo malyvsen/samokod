@@ -60,9 +60,11 @@ describe("draft bubble in chat", () => {
 		const leads = document.querySelectorAll(".msg.user:not(.draft)");
 		expect(leads).toHaveLength(1);
 		expect(leads[0]?.textContent).toContain("TEMPLATE");
+		expect(leads[0]?.querySelector(".body p")).not.toBeNull();
 		const lead = screen.getByText("TEMPLATE").closest(".msg.user");
 		const draft = box.closest(".msg.user");
 		if (lead === null || draft === null) throw new Error("bubbles missing");
+		expect(screen.getByText("TEMPLATE").closest(".body")).not.toBeNull();
 		expect(
 			lead.compareDocumentPosition(draft) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
@@ -79,6 +81,8 @@ describe("draft bubble in chat", () => {
 		expect(bubbles).toHaveLength(2);
 		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
 		expect(bubbles[1]?.textContent).toContain("hello");
+		expect(bubbles[0]?.querySelector(".body p")).not.toBeNull();
+		expect(screen.getByText("hello").closest(".body")).not.toBeNull();
 		expect(api.scopingTemplate).toHaveBeenCalledTimes(1);
 	});
 

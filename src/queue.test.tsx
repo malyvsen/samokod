@@ -65,6 +65,8 @@ describe("message queue", () => {
 		expect(api.sendPrompt).toHaveBeenCalledTimes(1);
 		expect(screen.getByText("QUEUED")).toBeInTheDocument();
 		expect(screen.getByText("followup")).toBeInTheDocument();
+		expect(screen.getByText("followup").closest(".body")).not.toBeNull();
+		expect(document.querySelector(".msg.user.queued .body p")).not.toBeNull();
 	});
 
 	test("turn_done sends the head as a YOU bubble", async () => {
@@ -218,6 +220,7 @@ describe("queued editing", () => {
 			screen.queryByRole("textbox", { name: "Edit queued message" }),
 		).not.toBeInTheDocument();
 		expect(screen.getByText("followup edited")).toBeInTheDocument();
+		expect(screen.getByText("followup edited").closest(".body")).not.toBeNull();
 		expect(api.sendPrompt).toHaveBeenCalledTimes(1);
 	});
 

@@ -131,16 +131,44 @@ describe("transcript retry", () => {
 });
 
 describe("transcript user messages", () => {
-	test("renders user text with newlines intact", () => {
-		render(transcript(multiline));
+	test("renders user text as Markdown with newlines intact", () => {
+		const { container } = render(transcript(multiline));
 		const bubble = screen.getByText("YOU").parentElement as HTMLElement;
-		expect(bubble.textContent).toContain(multiline);
+		expect(bubble.textContent).toContain("first line");
+		expect(bubble.textContent).toContain("second line");
+		expect(bubble.textContent).toContain("third");
+		expect(container.querySelector(".msg.user .body ul li")).not.toBeNull();
 	});
 
 	test("user bubble rule sets pre-wrap", () => {
 		const css = readFileSync("src/App.css", "utf8");
 		const rule = /\.msg\.user\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 		expect(rule).toContain("white-space: pre-wrap");
+	});
+
+	test("user table renders wrapped table with header cells", () => {
+		const table = "| File | Status |\n| --- | --- |\n| `a.ts` | ok |";
+		const { container } = render(transcript(table));
+		const wrap = container.querySelector(".msg.user .md-table-wrap");
+		expect(wrap).not.toBeNull();
+		expect(wrap?.querySelector("table")).not.toBeNull();
+		expect(
+			screen.getByRole("columnheader", { name: "File" }),
+		).toBeInTheDocument();
+		expect(screen.getByRole("cell", { name: "ok" })).toBeInTheDocument();
+	});
+
+	test("user code fence renders pre code", () => {
+		const { container } = render(transcript("```\ncode here\n```"));
+		const pre = container.querySelector(".msg.user .body pre code");
+		expect(pre).not.toBeNull();
+		expect(pre?.textContent).toContain("code here");
+	});
+
+	test("user pipe text without a delimiter stays a paragraph", () => {
+		const { container } = render(transcript("just a | pipe, no table here"));
+		expect(container.querySelector(".msg.user table")).toBeNull();
+		expect(screen.getByText(/just a \| pipe/)).toBeInTheDocument();
 	});
 });
 
@@ -239,10 +267,10 @@ describe("transcript agent tables", () => {
 	test("table cells wrap and wide tables scroll inside the bubble", () => {
 		const css = readFileSync("src/App.css", "utf8");
 		const wrapRule =
-			/\.msg\.agent \.md-table-wrap\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			/\.msg \.body \.md-table-wrap\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 		expect(wrapRule).toContain("overflow-x: auto");
 		const cellRule =
-			/\.msg\.agent th,\s*\.msg\.agent td\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			/\.msg \.body th,\s*\.msg \.body td\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 		expect(cellRule).toContain("white-space: normal");
 		expect(cellRule).toContain("overflow-wrap: anywhere");
 		expect(cellRule).not.toContain("nowrap");
