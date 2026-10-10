@@ -1,7 +1,6 @@
 import { act, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { testDefaults, testEntry, testKey } from "./fixtures";
-import { clearPreviewCache } from "./sessions/preview";
 import {
 	api,
 	appEventHandler,
@@ -22,7 +21,6 @@ vi.mock("@tauri-apps/plugin-dialog", async () => {
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	clearPreviewCache();
 	stubMatchMedia();
 	api.getPrefs.mockResolvedValue({ recent: [{ path: "/repo" }] });
 	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "feature" });
@@ -32,10 +30,10 @@ beforeEach(() => {
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
+		scopingPreview: null,
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
-	api.scopingTemplate.mockResolvedValue(null);
 	api.sendPrompt.mockResolvedValue(undefined);
 });
 

@@ -68,7 +68,6 @@ beforeEach(() => {
 	api.setGlobalConfigOption.mockReset();
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
-	api.scopingTemplate.mockResolvedValue(null);
 	api.planMdText.mockResolvedValue(null);
 });
 
@@ -84,6 +83,7 @@ async function openChatWith(options: ConfigOptionView[]) {
 		plans: [testEntry(executingPlan, "executing", "Shiny", true)],
 		selected: executingKey,
 		config_defaults: testDefaults(),
+		scopingPreview: null,
 	});
 	const user = await openChat(api);
 	emitAppEvent(api, {

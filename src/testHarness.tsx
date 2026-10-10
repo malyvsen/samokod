@@ -24,7 +24,6 @@ export const api = {
 	saveAttachment: vi.fn(),
 	warmSession: vi.fn(),
 	loadHistory: vi.fn(),
-	scopingTemplate: vi.fn(),
 	planMdText: vi.fn(async () => null as string | null),
 	onAppEvent: vi.fn(() => () => {}),
 };
@@ -90,6 +89,7 @@ export async function openChat(
 			plans: overrides.plans,
 			selected: overrides.selected ?? testKey(overrides.plans[0]?.name ?? "a"),
 			config_defaults: testDefaults(),
+			scopingPreview: "TEMPLATE",
 		});
 	}
 	const { App } = await import("./App");

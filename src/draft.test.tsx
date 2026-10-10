@@ -7,7 +7,6 @@ import {
 	testKey,
 	testStatus,
 } from "./fixtures";
-import { clearPreviewCache } from "./sessions/preview";
 import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
 import type { SessionKey } from "./types";
 
@@ -23,7 +22,6 @@ vi.mock("@tauri-apps/plugin-dialog", async () => {
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	clearPreviewCache();
 	stubMatchMedia();
 	api.getPrefs.mockResolvedValue({
 		recent: [{ path: "/repo" }],
@@ -35,10 +33,10 @@ beforeEach(() => {
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
+		scopingPreview: "TEMPLATE",
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
-	api.scopingTemplate.mockResolvedValue("TEMPLATE");
 	api.sendPrompt.mockResolvedValue(undefined);
 });
 
@@ -52,9 +50,9 @@ describe("draft bubble in chat", () => {
 	});
 
 	test("fresh scoping session previews its template above the draft", async () => {
-		api.scopingTemplate.mockResolvedValue("TEMPLATE");
 		await openChat(api);
-		await screen.findByText("TEMPLATE");
+		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		expect("scopingTemplate" in api).toBe(false);
 		const box = screen.getByRole("textbox", { name: "Ask for a change…" });
 		expect(box).toBeInTheDocument();
 		const leads = document.querySelectorAll(".msg.user:not(.draft)");
@@ -71,9 +69,8 @@ describe("draft bubble in chat", () => {
 	});
 
 	test("send with preview appends only the user bubble and sends pure text", async () => {
-		api.scopingTemplate.mockResolvedValue("TEMPLATE");
 		const user = await openChat(api);
-		await screen.findByText("TEMPLATE");
+		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
 		await user.keyboard("hello{Enter}");
 		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello");
 		await screen.findByText("hello");
@@ -83,11 +80,18 @@ describe("draft bubble in chat", () => {
 		expect(bubbles[1]?.textContent).toContain("hello");
 		expect(bubbles[0]?.querySelector(".body p")).not.toBeNull();
 		expect(screen.getByText("hello").closest(".body")).not.toBeNull();
-		expect(api.scopingTemplate).toHaveBeenCalledTimes(1);
+		expect("scopingTemplate" in api).toBe(false);
 	});
 
-	test("live send falls back to one bubble when template fetch fails", async () => {
-		api.scopingTemplate.mockRejectedValue(new Error("boom"));
+	test("live send without preview shows one bubble", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [testEntry()],
+			selected: testKey(),
+			config_defaults: testDefaults(),
+			scopingPreview: null,
+		});
 		const user = await openChat(api);
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
@@ -108,18 +112,21 @@ describe("draft bubble in chat", () => {
 			testStatus("scoping"),
 		]);
 		const plans = [first, second];
-		api.scopingTemplate.mockImplementation(async (session: SessionKey) =>
-			session.plan === "aaa" ? "AAA-TEMPLATE" : "BBB-TEMPLATE",
-		);
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans,
+			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
+			scopingPreview: "AAA-TEMPLATE",
+		});
 		api.selectPlan.mockImplementation(async (session: SessionKey) => ({
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
+			scopingPreview: session.plan === "aaa" ? "AAA-TEMPLATE" : "BBB-TEMPLATE",
 		}));
-		const user = await openChat(api, {
-			plans,
-			selected: { plan: "aaa", role: "scoping" },
-		});
+		const user = await openChat(api);
 		await screen.findByText("AAA-TEMPLATE");
 		await user.click(
 			await screen.findByRole("button", {
@@ -138,7 +145,14 @@ describe("draft bubble in chat", () => {
 	});
 
 	test("replayed template never duplicates the preview", async () => {
-		api.scopingTemplate.mockResolvedValue(null);
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [testEntry()],
+			selected: testKey(),
+			config_defaults: testDefaults(),
+			scopingPreview: null,
+		});
 		await openChat(api);
 		emitAppEvent(api, { type: "history_preparing", session: testKey() });
 		emitAppEvent(api, { type: "history_begin", session: testKey() });
@@ -159,9 +173,8 @@ describe("draft bubble in chat", () => {
 	});
 
 	test("stale preview plus replayed template shows exactly once", async () => {
-		api.scopingTemplate.mockResolvedValue("TEMPLATE");
 		await openChat(api);
-		await screen.findByText("TEMPLATE");
+		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
 		emitAppEvent(api, { type: "history_begin", session: testKey() });
 		emitAppEvent(api, {
 			type: "user_text",
@@ -191,6 +204,7 @@ describe("draft bubble in chat", () => {
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
+			scopingPreview: null,
 		}));
 		const user = await openChat(api, {
 			plans,
@@ -225,6 +239,7 @@ describe("draft bubble in chat", () => {
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
+			scopingPreview: null,
 		}));
 		const user = await openChat(api, {
 			plans,
@@ -265,6 +280,7 @@ describe("draft bubble in chat", () => {
 			plans: after,
 			selected: session,
 			config_defaults: testDefaults(),
+			scopingPreview: null,
 		}));
 		const user = await openChat(api, {
 			plans: before,
@@ -291,6 +307,7 @@ describe("draft bubble in chat", () => {
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
+			scopingPreview: null,
 		}));
 		const user = await openChat(api, {
 			plans,
@@ -339,11 +356,13 @@ describe("draft bubble in chat", () => {
 			plans: [kept, fresh],
 			selected: { plan: "ccc", role: "scoping" },
 			config_defaults: testDefaults(),
+			scopingPreview: "TEMPLATE",
 		}));
 		api.selectPlan.mockImplementation(async (session: SessionKey) => ({
 			plans: [kept, fresh],
 			selected: session,
 			config_defaults: testDefaults(),
+			scopingPreview: null,
 		}));
 		const user = await openChat(api, {
 			plans: [first],
@@ -359,6 +378,35 @@ describe("draft bubble in chat", () => {
 			}),
 		);
 		expect(await screen.findByRole("textbox")).toHaveTextContent("hello draft");
+	});
+
+	test("new plan shows its template lead synchronously", async () => {
+		const first = testEntryWith("aaa", "scoping", "First", false, [
+			testStatus("scoping"),
+		]);
+		const fresh = testEntryWith("ccc", "scoping", "Untitled", false, [
+			testStatus("scoping"),
+		]);
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [first],
+			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
+			scopingPreview: null,
+		});
+		api.createPlan.mockResolvedValue({
+			plans: [first, fresh],
+			selected: { plan: "ccc", role: "scoping" },
+			config_defaults: testDefaults(),
+			scopingPreview: "TEMPLATE",
+		});
+		const user = await openChat(api);
+		await screen.findByRole("textbox", { name: "Ask for a change…" });
+		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "New plan" }));
+		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		expect("scopingTemplate" in api).toBe(false);
 	});
 
 	test("stays visible with queue placeholder while working", async () => {

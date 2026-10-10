@@ -30,15 +30,16 @@ beforeEach(() => {
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
+		scopingPreview: null,
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
-	api.scopingTemplate.mockResolvedValue(null);
 	api.planMdText.mockResolvedValue(null);
 	api.selectPlan.mockResolvedValue({
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
+		scopingPreview: null,
 	});
 });
 

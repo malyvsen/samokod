@@ -26,17 +26,17 @@ beforeEach(() => {
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
+		scopingPreview: null,
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
-	api.scopingTemplate.mockResolvedValue(null);
 });
 
 describe("history", () => {
 	test("unknown session shows opening copy", async () => {
 		await openChat(api);
-		expect(screen.getByText(/opening session/)).toBeInTheDocument();
-		expect(screen.getByText("getting session ready")).toBeInTheDocument();
+		expect(screen.getByText(/fresh session/)).toBeInTheDocument();
+		expect(screen.getByText("no messages yet")).toBeInTheDocument();
 	});
 
 	test("preparing shows fresh session without replay claim", async () => {

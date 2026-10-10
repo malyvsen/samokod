@@ -679,25 +679,6 @@ impl AgentManager {
         Ok(self.plans_update())
     }
 
-    /// Scoping template: the template with its plan dir filled in,
-    /// returned only while the session is fresh under the
-    /// `is_empty_scoping` gate. Non-fresh and non-scoping sessions get
-    /// `None`; missing repos and gone plans are errors, never silent
-    /// fallbacks.
-    pub fn scoping_template(&self, session: SessionKey) -> Result<Option<String>, AgentError> {
-        let Some(state_guard) = lock_state(&self.state) else {
-            return Err(AgentError::RequestFailed {
-                raw: "agent state unavailable".to_string(),
-            });
-        };
-        let Some(repo_root) = state_guard.repo_root.clone() else {
-            return Err(AgentError::NoSession {
-                raw: "open a repository first".to_string(),
-            });
-        };
-        scoping_template_for(&state_guard, &repo_root, &session)
-    }
-
     /// Live `plan.md` text for one session's plan, or `None` when the file
     /// does not exist yet (fresh scoping, pending, or bare). Searches every
     /// phase by name since the file travels with renames; read-only, never

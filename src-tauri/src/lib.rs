@@ -211,16 +211,6 @@ async fn set_global_config_option(
 }
 
 #[tauri::command]
-async fn scoping_template(
-    state: State<'_, AgentManager>,
-    session: SessionKey,
-) -> Result<Option<String>, String> {
-    state
-        .scoping_template(session)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 async fn plan_md_text(
     state: State<'_, AgentManager>,
     session: SessionKey,
@@ -307,7 +297,6 @@ pub fn run() {
             set_plan_mode,
             set_plan_evergreen,
             send_prompt,
-            scoping_template,
             plan_md_text,
             retry_last,
             cancel_turn,

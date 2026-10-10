@@ -35,7 +35,6 @@ import {
 	useSessionDrafts,
 } from "./sessions/drafts";
 import { usePlanMd } from "./sessions/planMd";
-import { previewPromiseFor, useScopingPreview } from "./sessions/preview";
 import {
 	type QueueMoveDirection,
 	resolveDrain,
@@ -124,11 +123,20 @@ export function App() {
 		[applyChats],
 	);
 
-	const applyPlans = useCallback((update: PlansUpdate) => {
-		setPlans(update.plans);
-		setSelectedKey(update.selected);
-		setConfigDefaults(update.config_defaults);
-	}, []);
+	const applyPlans = useCallback(
+		(update: PlansUpdate) => {
+			setPlans(update.plans);
+			setSelectedKey(update.selected);
+			setConfigDefaults(update.config_defaults);
+			applyChats((current) =>
+				updateEntry(current, update.selected, (chat) => ({
+					...chat,
+					scopingPreview: update.scopingPreview,
+				})),
+			);
+		},
+		[applyChats],
+	);
 
 	const applyPushedPlans = useCallback((pushed: PlanEntry[]) => {
 		setPlans(pushed);
@@ -149,17 +157,14 @@ export function App() {
 	const entry = selectedEntry(plans, selectedKey);
 	const readOnly = isReadOnly(entry);
 	useSessionStart(selectedKey, chats, readOnly);
-	useScopingPreview(selectedKey, updateChat);
 	useThoughtTimers(selectedKey, chat, updateChat);
 	const planMd = usePlanMd(selectedKey, chat?.working ?? false);
 	const isScoping = selectedKey?.role === "scoping";
 
 	const sendNow = useCallback(
 		async (key: SessionKey, text: string) => {
-			const template = await previewPromiseFor(key);
 			updateChat(key, (chat) => ({
 				...chat,
-				scopingPreview: template ?? chat.scopingPreview,
 				transcript: [
 					...chat.transcript,
 					{
@@ -218,6 +223,16 @@ export function App() {
 		(event: AppEvent) => {
 			if (event.type === "plans_changed") {
 				applyPushedPlans(event.plans);
+				const current = selectedRef.current;
+				if (current !== null && sameSession(current, event.selected)) {
+					const preview = event.scopingPreview;
+					applyChats((chats) =>
+						updateEntry(chats, current, (chat) => ({
+							...chat,
+							scopingPreview: preview,
+						})),
+					);
+				}
 				return;
 			}
 			if (event.type === "branch_changed") {
