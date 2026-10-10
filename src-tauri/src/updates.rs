@@ -7,10 +7,13 @@ use crate::types::{ToolKindLabel, ToolLineView, ToolStatus};
 const SKILL_PREFIX: &str = "Loaded skill: ";
 
 /// Raw input keys shown when a call has no title, in priority order.
+/// `pattern` leads so search lines stay identical from in-progress to
+/// completed (grep's completion title is already just the pattern).
 const KEY_PARAMS: &[&str] = &[
+    "pattern",
     "path",
     "file",
-    "pattern",
+    "filePath",
     "query",
     "command",
     "url",
@@ -109,7 +112,7 @@ fn line_text(
     status: ToolStatus,
 ) -> String {
     let label = tool_label(name, kind);
-    let body = tool_body(title, raw_input);
+    let body = tool_body(title, kind, raw_input);
     let base = if body.is_empty() {
         label
     } else {
@@ -143,10 +146,29 @@ fn kind_label(kind: Option<ToolKind>) -> ToolKindLabel {
     }
 }
 
+/// Bare tool names seen as placeholder titles before the agent sends the
+/// real summary, per kind. Pure.
+fn bare_titles(kind: Option<ToolKind>) -> &'static [&'static str] {
+    match kind {
+        Some(ToolKind::Read) => &["read"],
+        Some(ToolKind::Edit) => &["edit", "write"],
+        Some(ToolKind::Delete) => &["delete"],
+        Some(ToolKind::Move) => &["move"],
+        Some(ToolKind::Search) => &["glob", "grep"],
+        Some(ToolKind::Execute) => &["bash"],
+        Some(ToolKind::Think) => &["think"],
+        Some(ToolKind::Fetch) => &["fetch"],
+        Some(ToolKind::SwitchMode) => &["mode"],
+        Some(ToolKind::Other) | None => &[],
+        _ => &[],
+    }
+}
+
 /// Titled calls show the title, except skill titles show only the skill name
 /// and fetch titles show the `url` param (which omits the title's mime
-/// suffix). Untitled calls show the first present key param.
-fn tool_body(title: &str, raw_input: Option<&serde_json::Value>) -> String {
+/// suffix). Bare placeholder titles fall back to the first present key
+/// param when one exists. Untitled calls show the first present key param.
+fn tool_body(title: &str, kind: Option<ToolKind>, raw_input: Option<&serde_json::Value>) -> String {
     let title = title.trim();
     if !title.is_empty() {
         if let Some(skill) = title.strip_prefix(SKILL_PREFIX) {
@@ -154,6 +176,11 @@ fn tool_body(title: &str, raw_input: Option<&serde_json::Value>) -> String {
         }
         if let Some(url) = raw_input.and_then(|input| first_line_param(input, "url")) {
             return url;
+        }
+        if bare_titles(kind).contains(&title)
+            && let Some(fallback) = fallback_body(raw_input)
+        {
+            return fallback;
         }
         return title.to_string();
     }
@@ -448,5 +475,92 @@ mod tests {
                 .status(ToolCallStatus::Completed);
             assert_eq!(format_tool_line(&call).text, expected, "{kind:?}");
         }
+    }
+
+    #[test]
+    fn bare_titles_fall_back_to_input_summary() {
+        let glob = ToolCall::new("id-1", "glob")
+            .kind(ToolKind::Search)
+            .raw_input(serde_json::json!({"pattern": "src/**/*.ts"}))
+            .status(ToolCallStatus::InProgress);
+        assert_eq!(format_tool_line(&glob).text, "search: src/**/*.ts …");
+
+        let read = ToolCall::new("id-1", "read")
+            .kind(ToolKind::Read)
+            .raw_input(serde_json::json!({"filePath": "/tmp/src/types.ts"}))
+            .status(ToolCallStatus::InProgress);
+        assert_eq!(format_tool_line(&read).text, "read: /tmp/src/types.ts …");
+
+        let bash = ToolCall::new("id-1", "bash")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({"command": "ls -la"}))
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&bash).text, "bash: ls -la");
+    }
+
+    #[test]
+    fn bare_grep_prefers_pattern_over_path() {
+        let grep = ToolCall::new("id-1", "grep")
+            .kind(ToolKind::Search)
+            .raw_input(serde_json::json!({"pattern": "ToolLineView", "path": "src"}))
+            .status(ToolCallStatus::InProgress);
+        assert_eq!(format_tool_line(&grep).text, "search: ToolLineView …");
+    }
+
+    #[test]
+    fn real_titles_stay_verbatim() {
+        let read = ToolCall::new("id-1", "src/types.ts")
+            .kind(ToolKind::Read)
+            .raw_input(serde_json::json!({"filePath": "/tmp/src/types.ts"}))
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&read).text, "read: src/types.ts");
+
+        let grep = ToolCall::new("id-1", "ToolLineView")
+            .kind(ToolKind::Search)
+            .raw_input(serde_json::json!({"pattern": "ToolLineView", "path": "src"}))
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&grep).text, "search: ToolLineView");
+
+        let bash = ToolCall::new("id-1", "ls -la")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({"command": "ls -la"}))
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&bash).text, "bash: ls -la");
+
+        let skill = ToolCall::new("id-1", "Loaded skill: repo-news")
+            .name("skill")
+            .kind(ToolKind::Other)
+            .raw_input(serde_json::json!({"skill": "repo-news"}))
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&skill).text, "skill: repo-news");
+
+        let fetch = ToolCall::new("id-1", "https://opencode.ai/docs (text/html)")
+            .kind(ToolKind::Fetch)
+            .raw_input(serde_json::json!({"url": "https://opencode.ai/docs"}))
+            .status(ToolCallStatus::Completed);
+        assert_eq!(
+            format_tool_line(&fetch).text,
+            "fetch: https://opencode.ai/docs"
+        );
+
+        let task = ToolCall::new("id-1", "Explore plans UI")
+            .name("task")
+            .kind(ToolKind::Other)
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&task).text, "task: Explore plans UI");
+    }
+
+    #[test]
+    fn bare_title_without_input_keeps_placeholder() {
+        let read = ToolCall::new("id-1", "read")
+            .kind(ToolKind::Read)
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&read).text, "read: read");
+
+        let ongoing = ToolCall::new("id-1", "glob")
+            .kind(ToolKind::Search)
+            .raw_input(serde_json::json!({"pattern": "src/**/*.ts"}))
+            .status(ToolCallStatus::Pending);
+        assert_eq!(format_tool_line(&ongoing).text, "search: src/**/*.ts …");
     }
 }
