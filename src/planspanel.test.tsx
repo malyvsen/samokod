@@ -1085,6 +1085,8 @@ describe("plans panel", () => {
 
 		test("plan menus float a bordered dropdown", () => {
 			const css = appCss();
+			const head = /\.phead\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(head).toContain("position: relative");
 			const top = /\.phead-top\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(top).toContain("position: relative");
 			const drop = /\.pdrop\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
