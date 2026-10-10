@@ -459,12 +459,34 @@ describe("transcript collapse", () => {
 
 	test("collapsed CSS caps the body with a fade", () => {
 		const css = readFileSync("src/App.css", "utf8");
+		const baseRule = /\.msg \.body\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(baseRule).not.toContain("overflow");
 		const collapsedRule =
 			/\.msg\.collapsed \.body\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 		expect(collapsedRule).toContain("max-height");
 		expect(collapsedRule).toContain("overflow: hidden");
 		expect(css).toContain(".msg.collapsed .body::after");
 		expect(css).toContain(".msg .who .right");
+	});
+});
+
+describe("transcript lists", () => {
+	test("message lists leave room for markers", () => {
+		const css = readFileSync("src/App.css", "utf8");
+		const listRule =
+			/\.msg \.body ol,\s*\.msg \.body ul\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(listRule).toContain("padding-left: 28px");
+	});
+
+	test("ten-item ordered list renders all items", () => {
+		const { container } = render(
+			agentTranscript(
+				"1. one\n2. two\n3. three\n4. four\n5. five\n6. six\n7. seven\n8. eight\n9. nine\n10. ten",
+			),
+		);
+		expect(container.querySelectorAll(".msg.agent .body ol li")).toHaveLength(
+			10,
+		);
 	});
 });
 

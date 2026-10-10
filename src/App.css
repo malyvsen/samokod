@@ -491,10 +491,6 @@ button.brand:hover {
 	align-items: center;
 }
 
-.msg .body {
-	overflow: hidden;
-}
-
 .msg.collapsed .body {
 	max-height: 96px;
 	overflow: hidden;
@@ -740,7 +736,7 @@ button.brand:hover {
 .msg .body ol,
 .msg .body ul {
 	margin: 8px 0 10px;
-	padding-left: 22px;
+	padding-left: 28px;
 }
 
 .msg .body li {
