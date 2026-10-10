@@ -177,7 +177,7 @@ describe("plans panel", () => {
 			render(<PlansPanel {...panelProps([executingPlan()], null)} />);
 			expect(
 				screen.getByRole("button", {
-					name: "Shiny, executing, No todos yet",
+					name: "Shiny, executing, opens Executing",
 				}),
 			).toBeInTheDocument();
 		});
@@ -186,8 +186,12 @@ describe("plans panel", () => {
 			const user = userEvent.setup();
 			for (const [plan, role, name] of [
 				[scopingPlan(), "scoping", /opens scoping$/i],
-				[executingPlan(), "executing", /executing, No todos yet$/i],
-				[evergreeningPlan(), "evergreening", /evergreening, No todos yet$/i],
+				[executingPlan(), "executing", /executing, opens Executing$/i],
+				[
+					evergreeningPlan(),
+					"evergreening",
+					/evergreening, opens Evergreening$/i,
+				],
 				[landingPlan(), "landing", /opens landing$/i],
 			] as const) {
 				const props = panelProps([plan], null);
@@ -209,7 +213,7 @@ describe("plans panel", () => {
 				/>,
 			);
 			const header = screen.getByRole("button", {
-				name: "Shiny, executing, No todos yet",
+				name: "Shiny, executing, opens Executing",
 			});
 			expect(header.className).toBe("plan-name");
 		});
@@ -364,7 +368,7 @@ describe("plans panel", () => {
 				role: "executing",
 			});
 			expect(
-				planGroup("Shiny, executing, No todos yet").querySelector(".pdrop"),
+				planGroup("Shiny, executing, opens Executing").querySelector(".pdrop"),
 			).toBeNull();
 		});
 
@@ -441,7 +445,7 @@ describe("plans panel", () => {
 				planGroupFor("Parallel sessions").querySelector(".pdrop"),
 			).not.toBeNull();
 			expect(
-				planGroup("Shiny, executing, No todos yet").querySelector(".pdrop"),
+				planGroup("Shiny, executing, opens Executing").querySelector(".pdrop"),
 			).toBeNull();
 			await user.click(
 				screen.getByRole("menuitemcheckbox", { name: "Evergreen" }),
@@ -455,7 +459,7 @@ describe("plans panel", () => {
 				planGroupFor("Parallel sessions").querySelector(".pdrop"),
 			).toBeNull();
 			expect(
-				planGroup("Shiny, executing, No todos yet").querySelector(".pdrop"),
+				planGroup("Shiny, executing, opens Executing").querySelector(".pdrop"),
 			).not.toBeNull();
 			await user.click(
 				screen.getByRole("menuitemcheckbox", { name: "Auto-advance" }),
@@ -495,7 +499,7 @@ describe("plans panel", () => {
 			).not.toBeNull();
 			await user.click(
 				screen.getByRole("button", {
-					name: "Shiny, executing, No todos yet",
+					name: "Shiny, executing, opens Executing",
 				}),
 			);
 			expect(
@@ -570,17 +574,12 @@ describe("plans panel", () => {
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
 			const header = screen.getByRole("button", {
-				name: "Shiny, executing, 2 of 5 todos done, 8m left",
+				name: "Shiny, executing, opens Executing",
 			});
-			expect(header).toHaveAttribute(
-				"data-full",
-				"Shiny - 2 of 5 todos done, 8m left",
-			);
+			expect(header).toHaveAttribute("data-full", "Shiny");
 			const group = header.closest(".plan-group") as HTMLElement;
 			expect(within(group).getByText("8m").className).toContain("pmeta");
-			expect(within(group).getByText("8m").getAttribute("title")).toBe(
-				"2 of 5 todos done, 8m left",
-			);
+			expect(within(group).getByText("8m").getAttribute("title")).toBeNull();
 			const bar = group.querySelector(".hbar-in") as HTMLElement;
 			expect(bar).not.toBeNull();
 			expect(bar.className).not.toContain("paused");
@@ -597,9 +596,9 @@ describe("plans panel", () => {
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
 			const header = screen.getByRole("button", {
-				name: "Shiny, executing, No todos yet",
+				name: "Shiny, executing, opens Executing",
 			});
-			expect(header).toHaveAttribute("data-full", "Shiny - No todos yet");
+			expect(header).toHaveAttribute("data-full", "Shiny");
 			const group = header.closest(".plan-group") as HTMLElement;
 			expect(group.querySelector(".pmeta")).toBeNull();
 			expect(
@@ -623,12 +622,9 @@ describe("plans panel", () => {
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
 			const header = screen.getByRole("button", {
-				name: "Shiny, executing, 0 of 5 todos done, estimating time",
+				name: "Shiny, executing, opens Executing",
 			});
-			expect(header).toHaveAttribute(
-				"data-full",
-				"Shiny - 0 of 5 todos done, estimating time",
-			);
+			expect(header).toHaveAttribute("data-full", "Shiny");
 			const group = header.closest(".plan-group") as HTMLElement;
 			expect(group.querySelector(".pmeta")).toBeNull();
 			expect(
@@ -651,9 +647,9 @@ describe("plans panel", () => {
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
 			const header = screen.getByRole("button", {
-				name: "Shiny, executing, 5 of 5 todos done",
+				name: "Shiny, executing, opens Executing",
 			});
-			expect(header).toHaveAttribute("data-full", "Shiny - 5 of 5 todos done");
+			expect(header).toHaveAttribute("data-full", "Shiny");
 			const group = header.closest(".plan-group") as HTMLElement;
 			expect(group.querySelector(".pmeta")).toBeNull();
 			const bar = group.querySelector(".hbar-in") as HTMLElement;
@@ -677,7 +673,7 @@ describe("plans panel", () => {
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
 			const header = screen.getByRole("button", {
-				name: "Shiny, executing, 2 of 5 todos done, 8m left",
+				name: "Shiny, executing, opens Executing",
 			});
 			const group = header.closest(".plan-group") as HTMLElement;
 			expect(within(group).getByText("8m")).toBeInTheDocument();
@@ -1156,7 +1152,7 @@ describe("plans panel", () => {
 					{...panelProps([plan], { plan: plan.name, role: "executing" })}
 				/>,
 			);
-			const group = planGroup("Shiny, executing, No todos yet");
+			const group = planGroup("Shiny, executing, opens Executing");
 			expect(group.querySelectorAll(".ngutter").length).toBe(2);
 			expect(group.querySelectorAll(".mgutter").length).toBe(1);
 			const gutters = group.querySelectorAll(".ngutter");
@@ -1201,7 +1197,7 @@ describe("plans panel", () => {
 					{...panelProps([plan], { plan: "broke", role: "scoping" })}
 				/>,
 			);
-			const group = planGroup("Broke, executing, No todos yet");
+			const group = planGroup("Broke, executing, opens Executing");
 			expect(group.querySelector(".mk-failed")).not.toBeNull();
 			expect(group.querySelector(".mgutter .v.c-sel")).not.toBeNull();
 			expect(group.querySelector(".ngutter .nd.sel")).not.toBeNull();

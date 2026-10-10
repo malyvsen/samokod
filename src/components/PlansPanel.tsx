@@ -197,8 +197,8 @@ function PlanHeader({
 					className="plan-name"
 					type="button"
 					onClick={() => onSelect(target)}
-					aria-label={`${plan.title}, ${plan.phase}, ${meta.tip}`}
-					data-full={`${plan.title} - ${meta.tip}`}
+					aria-label={`${plan.title}, ${plan.phase}, opens ${roleLabel(target.role)}`}
+					data-full={plan.title}
 				>
 					<span
 						className={`ptitle${attention === null ? "" : ` sheen-${attention}`}`}
@@ -206,9 +206,7 @@ function PlanHeader({
 						{plan.title}
 					</span>
 					{meta.text === null ? null : (
-						<span className="pmeta" title={meta.tip}>
-							{meta.text}
-						</span>
+						<span className="pmeta">{meta.text}</span>
 					)}
 				</button>
 				{controls}
