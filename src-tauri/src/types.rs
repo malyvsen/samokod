@@ -219,6 +219,7 @@ pub struct PlansUpdate {
     pub plans: Vec<PlanEntry>,
     pub selected: SessionKey,
     pub config_defaults: RepoDefaults,
+    pub scoping_preview: Option<String>,
 }
 
 /// Repository payload returned after opening a repo. No agents spawn here;
@@ -230,6 +231,7 @@ pub struct OpenRepoResult {
     pub plans: Vec<PlanEntry>,
     pub selected: SessionKey,
     pub config_defaults: RepoDefaults,
+    pub scoping_preview: Option<String>,
 }
 
 /// Frontend event envelope. One Tauri event name carries every variant so
@@ -331,6 +333,7 @@ pub enum AppEvent {
     PlansChanged {
         plans: Vec<PlanEntry>,
         selected: SessionKey,
+        scoping_preview: Option<String>,
     },
 }
 

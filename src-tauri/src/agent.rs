@@ -1636,6 +1636,54 @@ mod tests {
     }
 
     #[test]
+    fn payload_preview_follows_freshness_gate() {
+        use super::plans_list::preview_for;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let key = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Scoping,
+        };
+        let state = State {
+            pending_scoping: HashMap::from([(name.to_string(), None)]),
+            ..Default::default()
+        };
+        let preview = preview_for(&state, root, &key).expect("fresh pending renders");
+        assert!(preview.contains(".samokod/plans/scoping/2026-09-26.08-41-03"));
+
+        plans::materialize_scoping(root, name).expect("materialize");
+        std::fs::write(
+            root.join(".samokod/plans/scoping/2026-09-26.08-41-03/plan.md"),
+            "# T\n",
+        )
+        .expect("write");
+        assert_eq!(preview_for(&State::default(), root, &key), None);
+
+        let mut prompted = State::default();
+        plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("materialize");
+        let other = SessionKey {
+            plan: "2026-09-26.08-41-04".to_string(),
+            role: SessionRole::Scoping,
+        };
+        prompted.prompted.insert(other.plan.clone());
+        assert_eq!(preview_for(&prompted, root, &other), None);
+
+        let executing = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Executing,
+        };
+        assert_eq!(preview_for(&State::default(), root, &executing), None);
+
+        let gone = SessionKey {
+            plan: "2026-09-26.08-41-99".to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert_eq!(preview_for(&State::default(), root, &gone), None);
+    }
+
+    #[test]
     fn plan_md_text_reads_live_file_or_none() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();

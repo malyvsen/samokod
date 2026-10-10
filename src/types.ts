@@ -90,6 +90,7 @@ export interface PlansUpdate {
 	plans: PlanEntry[];
 	selected: SessionKey;
 	config_defaults: RepoDefaults;
+	scopingPreview: string | null;
 }
 
 export interface OpenRepoResult {
@@ -98,6 +99,7 @@ export interface OpenRepoResult {
 	plans: PlanEntry[];
 	selected: SessionKey;
 	config_defaults: RepoDefaults;
+	scopingPreview: string | null;
 }
 
 export interface RecentRepo {
@@ -189,7 +191,12 @@ export type AppEvent =
 			retryable: boolean;
 	  }
 	| { type: "branch_changed"; branch: string }
-	| { type: "plans_changed"; plans: PlanEntry[]; selected: SessionKey };
+	| {
+			type: "plans_changed";
+			plans: PlanEntry[];
+			selected: SessionKey;
+			scopingPreview: string | null;
+	  };
 
 export type TranscriptItem =
 	| { kind: "user"; id: string; text: string }

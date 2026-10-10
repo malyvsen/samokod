@@ -52,6 +52,7 @@ describe("plan", () => {
 				testEntry("2026-09-25.10-54-59.slug", "executing", "Shiny", true),
 			],
 			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
+			scopingPreview: null,
 		});
 		expect(screen.getByText("Shiny")).toBeInTheDocument();
 		expect(screen.getByText("Scoping")).toBeInTheDocument();
@@ -240,6 +241,7 @@ describe("plan", () => {
 				testEntry("bbb", "scoping", "Beta", true),
 			],
 			selected: { plan: "bbb", role: "scoping" },
+			scopingPreview: null,
 		});
 		expect(screen.getByText("aaa chat")).toBeInTheDocument();
 		expect(screen.queryByText("bbb chat")).not.toBeInTheDocument();
@@ -422,6 +424,7 @@ describe("plan", () => {
 			type: "plans_changed",
 			plans: [testEntry("bbb", "scoping", "Beta", true)],
 			selected: { plan: "bbb", role: "scoping" },
+			scopingPreview: null,
 		});
 		await screen.findByText("bbb chat");
 		expect(screen.queryByText("aaa chat")).not.toBeInTheDocument();
@@ -490,6 +493,7 @@ describe("plan", () => {
 			type: "plans_changed",
 			plans: [testEntry()],
 			selected: { plan: "other-plan", role: "scoping" },
+			scopingPreview: null,
 		});
 		expect(document.activeElement).toBe(box);
 		expect(textbox()).toBeInTheDocument();

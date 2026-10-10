@@ -14,6 +14,7 @@ use crate::types::{
 };
 
 use super::AgentManager;
+use super::scoping_template_for;
 use super::session::LiveSession;
 use super::{State, emit_event, lock_state};
 
@@ -32,12 +33,14 @@ impl AgentManager {
             role: SessionRole::Scoping,
         });
         let config_defaults = defaults_for(&repo_root);
+        let scoping_preview = preview_for(&state, &repo_root, &selected);
         OpenRepoResult {
             repo_root: repo_root.to_string_lossy().to_string(),
             branch,
             plans,
             selected,
             config_defaults,
+            scoping_preview,
         }
     }
 
@@ -57,10 +60,12 @@ impl AgentManager {
             })
         });
         let config_defaults = defaults_for(&repo_root);
+        let scoping_preview = preview_for(&state, &repo_root, &selected);
         PlansUpdate {
             plans,
             selected,
             config_defaults,
+            scoping_preview,
         }
     }
 
@@ -71,6 +76,7 @@ impl AgentManager {
             AppEvent::PlansChanged {
                 plans: update.plans,
                 selected: update.selected,
+                scoping_preview: update.scoping_preview,
             },
         );
     }
@@ -305,15 +311,29 @@ pub(crate) fn most_recent_key(plans: &[PlanEntry]) -> Option<SessionKey> {
     })
 }
 
+/// Scoping preview for the selected session. List payloads stay infallible:
+/// a gone plan yields no preview instead of an error. Pure except disk reads
+/// inside the gate.
+pub(crate) fn preview_for(
+    state: &State,
+    repo_root: &Path,
+    selected: &SessionKey,
+) -> Option<String> {
+    scoping_template_for(state, repo_root, selected).unwrap_or(None)
+}
+
 /// Rebuild the plans list from a spawned task holding only state and app.
 /// Titles re-read here, so every finished turn refreshes plan names.
 pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
-    let (plans, selected) = match state.lock() {
+    let (plans, selected, scoping_preview) = match state.lock() {
         Ok(guard) => {
             let repo_root = guard.repo_root.clone().unwrap_or_default();
             let plans = sorted_entries(&repo_root, &guard.sessions, &guard.pending_scoping);
             let selected = guard.current.clone().or_else(|| most_recent_key(&plans));
-            (plans, selected)
+            let scoping_preview = selected
+                .as_ref()
+                .and_then(|selected| preview_for(&guard, &repo_root, selected));
+            (plans, selected, scoping_preview)
         }
         Err(error) => {
             log::warn!("failed to rebuild plans list: {error}");
@@ -321,7 +341,14 @@ pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
         }
     };
     if let Some(selected) = selected {
-        emit_event(app, AppEvent::PlansChanged { plans, selected });
+        emit_event(
+            app,
+            AppEvent::PlansChanged {
+                plans,
+                selected,
+                scoping_preview,
+            },
+        );
     }
 }
 
