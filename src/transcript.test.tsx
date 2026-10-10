@@ -441,3 +441,21 @@ describe("transcript collapse", () => {
 		expect(css).toContain(".msg .who .right");
 	});
 });
+
+describe("transcript width", () => {
+	test("bubbles stay inside the transcript column", () => {
+		const css = readFileSync("src/App.css", "utf8");
+		const msgRule = /\.msg\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(msgRule).toMatch(/max-width:\s*min\(880px,\s*100%\)/);
+		const approvalRule = /\.approval\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(approvalRule).toMatch(/max-width:\s*min\(880px,\s*100%\)/);
+	});
+
+	test("transcript centering stays overflow-safe", () => {
+		const css = readFileSync("src/App.css", "utf8");
+		const transcriptRule = /\.transcript\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(transcriptRule).not.toMatch(/align-items:\s*center/);
+		const columnRule = /\.tcol\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(columnRule).toMatch(/margin:\s*0\s+auto/);
+	});
+});
