@@ -110,7 +110,7 @@ pub struct PlanState {
     pub prompted: bool,
 }
 
-fn default_evergreen() -> bool {
+pub(crate) fn default_evergreen() -> bool {
     true
 }
 

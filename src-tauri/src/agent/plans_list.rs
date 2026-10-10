@@ -114,6 +114,13 @@ impl AgentManager {
     }
 }
 
+/// Manual and evergreen flags for one plan row, read together from a
+/// single `load_state` so adding a flag never needs a new disk read.
+pub(crate) struct PlanFlags {
+    pub manual: bool,
+    pub evergreen: bool,
+}
+
 /// Plans sorted by phase, then phase-entry arrival newest first, then
 /// name descending. Each pending name missing on disk appends a synthetic
 /// scoping `PlanRef`; with no timestamp it orders by name, newest first.
@@ -145,14 +152,17 @@ pub(crate) fn sorted_entries(
     });
     plans
         .iter()
-        .map(|plan| PlanEntry {
-            name: plan.name.clone(),
-            phase: plan.phase,
-            title: entry_title(repo_root, plan, pending),
-            has_plan_md: plan.has_plan_md(repo_root),
-            sessions: session_statuses(repo_root, plan, sessions),
-            manual: entry_manual(repo_root, plan),
-            evergreen: entry_evergreen(repo_root, plan),
+        .map(|plan| {
+            let flags = entry_flags(repo_root, plan);
+            PlanEntry {
+                name: plan.name.clone(),
+                phase: plan.phase,
+                title: entry_title(repo_root, plan, pending),
+                has_plan_md: plan.has_plan_md(repo_root),
+                sessions: session_statuses(repo_root, plan, sessions),
+                manual: flags.manual,
+                evergreen: flags.evergreen,
+            }
         })
         .collect()
 }
@@ -180,22 +190,20 @@ fn entry_title(
     "Untitled".to_string()
 }
 
-/// Manual flag from disk state; pending names with no directory stay
-/// automatic. Pure except the state read.
-fn entry_manual(repo_root: &Path, plan: &plans::PlanRef) -> bool {
+/// Manual and evergreen flags from disk state in one read; pending names
+/// with no directory stay automatic and evergreen. Pure except the read.
+fn entry_flags(repo_root: &Path, plan: &plans::PlanRef) -> PlanFlags {
     if !plan.path(repo_root).is_dir() {
-        return false;
+        return PlanFlags {
+            manual: false,
+            evergreen: true,
+        };
     }
-    plans::load_state(&plan.path(repo_root)).manual
-}
-
-/// Evergreen intent from disk state; pending names with no directory stay
-/// evergreen. Pure except the state read.
-fn entry_evergreen(repo_root: &Path, plan: &plans::PlanRef) -> bool {
-    if !plan.path(repo_root).is_dir() {
-        return true;
+    let stored = plans::load_state(&plan.path(repo_root));
+    PlanFlags {
+        manual: stored.manual,
+        evergreen: stored.evergreen,
     }
-    plans::load_state(&plan.path(repo_root)).evergreen
 }
 
 /// One status row per session a plan owns, from `roles_for`: scoping

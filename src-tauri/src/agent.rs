@@ -593,23 +593,8 @@ impl AgentManager {
         plan: String,
         manual: bool,
     ) -> Result<PlansUpdate, AgentError> {
-        let (repo_root, _) = self
-            .reopen_snapshot()
-            .ok_or_else(|| AgentError::NoSession {
-                raw: "open a repository first".to_string(),
-            })?;
-        let Some(plan_dir) = session_ids::locate(&repo_root, &plan) else {
-            return Err(AgentError::NoSession {
-                raw: "plan is gone".to_string(),
-            });
-        };
-        let mut state = plans::load_state(&plan_dir);
-        state.manual = manual;
-        plans::store_state(&plan_dir, &state);
-        if !manual {
-            self.pump().await;
-        }
-        Ok(self.plans_update())
+        self.update_plan_state(plan, |state| state.manual = manual, |_| !manual)
+            .await
     }
 
     /// Flip one plan's evergreen intent. Persists `evergreen` into
@@ -620,6 +605,23 @@ impl AgentManager {
         &self,
         plan: String,
         evergreen: bool,
+    ) -> Result<PlansUpdate, AgentError> {
+        self.update_plan_state(
+            plan,
+            |state| state.evergreen = evergreen,
+            |state| !state.manual,
+        )
+        .await
+    }
+
+    /// Shared plan-state mutator for the mode and evergreen setters:
+    /// locate plus load plus mutate plus store, then a conditional pump
+    /// and the refreshed list. Pure except the disk and pump effects.
+    async fn update_plan_state(
+        &self,
+        plan: String,
+        mutate: impl FnOnce(&mut plans::PlanState),
+        should_pump: impl FnOnce(&plans::PlanState) -> bool,
     ) -> Result<PlansUpdate, AgentError> {
         let (repo_root, _) = self
             .reopen_snapshot()
@@ -632,9 +634,10 @@ impl AgentManager {
             });
         };
         let mut state = plans::load_state(&plan_dir);
-        state.evergreen = evergreen;
+        mutate(&mut state);
+        let pump = should_pump(&state);
         plans::store_state(&plan_dir, &state);
-        if !state.manual {
+        if pump {
             self.pump().await;
         }
         Ok(self.plans_update())

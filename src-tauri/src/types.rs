@@ -199,12 +199,8 @@ pub struct PlanEntry {
     pub manual: bool,
     /// Evergreen intent: true cleans up after executing, false lands
     /// straight from executing. The single copy lives in `PlanState`.
-    #[serde(default = "default_evergreen_true")]
+    #[serde(default = "crate::plans::default_evergreen")]
     pub evergreen: bool,
-}
-
-fn default_evergreen_true() -> bool {
-    true
 }
 
 /// Stored model/effort defaults for the instant disabled picker paint.
@@ -412,5 +408,34 @@ mod tests {
             value.get("chunk").and_then(|v| v.as_str()),
             Some("considering")
         );
+    }
+
+    #[test]
+    fn plan_entry_json_field_names() {
+        let entry = PlanEntry {
+            name: "2026-09-26.08-41-03".to_string(),
+            phase: crate::plans::Phase::Scoping,
+            title: "Untitled".to_string(),
+            has_plan_md: false,
+            sessions: Vec::new(),
+            manual: false,
+            evergreen: true,
+        };
+        let value = serde_json::to_value(&entry).expect("serializes");
+        let actual: std::collections::BTreeSet<String> =
+            value.as_object().expect("object").keys().cloned().collect();
+        let expected: std::collections::BTreeSet<String> = [
+            "name",
+            "phase",
+            "title",
+            "has_plan_md",
+            "sessions",
+            "manual",
+            "evergreen",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+        assert_eq!(actual, expected);
     }
 }
