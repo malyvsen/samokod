@@ -32,7 +32,7 @@ Note that when this prompt tells you to consider doing something, it does not ne
 # Scope
 The scope is this worktree. The commits listed above and the plan show what was done and what was intended. Consider the edited code plus adjacent and related content.
 
-# When done
-Use TODOs to track progress in detail - at least one TODO per cleanup area, but more are encouraged.
+# Instructions
+Use TODOs to track progress - make them detailed if possible.
 
-When every cleanup is done, summarize what you did and stop. Leave the worktree clean - do not start landing.
+When you are done, commit, summarize what you did, and stop.
