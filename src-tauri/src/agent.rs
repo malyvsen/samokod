@@ -94,6 +94,9 @@ pub(crate) fn is_empty_scoping(state: &State, repo_root: &Path, name: &str) -> b
     if state.prompted.contains(name) {
         return false;
     }
+    if plans::load_state(&plan.path(repo_root)).prompted {
+        return false;
+    }
     let key = SessionKey {
         plan: name.to_string(),
         role: SessionRole::Scoping,
@@ -107,6 +110,23 @@ pub(crate) fn is_empty_scoping(state: &State, repo_root: &Path, name: &str) -> b
         return false;
     }
     true
+}
+
+/// Persist the prompted flag for the empty-scoping gate inside the plan's
+/// `state.json`, wherever the plan currently lives. Best-effort: a missing
+/// directory (diskless pending session) skips quietly like
+/// `session_ids::record`, an unchanged flag skips the rewrite, and other
+/// failures log while the in-memory flag still applies.
+pub(crate) fn persist_prompted(repo_root: &Path, name: &str) {
+    let Some(plan_dir) = session_ids::locate(repo_root, name) else {
+        return;
+    };
+    let mut stored = plans::load_state(&plan_dir);
+    if stored.prompted {
+        return;
+    }
+    stored.prompted = true;
+    plans::store_state(&plan_dir, &stored);
 }
 
 /// Discard an empty scoping session without a `cancelled/` trace:
@@ -1421,6 +1441,34 @@ mod tests {
         )
         .expect("write");
         assert!(!is_empty_scoping(&state, root, "2026-09-26.08-41-04"));
+    }
+
+    #[test]
+    fn persist_prompted_writes_flag_to_state_json() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        plans::materialize_scoping(root, name).expect("materialize");
+        let plan = plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Scoping,
+        };
+        assert!(!plans::load_state(&plan.path(root)).prompted);
+        persist_prompted(root, name);
+        assert!(plans::load_state(&plan.path(root)).prompted);
+    }
+
+    #[test]
+    fn empty_gate_survives_restart_via_persisted_flag() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        plans::materialize_scoping(root, name).expect("materialize");
+        persist_prompted(root, name);
+        let state = State::default();
+        assert!(!is_empty_scoping(&state, root, name));
     }
 
     #[test]

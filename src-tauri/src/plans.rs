@@ -104,6 +104,10 @@ pub struct PlanState {
     /// `state.json` from scoping onward.
     #[serde(default = "default_evergreen")]
     pub evergreen: bool,
+    /// A user prompt was sent; set once, travels with renames inside
+    /// `state.json`.
+    #[serde(default)]
+    pub prompted: bool,
 }
 
 fn default_evergreen() -> bool {
@@ -121,6 +125,7 @@ impl Default for PlanState {
             working_title: None,
             manual: false,
             evergreen: true,
+            prompted: false,
         }
     }
 }
@@ -635,6 +640,24 @@ mod tests {
         )
         .expect("write old state");
         assert!(load_state(&plan.path(root)).evergreen);
+    }
+
+    #[test]
+    fn legacy_state_without_prompted_defaults_to_false() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let plan = PlanRef {
+            name: "2026-09-26.08-41-03".to_string(),
+            phase: Phase::Scoping,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        std::fs::write(
+            plan.path(root).join(STATE_FILE),
+            r#"{"scoping":"ses_old","entered_at":123}"#,
+        )
+        .expect("write old state");
+        assert!(!load_state(&plan.path(root)).prompted);
     }
 
     #[test]
