@@ -1092,6 +1092,13 @@ describe("plans panel", () => {
 			const drop = /\.pdrop\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(drop).toContain("position: absolute");
 			expect(drop).toContain("rgba(8, 8, 12, 0.96)");
+			const tooltip =
+				/\.plan-name\[data-full\]:hover::after\s*\{[^}]*\}/.exec(css)?.[0] ??
+				"";
+			expect(tooltip).toContain("pointer-events: none");
+			const dropZ = Number(/z-index:\s*(\d+)/.exec(drop)?.[1] ?? "0");
+			const tipZ = Number(/z-index:\s*(\d+)/.exec(tooltip)?.[1] ?? "0");
+			expect(dropZ).toBeGreaterThan(tipZ);
 			const sep = /\.dsep\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(sep).toContain("rgba(255, 255, 255, 0.12)");
 			const mark = /\.pdrop\s+\.mark\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
