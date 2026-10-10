@@ -1327,11 +1327,13 @@ button.brand:hover {
 	--sheen: #57c8ff;
 	background-image: linear-gradient(
 		100deg,
-		var(--sheen) 30%,
-		#fff 48%,
-		var(--sheen) 62%
+		var(--sheen) 0%,
+		var(--sheen) 40%,
+		#fff 50%,
+		var(--sheen) 60%,
+		var(--sheen) 100%
 	);
-	background-size: 220% 100%;
+	background-size: 300% 100%;
 	background-repeat: no-repeat;
 	background-clip: text;
 	-webkit-background-clip: text;
@@ -1353,10 +1355,10 @@ button.brand:hover {
 
 @keyframes sheen {
 	from {
-		background-position: 165% 0;
+		background-position: 100% 0;
 	}
 	to {
-		background-position: -75% 0;
+		background-position: 0% 0;
 	}
 }
 
