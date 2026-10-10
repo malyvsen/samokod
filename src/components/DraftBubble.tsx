@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useRef } from "react";
+import type { SessionKey } from "../types";
+import {
+	collectDropImages,
+	collectPasteImages,
+	handleImageFiles,
+} from "./attachments";
 import {
 	applyInitialText,
 	extractText,
@@ -9,15 +15,19 @@ import {
 export function DraftBubble({
 	initialText,
 	placeholder = "Ask for a change…",
+	session,
 	onSend,
 	onEdit,
 	onInput,
+	onAttachmentError,
 }: {
 	initialText?: string | undefined;
 	placeholder?: string;
+	session: SessionKey;
 	onSend: (text: string) => void;
 	onEdit: () => void;
 	onInput?: ((text: string) => void) | undefined;
+	onAttachmentError: (message: string) => void;
 }) {
 	const ref = useRef<HTMLDivElement | null>(null);
 	const edited = useRef(false);
@@ -49,6 +59,12 @@ export function DraftBubble({
 		onEdit();
 	}
 
+	function syncAfterAttachment(text: string): void {
+		edited.current = true;
+		onInput?.(text);
+		onEdit();
+	}
+
 	return (
 		<div className="msg user draft">
 			<div className="who">YOU</div>
@@ -68,9 +84,34 @@ export function DraftBubble({
 					send();
 				}}
 				onPaste={(event) => {
+					const images = collectPasteImages(event.clipboardData);
+					if (images.length > 0) {
+						event.preventDefault();
+						const node = ref.current;
+						if (node === null) return;
+						void handleImageFiles(node, session, images, {
+							onInput: syncAfterAttachment,
+							onError: onAttachmentError,
+						});
+						return;
+					}
 					event.preventDefault();
 					insertPlainText(event.clipboardData.getData("text/plain"));
 					handleInput();
+				}}
+				onDragOver={(event) => {
+					event.preventDefault();
+				}}
+				onDrop={(event) => {
+					event.preventDefault();
+					const images = collectDropImages(event.dataTransfer.files);
+					if (images.length === 0) return;
+					const node = ref.current;
+					if (node === null) return;
+					void handleImageFiles(node, session, images, {
+						onInput: syncAfterAttachment,
+						onError: onAttachmentError,
+					});
 				}}
 			/>
 		</div>

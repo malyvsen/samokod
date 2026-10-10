@@ -1,5 +1,11 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import type { QueuedMessage, QueueMoveDirection } from "../sessions/queue";
+import type { SessionKey } from "../types";
+import {
+	collectDropImages,
+	collectPasteImages,
+	handleImageFiles,
+} from "./attachments";
 import { CollapseControl, isLongMessage, useCollapsed } from "./collapsible";
 import {
 	extractText,
@@ -23,18 +29,22 @@ export function QueuedBubbleList({
 	items,
 	editingId,
 	editingBlocked,
+	session,
 	onEdit,
 	onCommit,
 	onCancel,
 	onMove,
+	onAttachmentError,
 }: {
 	items: QueuedMessage[];
 	editingId: string | null;
 	editingBlocked: boolean;
+	session: SessionKey;
 	onEdit: (id: string) => void;
 	onCommit: (id: string, text: string) => void;
 	onCancel: () => void;
 	onMove: (id: string, direction: QueueMoveDirection) => void;
+	onAttachmentError: (message: string) => void;
 }) {
 	if (items.length === 0) return null;
 	const showControls = items.length > 1;
@@ -57,8 +67,10 @@ export function QueuedBubbleList({
 						text={item.text}
 						blocked={editingBlocked}
 						controls={controls}
+						session={session}
 						onCommit={(text) => onCommit(item.id, text)}
 						onCancel={onCancel}
+						onAttachmentError={onAttachmentError}
 					/>
 				) : (
 					<QueuedBubble
@@ -118,14 +130,18 @@ function QueuedBubbleEditor({
 	text,
 	blocked,
 	controls,
+	session,
 	onCommit,
 	onCancel,
+	onAttachmentError,
 }: {
 	text: string;
 	blocked: boolean;
 	controls: QueuedHeaderControls;
+	session: SessionKey;
 	onCommit: (text: string) => void;
 	onCancel: () => void;
+	onAttachmentError: (message: string) => void;
 }) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const ref = useRef<HTMLDivElement | null>(null);
@@ -173,8 +189,31 @@ function QueuedBubbleEditor({
 					commit();
 				}}
 				onPaste={(event) => {
+					const images = collectPasteImages(event.clipboardData);
+					if (images.length > 0) {
+						event.preventDefault();
+						const node = ref.current;
+						if (node === null) return;
+						void handleImageFiles(node, session, images, {
+							onError: onAttachmentError,
+						});
+						return;
+					}
 					event.preventDefault();
 					insertPlainText(event.clipboardData.getData("text/plain"));
+				}}
+				onDragOver={(event) => {
+					event.preventDefault();
+				}}
+				onDrop={(event) => {
+					event.preventDefault();
+					const images = collectDropImages(event.dataTransfer.files);
+					if (images.length === 0) return;
+					const node = ref.current;
+					if (node === null) return;
+					void handleImageFiles(node, session, images, {
+						onError: onAttachmentError,
+					});
 				}}
 				onBlur={(event) => {
 					if (

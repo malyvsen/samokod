@@ -409,6 +409,12 @@ export function App() {
 		}));
 	}
 
+	function handleAttachmentError(message: string) {
+		const key = selectedRef.current;
+		if (key === null) return;
+		appendError(key, message, "image not saved - try again", false);
+	}
+
 	async function handleSend(text: string) {
 		const key = selectedRef.current;
 		if (text === "" || readOnly || key === null) return;
@@ -765,16 +771,18 @@ export function App() {
 											: null
 									}
 								>
-									{selectedId !== null && !readOnly && (
+									{selectedKey !== null && !readOnly && (
 										<>
 											<QueuedBubbleList
 												items={queue.items}
 												editingId={queue.editingId}
 												editingBlocked={editingBlocked}
+												session={selectedKey}
 												onEdit={handleQueueEdit}
 												onCommit={handleQueueCommit}
 												onCancel={handleQueueCancel}
 												onMove={handleQueueMove}
+												onAttachmentError={handleAttachmentError}
 											/>
 											<DraftBubble
 												key={selectedId}
@@ -782,9 +790,11 @@ export function App() {
 												placeholder={
 													busy ? "Queue a follow-up…" : "Ask for a change…"
 												}
+												session={selectedKey}
 												onSend={handleSend}
 												onEdit={notifyEdit}
 												onInput={draft.onDraftInput}
+												onAttachmentError={handleAttachmentError}
 											/>
 										</>
 									)}

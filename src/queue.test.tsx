@@ -565,10 +565,12 @@ describe("queued collapse", () => {
 				]}
 				editingId={null}
 				editingBlocked={false}
+				session={testKey()}
 				onEdit={vi.fn()}
 				onCommit={vi.fn()}
 				onCancel={vi.fn()}
 				onMove={vi.fn()}
+				onAttachmentError={vi.fn()}
 			/>,
 		);
 		const bubbles = container.querySelectorAll(".msg.user.queued");
@@ -598,10 +600,12 @@ describe("queued collapse", () => {
 				items={[{ id: "q1", text: longText }]}
 				editingId={null}
 				editingBlocked={false}
+				session={testKey()}
 				onEdit={onEdit}
 				onCommit={vi.fn()}
 				onCancel={vi.fn()}
 				onMove={vi.fn()}
+				onAttachmentError={vi.fn()}
 			/>,
 		);
 		const bubble = container.querySelector(".msg.user.queued");

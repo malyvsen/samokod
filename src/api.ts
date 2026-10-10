@@ -63,6 +63,13 @@ export function sendPrompt(session: SessionKey, text: string): Promise<void> {
 	return invoke("send_prompt", { session, text });
 }
 
+export function saveAttachment(
+	session: SessionKey,
+	dataBase64: string,
+): Promise<string> {
+	return invoke<string>("save_attachment", { session, dataBase64 });
+}
+
 export function scopingTemplate(session: SessionKey): Promise<string | null> {
 	return invoke<string | null>("scoping_template", { session });
 }

@@ -4,6 +4,7 @@ import {
 	executePlan,
 	loadHistory,
 	onAppEvent,
+	saveAttachment,
 	selectPlan,
 	setGlobalConfigOption,
 	setPlanEvergreen,
@@ -116,6 +117,15 @@ describe("session commands", () => {
 		await loadHistory(testKey());
 		expect(invoke).toHaveBeenCalledWith("load_history", {
 			session: testKey(),
+		});
+	});
+
+	test("save_attachment sends camelCase data", async () => {
+		vi.mocked(invoke).mockResolvedValue("/abs/paste-1-0.png");
+		await saveAttachment(testKey(), "aGVsbG8=");
+		expect(invoke).toHaveBeenCalledWith("save_attachment", {
+			session: testKey(),
+			dataBase64: "aGVsbG8=",
 		});
 	});
 });

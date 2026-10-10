@@ -21,6 +21,7 @@ export const api = {
 	setGlobalConfigOption: vi.fn(),
 	setPlanMode: vi.fn(),
 	setPlanEvergreen: vi.fn(),
+	saveAttachment: vi.fn(),
 	warmSession: vi.fn(),
 	loadHistory: vi.fn(),
 	scopingTemplate: vi.fn(),
