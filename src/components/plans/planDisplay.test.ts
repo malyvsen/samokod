@@ -309,7 +309,6 @@ describe("headerMeta", () => {
 			text: null,
 			pct: 0,
 			barClass: "",
-			tip: "No todos yet",
 		});
 	});
 
@@ -318,7 +317,6 @@ describe("headerMeta", () => {
 			text: null,
 			pct: 0,
 			barClass: "",
-			tip: "0 of 5 todos done, estimating time",
 		});
 	});
 
@@ -327,7 +325,6 @@ describe("headerMeta", () => {
 			text: "8m",
 			pct: 40,
 			barClass: "",
-			tip: "2 of 5 todos done, 8m left",
 		});
 	});
 
@@ -337,7 +334,6 @@ describe("headerMeta", () => {
 			expect(meta.text).toBe("8m");
 			expect(meta.pct).toBe(40);
 			expect(meta.barClass).toBe("paused");
-			expect(meta.tip).toBe("2 of 5 todos done, 8m left");
 		}
 	});
 
@@ -346,7 +342,6 @@ describe("headerMeta", () => {
 			text: null,
 			pct: 100,
 			barClass: "",
-			tip: "5 of 5 todos done",
 		});
 	});
 });

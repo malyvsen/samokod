@@ -88,7 +88,6 @@ export interface HeaderMeta {
 	text: string | null;
 	pct: number;
 	barClass: string;
-	tip: string;
 }
 
 export function headerMeta(
@@ -100,7 +99,6 @@ export function headerMeta(
 			text: null,
 			pct: 0,
 			barClass: attention === null ? "" : "paused",
-			tip: "No todos yet",
 		};
 	}
 	const done = progress.done >= progress.total;
@@ -109,7 +107,6 @@ export function headerMeta(
 			text: null,
 			pct: 100,
 			barClass: "",
-			tip: `${progress.done} of ${progress.total} todos done`,
 		};
 	}
 	const pct = Math.round((progress.done / progress.total) * 100);
@@ -118,7 +115,6 @@ export function headerMeta(
 			text: null,
 			pct,
 			barClass: attention === null ? "" : "paused",
-			tip: `${progress.done} of ${progress.total} todos done, estimating time`,
 		};
 	}
 	const text = formatEta(progress.etaSecs);
@@ -126,7 +122,6 @@ export function headerMeta(
 		text,
 		pct,
 		barClass: attention === null ? "" : "paused",
-		tip: `${progress.done} of ${progress.total} todos done, ${text} left`,
 	};
 }
 
