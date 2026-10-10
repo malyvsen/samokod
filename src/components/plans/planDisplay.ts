@@ -53,13 +53,13 @@ export function attentionFor(plan: PlanEntry): AttentionKind | null {
 	return "idle";
 }
 
-export interface ExecutingProgress {
+export interface HeaderProgress {
 	done: number;
 	total: number;
 	etaSecs: number | null;
 }
 
-export function executingProgress(plan: PlanEntry): ExecutingProgress | null {
+export function todoProgress(plan: PlanEntry): HeaderProgress | null {
 	if (plan.phase !== "executing" && plan.phase !== "evergreening") {
 		return null;
 	}
@@ -77,6 +77,10 @@ export function executingProgress(plan: PlanEntry): ExecutingProgress | null {
 	};
 }
 
+export function headerProgress(plan: PlanEntry): HeaderProgress | null {
+	return todoProgress(plan);
+}
+
 export function formatEta(secs: number): string {
 	if (secs >= 3600) {
 		return `${Math.floor(secs / 3600)}h`;
@@ -91,7 +95,7 @@ export interface HeaderMeta {
 }
 
 export function headerMeta(
-	progress: ExecutingProgress,
+	progress: HeaderProgress,
 	attention: AttentionKind | null,
 ): HeaderMeta {
 	const paused = attention === null ? "" : "paused";

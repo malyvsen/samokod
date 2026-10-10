@@ -4,14 +4,15 @@ import type { PlanEntry, PlanPhase, SessionStatusView } from "../../types";
 import {
 	attentionFor,
 	attentionTitle,
-	executingProgress,
 	formatEta,
 	headerKey,
 	headerMeta,
+	headerProgress,
 	latestRole,
 	openPathFor,
 	PHASES,
 	roleLabel,
+	todoProgress,
 } from "./planDisplay";
 
 function plan(
@@ -222,13 +223,13 @@ describe("roleLabel", () => {
 	});
 });
 
-describe("executingProgress", () => {
+describe("todoProgress", () => {
 	test("returns null outside executing and evergreening", () => {
 		expect(
-			executingProgress(plan("a", "scoping", [testStatus("scoping")])),
+			todoProgress(plan("a", "scoping", [testStatus("scoping")])),
 		).toBeNull();
 		expect(
-			executingProgress(
+			todoProgress(
 				plan("a", "landing", [
 					testStatus("scoping"),
 					testStatus("executing"),
@@ -241,7 +242,7 @@ describe("executingProgress", () => {
 
 	test("missing progress counts as empty", () => {
 		expect(
-			executingProgress(
+			todoProgress(
 				plan("a", "executing", [
 					testStatus("scoping"),
 					testStatus("executing"),
@@ -249,7 +250,7 @@ describe("executingProgress", () => {
 			),
 		).toEqual({ done: 0, total: 0, etaSecs: null });
 		expect(
-			executingProgress(
+			todoProgress(
 				plan("a", "evergreening", [
 					testStatus("scoping"),
 					testStatus("executing"),
@@ -266,7 +267,7 @@ describe("executingProgress", () => {
 				progress: { done: 2, total: 5, eta_secs: 480 },
 			}),
 		]);
-		expect(executingProgress(entry)).toEqual({
+		expect(todoProgress(entry)).toEqual({
 			done: 2,
 			total: 5,
 			etaSecs: 480,
@@ -281,11 +282,26 @@ describe("executingProgress", () => {
 				progress: { done: 1, total: 4, eta_secs: 120 },
 			}),
 		]);
-		expect(executingProgress(entry)).toEqual({
+		expect(todoProgress(entry)).toEqual({
 			done: 1,
 			total: 4,
 			etaSecs: 120,
 		});
+	});
+});
+
+describe("headerProgress", () => {
+	test("delegates to todo progress for now", () => {
+		const entry = plan("a", "executing", [
+			testStatus("scoping"),
+			testStatus("executing", {
+				progress: { done: 2, total: 5, eta_secs: 480 },
+			}),
+		]);
+		expect(headerProgress(entry)).toEqual(todoProgress(entry));
+		expect(
+			headerProgress(plan("a", "landing", [testStatus("scoping")])),
+		).toBeNull();
 	});
 });
 

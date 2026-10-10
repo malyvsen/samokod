@@ -5,9 +5,9 @@ import {
 	type AttentionKind,
 	attentionFor,
 	attentionTitle,
-	executingProgress,
 	headerKey,
 	headerMeta,
+	headerProgress,
 	openPathFor,
 	PHASES,
 	roleLabel,
@@ -157,7 +157,7 @@ function PlanHeader({
 	onSetMode: (plan: string, manual: boolean) => void;
 	onSetEvergreen: (plan: string, evergreen: boolean) => void;
 }) {
-	const progress = executingProgress(plan);
+	const progress = headerProgress(plan);
 	const controls =
 		plan.phase === "completed" || plan.phase === "cancelled" ? null : (
 			<PlanMenu
