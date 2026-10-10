@@ -104,8 +104,8 @@ pub struct PlanState {
     /// `state.json` from scoping onward.
     #[serde(default = "default_evergreen")]
     pub evergreen: bool,
-    /// A user prompt was sent; set once, travels with renames inside
-    /// `state.json`.
+    /// Set on the first user prompt; once set the plan never counts as
+    /// empty. Travels with renames inside `state.json`.
     #[serde(default)]
     pub prompted: bool,
 }

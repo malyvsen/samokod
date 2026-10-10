@@ -31,8 +31,10 @@ pub(crate) struct State {
     checkout_branch: String,
     branch_watch: Option<notify::RecommendedWatcher>,
     awake: Option<awake::Guard>,
-    /// Plans with a sent user prompt. Feeds the empty-scoping gate;
-    /// carried across renames with the plan.
+    /// Plans with a sent user prompt. Memory mirror of the `prompted`
+    /// flag in each plan's `state.json`: the memory copy keeps the hot
+    /// gate read lock-only, the disk copy survives restarts and travels
+    /// with renames.
     prompted: HashSet<String>,
     /// Diskless scoping sessions: reserved name plus draft-inferred title.
     /// Presence means pending; the value is the draft-inferred title
@@ -80,9 +82,10 @@ impl State {
     }
 }
 
-/// Empty scoping session: no `plan.md` and no sent message, whether or
-/// not the directory exists. Takes `&State` (called under an existing
-/// lock or a snapshot; never locks itself).
+/// Empty scoping session: no `plan.md`, no prompted flag (memory or
+/// disk), and no live last prompt, whether or not the directory exists.
+/// Takes `&State` (called under an existing lock or a snapshot; never
+/// locks itself).
 pub(crate) fn is_empty_scoping(state: &State, repo_root: &Path, name: &str) -> bool {
     let plan = plans::PlanRef {
         name: name.to_string(),
@@ -112,29 +115,14 @@ pub(crate) fn is_empty_scoping(state: &State, repo_root: &Path, name: &str) -> b
     true
 }
 
-/// Persist the prompted flag for the empty-scoping gate inside the plan's
-/// `state.json`, wherever the plan currently lives. Best-effort: a missing
-/// directory (diskless pending session) skips quietly like
-/// `session_ids::record`, an unchanged flag skips the rewrite, and other
-/// failures log while the in-memory flag still applies.
-pub(crate) fn persist_prompted(repo_root: &Path, name: &str) {
-    let Some(plan_dir) = session_ids::locate(repo_root, name) else {
-        return;
-    };
-    let mut stored = plans::load_state(&plan_dir);
-    if stored.prompted {
-        return;
-    }
-    stored.prompted = true;
-    plans::store_state(&plan_dir, &stored);
-}
-
-/// Discard an empty scoping session without a `cancelled/` trace:
+/// Discard an empty scoping session without a `cancelled/` trace, logging
+/// the plan name with the trigger (`select`, `create`, `cancel`):
 /// `remove_dir_all` when present (`NotFound` is fine, other errors are
 /// logged per the preserve-evidence rule), plus the `LiveSession` and
 /// `prompted` entry. Removes the single pending-map entry on match.
 /// Caller owns the lock.
-pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str) {
+pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str, trigger: &str) {
+    log::info!("vanishing empty scoping {name} on {trigger}");
     let plan = plans::PlanRef {
         name: name.to_string(),
         phase: plans::Phase::Scoping,
@@ -183,6 +171,30 @@ pub(crate) fn keep_or_vanish_empty(
     }
     turns::store_draft_title(state, repo_root, &prev.plan, raw.trim());
     log::info!("keeping empty scoping {} on draft text", prev.plan);
+    true
+}
+
+/// Abandon the previous scoping session when it is still empty: a
+/// non-blank draft keeps it with its inferred title, otherwise it vanishes
+/// with the trigger logged. Returns true when vanished. Caller owns the
+/// lock.
+pub(crate) fn abandon_empty_scoping(
+    state: &mut State,
+    repo_root: &Path,
+    prev: &SessionKey,
+    draft: Option<String>,
+    trigger: &str,
+) -> bool {
+    if prev.role != SessionRole::Scoping {
+        return false;
+    }
+    if !is_empty_scoping(state, repo_root, &prev.plan) {
+        return false;
+    }
+    if keep_or_vanish_empty(state, repo_root, prev, draft) {
+        return false;
+    }
+    vanish_scoping(state, repo_root, &prev.plan, trigger);
     true
 }
 
@@ -352,13 +364,8 @@ impl AgentManager {
         }
         match self.state.lock() {
             Ok(mut state) => {
-                if let Some(prev) = state.current.clone()
-                    && prev.role == SessionRole::Scoping
-                    && is_empty_scoping(&state, &repo_root, &prev.plan)
-                    && !keep_or_vanish_empty(&mut state, &repo_root, &prev, draft)
-                {
-                    log::info!("vanishing empty scoping {} on create", prev.plan);
-                    vanish_scoping(&mut state, &repo_root, &prev.plan);
+                if let Some(prev) = state.current.clone() {
+                    abandon_empty_scoping(&mut state, &repo_root, &prev, draft, "create");
                 }
                 let name = reserve_scoping_name(&repo_root, &state.pending_scoping);
                 state.pending_scoping.insert(name.clone(), None);
@@ -515,18 +522,9 @@ impl AgentManager {
                 raw: "open a repository first".to_string(),
             })?;
         if session.role == SessionRole::Scoping {
-            let empty = match self.state.lock() {
-                Ok(state) => is_empty_scoping(&state, &repo_root, &session.plan),
-                Err(error) => {
-                    log::warn!("failed to check empty session: {error}");
-                    false
-                }
-            };
-            if empty {
-                match self.state.lock() {
-                    Ok(mut state) => {
-                        log::info!("vanishing empty scoping {} on cancel", session.plan);
-                        vanish_scoping(&mut state, &repo_root, &session.plan);
+            let vanished = match self.state.lock() {
+                Ok(mut state) => {
+                    if abandon_empty_scoping(&mut state, &repo_root, &session, None, "cancel") {
                         let plans = plans_list::sorted_entries(
                             &repo_root,
                             &state.sessions,
@@ -542,11 +540,17 @@ impl AgentManager {
                                 role: SessionRole::Scoping,
                             });
                         }
-                    }
-                    Err(error) => {
-                        log::warn!("failed to vanish empty session: {error}");
+                        true
+                    } else {
+                        false
                     }
                 }
+                Err(error) => {
+                    log::warn!("failed to check empty session: {error}");
+                    false
+                }
+            };
+            if vanished {
                 return Ok(self.plans_update());
             }
         }
@@ -670,12 +674,8 @@ impl AgentManager {
             Ok(mut state) => {
                 if let Some(prev) = state.current.clone()
                     && prev != session
-                    && prev.role == SessionRole::Scoping
-                    && is_empty_scoping(&state, &repo_root, &prev.plan)
-                    && !keep_or_vanish_empty(&mut state, &repo_root, &prev, draft)
                 {
-                    log::info!("vanishing empty scoping {} on select", prev.plan);
-                    vanish_scoping(&mut state, &repo_root, &prev.plan);
+                    abandon_empty_scoping(&mut state, &repo_root, &prev, draft, "select");
                 }
                 state.current = Some(session);
             }
@@ -1448,7 +1448,7 @@ mod tests {
     }
 
     #[test]
-    fn persist_prompted_writes_flag_to_state_json() {
+    fn prompted_flag_writes_to_state_json() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
@@ -1459,7 +1459,7 @@ mod tests {
             phase: plans::Phase::Scoping,
         };
         assert!(!plans::load_state(&plan.path(root)).prompted);
-        persist_prompted(root, name);
+        session_ids::mark_prompted(root, name);
         assert!(plans::load_state(&plan.path(root)).prompted);
     }
 
@@ -1470,9 +1470,51 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
         plans::materialize_scoping(root, name).expect("materialize");
-        persist_prompted(root, name);
+        session_ids::mark_prompted(root, name);
         let state = State::default();
         assert!(!is_empty_scoping(&state, root, name));
+    }
+
+    #[test]
+    fn abandon_vanishes_empty_without_draft() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let mut state = State {
+            pending_scoping: HashMap::from([(name.to_string(), None)]),
+            ..Default::default()
+        };
+        let prev = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert!(abandon_empty_scoping(&mut state, root, &prev, None, "test"));
+        assert!(!state.pending_scoping.contains_key(name));
+    }
+
+    #[test]
+    fn abandon_keeps_empty_with_draft() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let mut state = State {
+            pending_scoping: HashMap::from([(name.to_string(), None)]),
+            ..Default::default()
+        };
+        let prev = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert!(!abandon_empty_scoping(
+            &mut state,
+            root,
+            &prev,
+            Some("Fix the login flow login errors on login retry.".to_string()),
+            "test"
+        ));
+        assert!(state.pending_scoping.contains_key(name));
     }
 
     #[test]
@@ -1626,7 +1668,7 @@ mod tests {
                 crate::repo_state::RepoState::default(),
             ),
         );
-        vanish_scoping(&mut state, root, name);
+        vanish_scoping(&mut state, root, name, "test");
         assert!(
             !plans::PlanRef {
                 name: name.to_string(),
@@ -1638,7 +1680,7 @@ mod tests {
         assert!(state.sessions.is_empty());
         assert!(!state.prompted.contains(name));
         assert!(!state.pending_scoping.contains_key(name));
-        vanish_scoping(&mut state, root, "2026-09-26.08-41-99");
+        vanish_scoping(&mut state, root, "2026-09-26.08-41-99", "test");
     }
 
     #[test]
@@ -1716,10 +1758,8 @@ mod tests {
         };
         if let Some(prev) = state.current.clone()
             && prev != target
-            && prev.role == SessionRole::Scoping
-            && is_empty_scoping(&state, root, &prev.plan)
         {
-            vanish_scoping(&mut state, root, &prev.plan);
+            abandon_empty_scoping(&mut state, root, &prev, None, "select");
         }
         state.current = Some(target.clone());
         assert!(!state.pending_scoping.contains_key("2026-09-26.08-41-03"));
@@ -1790,7 +1830,7 @@ mod tests {
             Some("   \n  ".to_string())
         ));
         assert!(!keep_or_vanish_empty(&mut state, root, &prev, None));
-        vanish_scoping(&mut state, root, name);
+        vanish_scoping(&mut state, root, name, "test");
         assert!(!state.pending_scoping.contains_key(name));
     }
 
@@ -1922,7 +1962,7 @@ mod tests {
             Some("Fix the login flow login errors on login retry.".to_string())
         ));
         assert!(is_empty_scoping(&state, root, name));
-        vanish_scoping(&mut state, root, name);
+        vanish_scoping(&mut state, root, name, "test");
         assert!(!state.pending_scoping.contains_key(name));
     }
 

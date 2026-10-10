@@ -75,21 +75,24 @@ impl AgentManager {
         );
     }
 
-    /// Record one user prompt for the empty-scoping gate, in memory and on
-    /// disk. The disk write travels with renames inside `state.json`, so a
-    /// restart never voids the gate.
+    /// Record one user prompt for the empty-scoping gate, in memory and
+    /// on disk.
     pub(crate) fn mark_prompted(&self, plan: &str) {
-        let repo_root = lock_state(&self.state).and_then(|state| state.repo_root.clone());
-        if let Some(mut state) = lock_state(&self.state) {
-            state.prompted.insert(plan.to_string());
-        }
+        let repo_root = match lock_state(&self.state) {
+            Some(mut state) => {
+                state.prompted.insert(plan.to_string());
+                state.repo_root.clone()
+            }
+            None => None,
+        };
         if let Some(root) = repo_root {
-            super::persist_prompted(&root, plan);
+            super::session_ids::mark_prompted(&root, plan);
         }
         self.push_plans();
     }
 
-    /// Carry the gate flag across a plan rename.
+    /// Carry the memory copy of the gate flag across a plan rename. The
+    /// disk copy travels with the directory move.
     pub(crate) fn carry_prompted(&self, from: &str, to: &str) {
         if let Some(mut state) = lock_state(&self.state)
             && state.prompted.remove(from)

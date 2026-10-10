@@ -46,6 +46,23 @@ pub(crate) fn record(repo_root: &Path, key: &SessionKey, session_id: &str) {
     crate::plans::store_state(&plan_dir, &state);
 }
 
+/// Mark one plan as prompted for the empty-scoping gate, preserving the
+/// rest of the state. Best-effort like `record`: missing directories
+/// (a diskless pending session) skip quietly, failures log, and an
+/// unchanged flag skips the rewrite. The flag travels with renames inside
+/// the plan directory.
+pub(crate) fn mark_prompted(repo_root: &Path, plan_name: &str) {
+    let Some(plan_dir) = locate(repo_root, plan_name) else {
+        return;
+    };
+    let mut state = crate::plans::load_state(&plan_dir);
+    if state.prompted {
+        return;
+    }
+    state.prompted = true;
+    crate::plans::store_state(&plan_dir, &state);
+}
+
 /// True when a plan name exists in any phase. Name-based: moves
 /// rename rather than copy, so names stay unique across phases. Pure
 /// except the directory probes.
@@ -435,6 +452,43 @@ mod tests {
             phase: Phase::Scoping,
         };
         assert!(!plan.path(dir.path()).join(plans::STATE_FILE).is_file());
+    }
+
+    #[test]
+    fn missing_dir_marks_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::plans::ensure_structure(dir.path()).expect("ensure");
+        mark_prompted(dir.path(), "2026-09-30.10-00-00");
+        let plan = PlanRef {
+            name: "2026-09-30.10-00-00".to_string(),
+            phase: Phase::Scoping,
+        };
+        assert!(!plan.path(dir.path()).join(plans::STATE_FILE).is_file());
+    }
+
+    #[test]
+    fn already_prompted_skips_rewrite() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::plans::ensure_structure(dir.path()).expect("ensure");
+        let name = "2026-09-30.10-00-00";
+        plan_dir(dir.path(), Phase::Scoping, name);
+        mark_prompted(dir.path(), name);
+        let plan = PlanRef {
+            name: name.to_string(),
+            phase: Phase::Scoping,
+        };
+        let path = plan.path(dir.path()).join(plans::STATE_FILE);
+        let before = std::fs::metadata(&path)
+            .expect("metadata")
+            .modified()
+            .expect("mtime");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        mark_prompted(dir.path(), name);
+        let after = std::fs::metadata(&path)
+            .expect("metadata")
+            .modified()
+            .expect("mtime");
+        assert_eq!(before, after);
     }
 
     #[test]
