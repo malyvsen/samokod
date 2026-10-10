@@ -47,6 +47,7 @@ import {
 	drainStatusFor,
 	isReadOnly,
 	isSessionBusy,
+	repairSelection,
 	selectedChat,
 	selectedEntry,
 } from "./sessions/select";
@@ -128,6 +129,16 @@ export function App() {
 		setConfigDefaults(update.config_defaults);
 	}, []);
 
+	const applyPushedPlans = useCallback((pushed: PlanEntry[]) => {
+		setPlans(pushed);
+		setSelectedKey((prev) => {
+			const repaired = repairSelection(pushed, prev);
+			if (prev === null || repaired === null) return repaired;
+			if (sameSession(prev, repaired)) return prev;
+			return repaired;
+		});
+	}, []);
+
 	const entry = selectedEntry(plans, selectedKey);
 	const readOnly = isReadOnly(entry);
 	useSessionStart(selectedKey, chats, readOnly);
@@ -199,8 +210,7 @@ export function App() {
 	const handleEvent = useCallback(
 		(event: AppEvent) => {
 			if (event.type === "plans_changed") {
-				setPlans(event.plans);
-				setSelectedKey(event.selected);
+				applyPushedPlans(event.plans);
 				return;
 			}
 			if (event.type === "branch_changed") {
@@ -227,7 +237,7 @@ export function App() {
 					);
 			}
 		},
-		[maybeDrain, applyChats],
+		[applyPushedPlans, maybeDrain, applyChats],
 	);
 
 	useEffect(() => {
@@ -595,8 +605,14 @@ export function App() {
 		updateChat(key, (chat) => ({ ...chat, working: true }));
 		try {
 			const update = await executePlan(key);
-			applyChats((current) => carryHistory(current, key, update, true));
-			applyPlans(update);
+			const viewed = selectedRef.current;
+			const isViewed = viewed?.plan === key.plan;
+			applyChats((current) => carryHistory(current, key, update, isViewed));
+			setPlans(update.plans);
+			setConfigDefaults(update.config_defaults);
+			if (isViewed) {
+				setSelectedKey(followRename(update.plans, key.plan, update.selected));
+			}
 		} catch (error) {
 			updateChat(key, (chat) => ({ ...chat, working: false }));
 			appendError(
@@ -619,7 +635,13 @@ export function App() {
 			} else {
 				applyChats((current) => carryHistory(current, key, update, false));
 			}
-			applyPlans(update);
+			const viewed = selectedRef.current;
+			const isViewed = viewed?.plan === key.plan;
+			setPlans(update.plans);
+			setConfigDefaults(update.config_defaults);
+			if (isViewed) {
+				setSelectedKey(followRename(update.plans, key.plan, update.selected));
+			}
 		} catch (error) {
 			updateChat(key, (chat) => ({ ...chat, working: false }));
 			appendError(
@@ -634,7 +656,12 @@ export function App() {
 	async function handleSetMode(plan: string, manual: boolean) {
 		try {
 			const update = await setPlanMode(plan, manual);
-			applyPlans(update);
+			const viewed = selectedRef.current;
+			setPlans(update.plans);
+			setConfigDefaults(update.config_defaults);
+			if (viewed?.plan === plan) {
+				setSelectedKey(followRename(update.plans, plan, update.selected));
+			}
 		} catch (error) {
 			const key = selectedRef.current;
 			if (key !== null) {
@@ -651,7 +678,12 @@ export function App() {
 	async function handleSetEvergreen(plan: string, evergreen: boolean) {
 		try {
 			const update = await setPlanEvergreen(plan, evergreen);
-			applyPlans(update);
+			const viewed = selectedRef.current;
+			setPlans(update.plans);
+			setConfigDefaults(update.config_defaults);
+			if (viewed?.plan === plan) {
+				setSelectedKey(followRename(update.plans, plan, update.selected));
+			}
 		} catch (error) {
 			const key = selectedRef.current;
 			if (key !== null) {
@@ -796,4 +828,39 @@ function shortPath(path: string): string {
 		return `~/${path.slice(home.length + 1)}`;
 	}
 	return path;
+}
+
+function derivesFrom(candidate: string, base: string): boolean {
+	return candidate === base || candidate.startsWith(`${base}.`);
+}
+
+function latestRoleOf(entry: PlanEntry): SessionKey["role"] {
+	const roles = new Set(entry.sessions.map((status) => status.role));
+	if (roles.has("landing")) return "landing";
+	if (roles.has("evergreening")) return "evergreening";
+	if (roles.has("executing")) return "executing";
+	return "scoping";
+}
+
+/// Follow the viewed plan's own rename through an execute/cancel
+/// response: honor `selected` when it derives from the acted plan,
+/// otherwise resolve the renamed entry from the fresh plan list.
+function followRename(
+	plans: PlanEntry[],
+	oldPlan: string,
+	selected: SessionKey,
+): SessionKey {
+	if (derivesFrom(selected.plan, oldPlan)) return selected;
+	const renamed = plans.find((entry) => derivesFrom(entry.name, oldPlan));
+	if (renamed !== undefined) {
+		if (renamed.sessions.some((status) => status.role === selected.role)) {
+			return { plan: renamed.name, role: selected.role };
+		}
+		return { plan: renamed.name, role: latestRoleOf(renamed) };
+	}
+	const first = plans[0];
+	if (first !== undefined) {
+		return { plan: first.name, role: latestRoleOf(first) };
+	}
+	return selected;
 }

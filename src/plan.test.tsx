@@ -194,6 +194,213 @@ describe("plan", () => {
 		).toBeInTheDocument();
 	});
 
+	test("background plans_changed keeps transcript and textbox", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb", "scoping", "Beta", true),
+			],
+			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
+		});
+		api.sendPrompt.mockResolvedValue(undefined);
+		const user = await openChat(api);
+		await user.keyboard("aaa question{Enter}");
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: { plan: "aaa", role: "scoping" },
+			chunk: "aaa chat",
+		});
+		emitAppEvent(api, {
+			type: "turn_done",
+			session: { plan: "aaa", role: "scoping" },
+		});
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: { plan: "bbb", role: "scoping" },
+			chunk: "bbb chat",
+		});
+		emitAppEvent(api, {
+			type: "turn_done",
+			session: { plan: "bbb", role: "scoping" },
+		});
+		expect(screen.getByText("aaa chat")).toBeInTheDocument();
+		emitAppEvent(api, {
+			type: "plans_changed",
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb", "scoping", "Beta", true),
+			],
+			selected: { plan: "bbb", role: "scoping" },
+		});
+		expect(screen.getByText("aaa chat")).toBeInTheDocument();
+		expect(screen.queryByText("bbb chat")).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("textbox", { name: "Ask for a change…" }),
+		).toBeInTheDocument();
+	});
+
+	test("background execute response keeps viewing", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb", "scoping", "Beta", true),
+			],
+			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
+		});
+		api.executePlan.mockResolvedValue({
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb.slug", "executing", "Beta", true),
+			],
+			selected: { plan: "bbb.slug", role: "executing" },
+			config_defaults: testDefaults(),
+		});
+		api.sendPrompt.mockResolvedValue(undefined);
+		const user = await openChat(api);
+		await user.keyboard("aaa question{Enter}");
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: { plan: "aaa", role: "scoping" },
+			chunk: "aaa chat",
+		});
+		emitAppEvent(api, {
+			type: "turn_done",
+			session: { plan: "aaa", role: "scoping" },
+		});
+		await user.click(
+			await screen.findByRole("button", { name: "Plan options for Beta" }),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Execute" }));
+		expect(api.executePlan).toHaveBeenCalledWith({
+			plan: "bbb",
+			role: "scoping",
+		});
+		await screen.findByText("Beta");
+		expect(screen.getByText("aaa chat")).toBeInTheDocument();
+		expect(
+			screen.getByRole("textbox", { name: "Ask for a change…" }),
+		).toBeInTheDocument();
+	});
+
+	test("background cancel response keeps viewing", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb", "scoping", "Beta", true),
+			],
+			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
+		});
+		api.cancelPlan.mockResolvedValue({
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb.cancelled", "cancelled", "Beta"),
+			],
+			selected: { plan: "bbb.cancelled", role: "scoping" },
+			config_defaults: testDefaults(),
+		});
+		api.sendPrompt.mockResolvedValue(undefined);
+		const user = await openChat(api);
+		await user.keyboard("aaa question{Enter}");
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: { plan: "aaa", role: "scoping" },
+			chunk: "aaa chat",
+		});
+		emitAppEvent(api, {
+			type: "turn_done",
+			session: { plan: "aaa", role: "scoping" },
+		});
+		await user.click(
+			await screen.findByRole("button", { name: "Plan options for Beta" }),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Cancel" }));
+		expect(api.cancelPlan).toHaveBeenCalledWith({
+			plan: "bbb",
+			role: "scoping",
+		});
+		await screen.findByText("Beta");
+		expect(screen.getByText("aaa chat")).toBeInTheDocument();
+		expect(
+			screen.getByRole("textbox", { name: "Ask for a change…" }),
+		).toBeInTheDocument();
+	});
+
+	test("viewed execute follows its own rename", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [testEntry("aaa", "scoping", "Alpha", true)],
+			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
+		});
+		api.executePlan.mockResolvedValue({
+			plans: [testEntry("aaa.slug", "executing", "Alpha", true)],
+			selected: { plan: "aaa.slug", role: "executing" },
+			config_defaults: testDefaults(),
+		});
+		const user = await openChat(api);
+		await user.click(
+			await screen.findByRole("button", { name: "Plan options for Alpha" }),
+		);
+		await user.click(await screen.findByRole("menuitem", { name: "Execute" }));
+		await screen.findByText("Executing");
+		expect(screen.getByRole("textbox")).toBeInTheDocument();
+	});
+
+	test("vanished viewed plan falls back to most-recent", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb", "scoping", "Beta", true),
+			],
+			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
+		});
+		api.sendPrompt.mockResolvedValue(undefined);
+		const user = await openChat(api);
+		await user.keyboard("aaa question{Enter}");
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: { plan: "aaa", role: "scoping" },
+			chunk: "aaa chat",
+		});
+		emitAppEvent(api, {
+			type: "turn_done",
+			session: { plan: "aaa", role: "scoping" },
+		});
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: { plan: "bbb", role: "scoping" },
+			chunk: "bbb chat",
+		});
+		emitAppEvent(api, {
+			type: "turn_done",
+			session: { plan: "bbb", role: "scoping" },
+		});
+		expect(screen.getByText("aaa chat")).toBeInTheDocument();
+		emitAppEvent(api, {
+			type: "plans_changed",
+			plans: [testEntry("bbb", "scoping", "Beta", true)],
+			selected: { plan: "bbb", role: "scoping" },
+		});
+		await screen.findByText("bbb chat");
+		expect(screen.queryByText("aaa chat")).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("textbox", { name: "Ask for a change…" }),
+		).toBeInTheDocument();
+	});
+
 	test("selecting a row swaps transcript while scoping shows the plan", async () => {
 		api.openRepo.mockResolvedValue({
 			repo_root: "/repo",

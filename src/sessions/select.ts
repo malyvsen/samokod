@@ -1,4 +1,4 @@
-import type { AgentStatus, PlanEntry, SessionKey } from "../types";
+import type { AgentStatus, PlanEntry, SessionKey, SessionRole } from "../types";
 import { sessionKeyOf } from "../types";
 import type { ChatState } from "./store";
 
@@ -47,4 +47,43 @@ export function selectedEntry(
 /// no input, retry, or config change may run against it.
 export function isReadOnly(entry: PlanEntry | undefined): boolean {
 	return entry?.phase === "completed" || entry?.phase === "cancelled";
+}
+
+/// Latest role one plan owns, mirroring the header target: landing wins
+/// over evergreening over executing over scoping.
+function latestRoleFor(entry: PlanEntry): SessionRole {
+	const roles = new Set(entry.sessions.map((status) => status.role));
+	if (roles.has("landing")) return "landing";
+	if (roles.has("evergreening")) return "evergreening";
+	if (roles.has("executing")) return "executing";
+	return "scoping";
+}
+
+function headerKeyFor(entry: PlanEntry): SessionKey {
+	return { plan: entry.name, role: latestRoleFor(entry) };
+}
+
+function mostRecentKeyFor(plans: PlanEntry[]): SessionKey | null {
+	const first = plans[0];
+	if (first === undefined) return null;
+	return headerKeyFor(first);
+}
+
+/// Repair the viewed selection against a pushed plan list without ever
+/// stealing focus: keep the current key when its plan still exists (role
+/// advances only when the entry no longer lists it), fall back to the
+/// most-recent entry when it vanished, null only when the list is empty.
+/// Pure.
+export function repairSelection(
+	plans: PlanEntry[],
+	current: SessionKey | null,
+): SessionKey | null {
+	if (plans.length === 0) return null;
+	if (current === null) return mostRecentKeyFor(plans);
+	const entry = plans.find((plan) => plan.name === current.plan);
+	if (entry === undefined) return mostRecentKeyFor(plans);
+	if (entry.sessions.some((status) => status.role === current.role)) {
+		return current;
+	}
+	return headerKeyFor(entry);
 }
