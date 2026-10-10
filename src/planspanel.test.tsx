@@ -1083,7 +1083,7 @@ describe("plans panel", () => {
 			expect(css).toContain(".plan-group:focus-within .pmeta");
 		});
 
-		test("plan menus float a bordered dropdown", () => {
+		test("plan menus anchor to their header above the title tooltip", () => {
 			const css = appCss();
 			const head = /\.phead\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(head).toContain("position: relative");
