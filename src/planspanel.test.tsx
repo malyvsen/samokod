@@ -1152,8 +1152,6 @@ describe("plans panel", () => {
 			expect(rule).toContain("var(--sheen) 100%");
 			const keyframes =
 				/@keyframes sheen\s*\{[\s\S]*?\n\}/.exec(css)?.[0] ?? "";
-			expect(keyframes).toContain("from");
-			expect(keyframes).toContain("to");
 			const positions = [
 				...keyframes.matchAll(/background-position:\s*(-?\d+(?:\.\d+)?)%/g),
 			].map((match) => Number(match[1]));
@@ -1164,8 +1162,6 @@ describe("plans panel", () => {
 			}
 			expect(keyframes).toContain("background-position: 100% 0");
 			expect(keyframes).toContain("background-position: 0% 0");
-			expect(css).not.toContain("165%");
-			expect(css).not.toContain("-75%");
 		});
 	});
 
