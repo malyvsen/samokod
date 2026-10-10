@@ -1142,6 +1142,31 @@ describe("plans panel", () => {
 			const single = /\.ngutter\.single\s+\.v\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(single).toContain("50%");
 		});
+
+		test("attention sheen always covers the title", () => {
+			const css = appCss();
+			const rule = /\.ptitle:is\([^)]*\)\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			expect(rule).toContain("background-size: 300% 100%");
+			expect(rule).toContain("background-repeat: no-repeat");
+			expect(rule).toContain("var(--sheen) 0%");
+			expect(rule).toContain("var(--sheen) 100%");
+			const keyframes =
+				/@keyframes sheen\s*\{[\s\S]*?\n\}/.exec(css)?.[0] ?? "";
+			expect(keyframes).toContain("from");
+			expect(keyframes).toContain("to");
+			const positions = [
+				...keyframes.matchAll(/background-position:\s*(-?\d+(?:\.\d+)?)%/g),
+			].map((match) => Number(match[1]));
+			expect(positions.length).toBeGreaterThan(0);
+			for (const position of positions) {
+				expect(position).toBeGreaterThanOrEqual(0);
+				expect(position).toBeLessThanOrEqual(100);
+			}
+			expect(keyframes).toContain("background-position: 100% 0");
+			expect(keyframes).toContain("background-position: 0% 0");
+			expect(css).not.toContain("165%");
+			expect(css).not.toContain("-75%");
+		});
 	});
 
 	describe("tree", () => {
