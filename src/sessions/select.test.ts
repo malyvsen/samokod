@@ -8,6 +8,7 @@ import {
 	isSessionBusy,
 	repairSelection,
 	selectedChat,
+	sideContentFor,
 } from "./select";
 import { emptyChat } from "./store";
 
@@ -127,6 +128,54 @@ describe("repairSelection", () => {
 	test("returns null only for an empty list", () => {
 		expect(repairSelection([], { plan: "aaa", role: "scoping" })).toBeNull();
 		expect(repairSelection([], null)).toBeNull();
+	});
+});
+
+describe("sideContentFor", () => {
+	test("landing role returns commits", () => {
+		const entry = testEntryWith(
+			"a",
+			"landing",
+			"Alpha",
+			true,
+			[testStatus("scoping"), testStatus("landing")],
+			false,
+			true,
+			["abc plan work", "def more work"],
+			false,
+		);
+		expect(sideContentFor(entry, { plan: "a", role: "landing" }, [])).toEqual({
+			kind: "commits",
+			commits: ["abc plan work", "def more work"],
+		});
+	});
+
+	test("other roles return todos", () => {
+		const entry = testEntryWith(
+			"a",
+			"landing",
+			"Alpha",
+			true,
+			[testStatus("scoping"), testStatus("executing")],
+			false,
+			true,
+			["abc plan work"],
+			false,
+		);
+		const todos = [{ content: "Wire view", status: "pending" } as const];
+		expect(
+			sideContentFor(entry, { plan: "a", role: "executing" }, [...todos]),
+		).toEqual({ kind: "todos", todos: [...todos] });
+		const executing = testEntryWith("b", "executing", "Beta", true, [
+			testStatus("scoping"),
+		]);
+		expect(
+			sideContentFor(executing, { plan: "b", role: "executing" }, [...todos]),
+		).toEqual({ kind: "todos", todos: [...todos] });
+		expect(sideContentFor(undefined, null, [...todos])).toEqual({
+			kind: "todos",
+			todos: [...todos],
+		});
 	});
 });
 

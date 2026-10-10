@@ -26,7 +26,7 @@ import { PlansPanel } from "./components/PlansPanel";
 import { QueuedBubbleList } from "./components/QueuedBubble";
 import { RepoPicker } from "./components/RepoPicker";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { SidePanel } from "./components/SidePanel";
+import { CommitsPanel, SidePanel } from "./components/SidePanel";
 import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
 import {
@@ -50,6 +50,7 @@ import {
 	repairSelection,
 	selectedChat,
 	selectedEntry,
+	sideContentFor,
 } from "./sessions/select";
 import { useSessionStart } from "./sessions/start";
 import {
@@ -172,6 +173,7 @@ export function App() {
 	useThoughtTimers(selectedKey, chat, updateChat);
 	const planMd = usePlanMd(selectedKey, chat?.working ?? false);
 	const isScoping = selectedKey?.role === "scoping";
+	const side = sideContentFor(entry, selectedKey, chat?.todos ?? []);
 
 	const sendNow = useCallback(
 		async (key: SessionKey, text: string) => {
@@ -825,8 +827,10 @@ export function App() {
 						</div>
 						{isScoping ? (
 							<PlanMdPane text={planMd} />
+						) : side.kind === "commits" ? (
+							<CommitsPanel commits={side.commits} />
 						) : (
-							<SidePanel todos={chat?.todos ?? []} />
+							<SidePanel todos={side.todos} />
 						)}
 					</div>
 				</>

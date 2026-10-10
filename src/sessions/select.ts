@@ -1,4 +1,10 @@
-import type { AgentStatus, PlanEntry, SessionKey, SessionRole } from "../types";
+import type {
+	AgentStatus,
+	PlanEntry,
+	SessionKey,
+	SessionRole,
+	TodoView,
+} from "../types";
 import { sessionKeyOf } from "../types";
 import type { ChatState } from "./store";
 
@@ -41,6 +47,23 @@ export function selectedEntry(
 ): PlanEntry | undefined {
 	if (selectedKey === null) return undefined;
 	return plans.find((plan) => plan.name === selectedKey.plan);
+}
+
+export type SideContent =
+	| { kind: "todos"; todos: TodoView[] }
+	| { kind: "commits"; commits: string[] };
+
+/// Sidebar content for the selected session: commits when the selected
+/// session has the landing role on a landing plan, else todos. Pure.
+export function sideContentFor(
+	entry: PlanEntry | undefined,
+	selectedKey: SessionKey | null,
+	todos: TodoView[],
+): SideContent {
+	if (entry?.phase === "landing" && selectedKey?.role === "landing") {
+		return { kind: "commits", commits: entry.commits };
+	}
+	return { kind: "todos", todos };
 }
 
 /// Finished plans are read-only: the selection stays on the session, but
