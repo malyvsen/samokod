@@ -12,8 +12,8 @@ One or two sentences explaining the ultimate objective of the plan.
 
 ## In scope
 
-- [ ] todo list of high-level objectives to be achieved
-- [ ] prefer expressing these in terms of the need, rather than the code - unless the code is the need
+- list of high-level objectives to be achieved
+- prefer expressing these in terms of the need, rather than the code - unless the code is the need
 
 ## Out of scope
 
@@ -34,7 +34,7 @@ A free-form description of what to do in the second commit.
 A free-form description of what to do in the non-commit step.
 ```
 
-Any number of commits is acceptable, down to a single one if that's all it takes. Order the commits in such a way that the repo isn't broken or inconsistent at any of them.
+Any number of commits is acceptable, but all work must be committed. Order the commits in such a way that the repo isn't broken or inconsistent at any of them.
 
 Make sure the plan is concrete - remove unknowns upfront (unless removing an unknown is the very purpose of the plan, that is). If possible, make sure it is entirely executable by an AI agent.
 
