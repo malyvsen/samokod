@@ -446,7 +446,7 @@ button.brand:hover {
 	display: flex;
 	flex-direction: column;
 	gap: 14px;
-	align-items: center;
+	align-items: stretch;
 }
 
 .transcript > * {
@@ -456,6 +456,7 @@ button.brand:hover {
 .tcol {
 	width: 100%;
 	max-width: 880px;
+	margin: 0 auto;
 	display: flex;
 	flex-direction: column;
 	gap: 14px;
@@ -467,7 +468,7 @@ button.brand:hover {
 }
 
 .msg {
-	max-width: 880px;
+	max-width: min(880px, 100%);
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
@@ -782,7 +783,7 @@ button.brand:hover {
 .approval {
 	position: relative;
 	align-self: flex-start;
-	max-width: 880px;
+	max-width: min(880px, 100%);
 	border: 1px solid rgba(255, 200, 60, 0.55);
 	background: rgba(20, 14, 4, 0.72);
 	padding: 14px 16px;
