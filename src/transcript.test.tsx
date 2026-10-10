@@ -140,10 +140,36 @@ describe("transcript user messages", () => {
 		expect(container.querySelector(".msg.user .body ul li")).not.toBeNull();
 	});
 
-	test("user bubble rule sets pre-wrap", () => {
+	test("message typography matches agent style", () => {
 		const css = readFileSync("src/App.css", "utf8");
-		const rule = /\.msg\.user\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
-		expect(rule).toContain("white-space: pre-wrap");
+		const baseRule = /\.msg\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(baseRule).toContain("font-size: 13px");
+		const userRule = /\.msg\.user\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(userRule).not.toContain("white-space: pre-wrap");
+		expect(userRule).not.toContain("font-size");
+		const agentRule = /\.msg\.agent\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(agentRule).not.toContain("font-size");
+	});
+
+	test("user and agent bubbles share body selectors", () => {
+		const md = "# t\n\npara\n\n1. a\n2. b\n\n```\ncode\n```";
+		const user = render(transcript(md));
+		expect(user.container.querySelector(".msg.user .body p")).not.toBeNull();
+		expect(
+			user.container.querySelector(".msg.user .body ol li"),
+		).not.toBeNull();
+		expect(
+			user.container.querySelector(".msg.user .body pre code"),
+		).not.toBeNull();
+		user.unmount();
+		const agent = render(agentTranscript(md));
+		expect(agent.container.querySelector(".msg.agent .body p")).not.toBeNull();
+		expect(
+			agent.container.querySelector(".msg.agent .body ol li"),
+		).not.toBeNull();
+		expect(
+			agent.container.querySelector(".msg.agent .body pre code"),
+		).not.toBeNull();
 	});
 
 	test("user table renders wrapped table with header cells", () => {

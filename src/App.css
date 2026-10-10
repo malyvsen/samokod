@@ -471,6 +471,7 @@ button.brand:hover {
 	max-width: min(880px, 100%);
 	min-width: 0;
 	overflow-wrap: anywhere;
+	font-size: 13px;
 }
 
 .msg .who {
@@ -536,7 +537,6 @@ button.brand:hover {
 	border: 1px solid rgba(255, 255, 255, 0.28);
 	background: rgba(255, 255, 255, 0.06);
 	padding: 10px 12px;
-	white-space: pre-wrap;
 }
 
 .msg.agent {
@@ -544,7 +544,6 @@ button.brand:hover {
 	border: 1px solid rgba(255, 255, 255, 0.14);
 	background: rgba(10, 10, 16, 0.55);
 	padding: 10px 12px;
-	font-size: 13px;
 }
 
 .msg.draft .edit {
