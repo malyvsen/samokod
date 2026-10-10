@@ -182,6 +182,7 @@ pub(crate) fn keep_or_vanish_empty(
         return false;
     }
     turns::store_draft_title(state, repo_root, &prev.plan, raw.trim());
+    log::info!("keeping empty scoping {} on draft text", prev.plan);
     true
 }
 
@@ -356,6 +357,7 @@ impl AgentManager {
                     && is_empty_scoping(&state, &repo_root, &prev.plan)
                     && !keep_or_vanish_empty(&mut state, &repo_root, &prev, draft)
                 {
+                    log::info!("vanishing empty scoping {} on create", prev.plan);
                     vanish_scoping(&mut state, &repo_root, &prev.plan);
                 }
                 let name = reserve_scoping_name(&repo_root, &state.pending_scoping);
@@ -523,6 +525,7 @@ impl AgentManager {
             if empty {
                 match self.state.lock() {
                     Ok(mut state) => {
+                        log::info!("vanishing empty scoping {} on cancel", session.plan);
                         vanish_scoping(&mut state, &repo_root, &session.plan);
                         let plans = plans_list::sorted_entries(
                             &repo_root,
@@ -671,6 +674,7 @@ impl AgentManager {
                     && is_empty_scoping(&state, &repo_root, &prev.plan)
                     && !keep_or_vanish_empty(&mut state, &repo_root, &prev, draft)
                 {
+                    log::info!("vanishing empty scoping {} on select", prev.plan);
                     vanish_scoping(&mut state, &repo_root, &prev.plan);
                 }
                 state.current = Some(session);
