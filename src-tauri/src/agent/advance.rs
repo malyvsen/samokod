@@ -28,7 +28,9 @@ use super::{AgentManager, lock_state};
 // Dirty or diverged plans hold and are skipped until a later trigger,
 // showing only their existing markers. A landing whose target moved under
 // it re-rebases automatically while still on A. Background plans never
-// steal the selection; the selected plan follows its own moves.
+// steal the selection: no `current` writes happen off the explicit
+// `select_plan`/`create_plan`/`open_repo` paths plus follow-own-move in
+// transitions; the pump itself never touches `current`.
 impl AgentManager {
     /// Fire-and-forget pump for background triggers (turn ends, branch
     /// moves). The pump future is not `Send` (it drives the turn
@@ -42,7 +44,6 @@ impl AgentManager {
     }
 
     pub(crate) async fn pump(&self) {
-        let mut selected = lock_state(&self.state).and_then(|state| state.current.clone());
         let mut fired_any = false;
         // Every fired transition makes its plan ineligible for the next
         // pass (its turn starts, or it leaves the phase), so the pump
@@ -76,18 +77,6 @@ impl AgentManager {
                         if !fired_plans.insert(plan_name.clone()) {
                             log::warn!("pump fired twice for {plan_name}; stopping");
                             break 'pump;
-                        }
-                        // The selected plan follows its own moves; background
-                        // plans never steal the selection.
-                        match selected {
-                            Some(ref current) if current.plan == plan_name => {
-                                selected =
-                                    lock_state(&self.state).and_then(|state| state.current.clone());
-                            }
-                            Some(ref current) => {
-                                self.select_key(current.clone());
-                            }
-                            None => {}
                         }
                         break;
                     }
@@ -245,7 +234,7 @@ impl AgentManager {
                 active.prefixed = true;
                 let plan_dir_abs = next.path(&repo_root).to_string_lossy().to_string();
                 let text = opencode::executing_first_message(&plan_dir_abs);
-                self.spawn_with_first_turn(&repo_root, &branch, active, text)
+                self.spawn_with_first_turn(&repo_root, &branch, &from.name, active, text)
                     .await
             }
             Transition::BeginEvergreening { plan } => {
@@ -291,7 +280,7 @@ impl AgentManager {
                     &status.target_branch,
                     &status.commits.join("\n"),
                 );
-                self.spawn_with_first_turn(&repo_root, &branch, active, text)
+                self.spawn_with_first_turn(&repo_root, &branch, &from.name, active, text)
                     .await
             }
             Transition::BeginLanding { plan } => {
@@ -355,7 +344,7 @@ impl AgentManager {
                     &status.path.to_string_lossy(),
                     &plan_md_abs,
                 );
-                self.spawn_with_first_turn(&repo_root, &branch, active, text)
+                self.spawn_with_first_turn(&repo_root, &branch, &from.name, active, text)
                     .await
             }
             Transition::FinishExecuting { plan } => {
@@ -389,10 +378,16 @@ impl AgentManager {
                 let next = plans::complete(&repo_root, &from)?;
                 self.drop_plan_lives(&from.name).await;
                 self.carry_prompted(&from.name, &next.name);
-                self.select_key(SessionKey {
+                let finished = SessionKey {
                     plan: next.name,
                     role: SessionRole::Executing,
-                });
+                };
+                if lock_state(&self.state)
+                    .and_then(|state| state.current.clone())
+                    .is_some_and(|current| current.plan == plan)
+                {
+                    self.select_key(finished);
+                }
                 Ok(self.plans_update())
             }
             Transition::FinishEvergreening { plan } => {
@@ -426,10 +421,16 @@ impl AgentManager {
                 let next = plans::complete(&repo_root, &from)?;
                 self.drop_plan_lives(&from.name).await;
                 self.carry_prompted(&from.name, &next.name);
-                self.select_key(SessionKey {
+                let finished = SessionKey {
                     plan: next.name,
                     role: SessionRole::Evergreening,
-                });
+                };
+                if lock_state(&self.state)
+                    .and_then(|state| state.current.clone())
+                    .is_some_and(|current| current.plan == plan)
+                {
+                    self.select_key(finished);
+                }
                 Ok(self.plans_update())
             }
             Transition::FinishLanding { plan } => {
@@ -463,10 +464,16 @@ impl AgentManager {
                 let next = plans::finish_landing(&repo_root, &from)?;
                 self.drop_plan_lives(&from.name).await;
                 self.carry_prompted(&from.name, &next.name);
-                self.select_key(SessionKey {
+                let finished = SessionKey {
                     plan: next.name,
                     role: SessionRole::Landing,
-                });
+                };
+                if lock_state(&self.state)
+                    .and_then(|state| state.current.clone())
+                    .is_some_and(|current| current.plan == plan)
+                {
+                    self.select_key(finished);
+                }
                 Ok(self.plans_update())
             }
             Transition::RebaseLanding { plan } => {
@@ -517,11 +524,14 @@ impl AgentManager {
     /// for the caller's `ActivePlan`, send its role as the full first turn,
     /// and announce it as a live user bubble. The caller moves the plan and
     /// drops the old live session first; the plan name travels inside
-    /// `active` so the prompted flag follows it.
+    /// `active` so the prompted flag follows it. Follows its own move
+    /// only: points `current` at the new key when the moved plan was the
+    /// viewed one, otherwise leaves the selection alone.
     async fn spawn_with_first_turn(
         &self,
         repo_root: &std::path::Path,
         branch: &str,
+        from_plan: &str,
         active: ActivePlan,
         text: String,
     ) -> Result<PlansUpdate, AgentError> {
@@ -529,6 +539,12 @@ impl AgentManager {
         let agent = opencode::agent_for(active.phase);
         let (connection, session_id, key) =
             self.spawn_session(repo_root, branch, active, agent).await?;
+        if lock_state(&self.state)
+            .and_then(|state| state.current.clone())
+            .is_some_and(|current| current.plan == from_plan)
+        {
+            self.select_key(key.clone());
+        }
         self.mark_prompted(&plan_name);
         self.start_turn(connection, session_id, key.clone(), text.clone())
             .await?;
@@ -932,6 +948,48 @@ mod tests {
                 ..view("a", phase)
             };
             assert_eq!(next_action(&done), None, "{phase:?} stays put");
+        }
+    }
+
+    fn should_follow(current: Option<SessionKey>, acted: &str) -> bool {
+        current.is_some_and(|key| key.plan == acted)
+    }
+
+    #[test]
+    fn finish_background_leaves_selection() {
+        let current = Some(SessionKey {
+            plan: "aaa".to_string(),
+            role: SessionRole::Executing,
+        });
+        assert!(!should_follow(current, "bbb"));
+    }
+
+    #[test]
+    fn finish_viewed_follows_own_move() {
+        let current = Some(SessionKey {
+            plan: "aaa".to_string(),
+            role: SessionRole::Executing,
+        });
+        assert!(should_follow(current, "aaa"));
+    }
+
+    #[test]
+    fn spawn_background_leaves_selection() {
+        let current = Some(SessionKey {
+            plan: "aaa".to_string(),
+            role: SessionRole::Scoping,
+        });
+        assert!(!should_follow(current, "bbb"));
+    }
+
+    #[test]
+    fn pump_background_leaves_selection() {
+        let current = Some(SessionKey {
+            plan: "aaa".to_string(),
+            role: SessionRole::Executing,
+        });
+        for acted in ["bbb", "ccc"] {
+            assert!(!should_follow(current.clone(), acted));
         }
     }
 }

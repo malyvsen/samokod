@@ -312,7 +312,6 @@ impl AgentManager {
             );
             state.repo_root = Some(repo_root.to_path_buf());
             state.checkout_branch = branch.to_string();
-            state.current = Some(key.clone());
         }
         super::session_ids::record(repo_root, &key, &session_id);
         log::info!(
