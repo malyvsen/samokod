@@ -409,6 +409,59 @@ describe("draft bubble in chat", () => {
 		expect("scopingTemplate" in api).toBe(false);
 	});
 
+	test("repeated plans_changed with same preview keeps one lead", async () => {
+		await openChat(api);
+		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		const plans = [testEntry()];
+		const selected = testKey();
+		emitAppEvent(api, {
+			type: "plans_changed",
+			plans,
+			selected,
+			scopingPreview: "TEMPLATE",
+		});
+		emitAppEvent(api, {
+			type: "plans_changed",
+			plans,
+			selected,
+			scopingPreview: "TEMPLATE",
+		});
+		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);
+	});
+
+	test("switching to a session without preview clears the lead", async () => {
+		const first = testEntryWith("aaa", "scoping", "First", false, [
+			testStatus("scoping"),
+		]);
+		const second = testEntryWith("bbb", "scoping", "Second", false, [
+			testStatus("scoping"),
+		]);
+		const plans = [first, second];
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans,
+			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
+			scopingPreview: "AAA-TEMPLATE",
+		});
+		api.selectPlan.mockResolvedValue({
+			plans,
+			selected: { plan: "bbb", role: "scoping" },
+			config_defaults: testDefaults(),
+			scopingPreview: null,
+		});
+		const user = await openChat(api);
+		expect(screen.getByText("AAA-TEMPLATE")).toBeInTheDocument();
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Second, scoping, opens Scoping",
+			}),
+		);
+		expect(screen.queryByText("AAA-TEMPLATE")).not.toBeInTheDocument();
+	});
+
 	test("stays visible with queue placeholder while working", async () => {
 		const user = await openChat(api);
 		api.sendPrompt.mockReturnValue(new Promise(() => {}));

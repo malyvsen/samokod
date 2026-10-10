@@ -1665,6 +1665,25 @@ mod tests {
     }
 
     #[test]
+    fn first_prompt_flips_payload_preview_from_some_to_none() {
+        use super::plans_list::preview_for;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let key = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Scoping,
+        };
+        plans::materialize_scoping(root, name).expect("materialize");
+        let fresh = State::default();
+        assert!(preview_for(&fresh, root, &key).is_some());
+        let mut prompted = State::default();
+        prompted.prompted.insert(name.to_string());
+        assert_eq!(preview_for(&prompted, root, &key), None);
+    }
+
+    #[test]
     fn plan_md_text_reads_live_file_or_none() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();

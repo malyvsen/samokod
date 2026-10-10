@@ -181,6 +181,27 @@ describe("scoping preview", () => {
 		expect(chat.transcript).toHaveLength(1);
 		expect(chat.transcript[0]).toMatchObject({ kind: "user", text: "hello" });
 	});
+
+	test("fresh-plan preparing then done preserves preview without begin", () => {
+		let chats = updateEntry(withChat(), testKey(), (chat) => ({
+			...chat,
+			scopingPreview: "TEMPLATE",
+		}));
+		chats = applySessionEvent(chats, {
+			type: "history_preparing",
+			session: testKey(),
+		});
+		chats = applySessionEvent(chats, {
+			type: "history_done",
+			session: testKey(),
+		});
+		expect(chatOf(chats).scopingPreview).toBe("TEMPLATE");
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
+		expect(chatOf(chats).scopingPreview).toBeNull();
+	});
 });
 
 describe("replayed updates", () => {
