@@ -27,10 +27,8 @@ use super::{AgentManager, lock_state};
 /// worktrees are independent.
 // Dirty or diverged plans hold and are skipped until a later trigger,
 // showing only their existing markers. A landing whose target moved under
-// it re-rebases automatically while still on A. Background plans never
-// steal the selection: no `current` writes happen off the explicit
-// `select_plan`/`create_plan`/`open_repo` paths plus follow-own-move in
-// transitions; the pump itself never touches `current`.
+// it re-rebases automatically while still on A. Selection never moves here
+// except through follow-own-move; the pump itself never touches `current`.
 impl AgentManager {
     /// Fire-and-forget pump for background triggers (turn ends, branch
     /// moves). The pump future is not `Send` (it drives the turn
@@ -180,10 +178,10 @@ impl AgentManager {
     }
 
     /// Shared transition core: idle gate, repo snapshot, `PlanRef` build,
-    /// existence check, live-session drop, prompted carry, selection, and
-    /// plans update happen once here for every entry point. The manual
-    /// commands map their session onto a `Transition` and delegate; the
-    /// pump calls this directly.
+    /// existence check, live-session drop, prompted carry, follow-own-move
+    /// selection, and plans update happen once here for every entry point.
+    /// The manual commands map their session onto a `Transition` and
+    /// delegate; the pump calls this directly.
     pub(crate) async fn transition(&self, action: Transition) -> Result<PlansUpdate, AgentError> {
         // A rebase that finds its landing ffable after all finishes
         // instead. Redirected up front so the core below stays a single
@@ -378,16 +376,13 @@ impl AgentManager {
                 let next = plans::complete(&repo_root, &from)?;
                 self.drop_plan_lives(&from.name).await;
                 self.carry_prompted(&from.name, &next.name);
-                let finished = SessionKey {
-                    plan: next.name,
-                    role: SessionRole::Executing,
-                };
-                if lock_state(&self.state)
-                    .and_then(|state| state.current.clone())
-                    .is_some_and(|current| current.plan == plan)
-                {
-                    self.select_key(finished);
-                }
+                self.select_if_viewed(
+                    &plan,
+                    SessionKey {
+                        plan: next.name,
+                        role: SessionRole::Executing,
+                    },
+                );
                 Ok(self.plans_update())
             }
             Transition::FinishEvergreening { plan } => {
@@ -421,16 +416,13 @@ impl AgentManager {
                 let next = plans::complete(&repo_root, &from)?;
                 self.drop_plan_lives(&from.name).await;
                 self.carry_prompted(&from.name, &next.name);
-                let finished = SessionKey {
-                    plan: next.name,
-                    role: SessionRole::Evergreening,
-                };
-                if lock_state(&self.state)
-                    .and_then(|state| state.current.clone())
-                    .is_some_and(|current| current.plan == plan)
-                {
-                    self.select_key(finished);
-                }
+                self.select_if_viewed(
+                    &plan,
+                    SessionKey {
+                        plan: next.name,
+                        role: SessionRole::Evergreening,
+                    },
+                );
                 Ok(self.plans_update())
             }
             Transition::FinishLanding { plan } => {
@@ -464,16 +456,13 @@ impl AgentManager {
                 let next = plans::finish_landing(&repo_root, &from)?;
                 self.drop_plan_lives(&from.name).await;
                 self.carry_prompted(&from.name, &next.name);
-                let finished = SessionKey {
-                    plan: next.name,
-                    role: SessionRole::Landing,
-                };
-                if lock_state(&self.state)
-                    .and_then(|state| state.current.clone())
-                    .is_some_and(|current| current.plan == plan)
-                {
-                    self.select_key(finished);
-                }
+                self.select_if_viewed(
+                    &plan,
+                    SessionKey {
+                        plan: next.name,
+                        role: SessionRole::Landing,
+                    },
+                );
                 Ok(self.plans_update())
             }
             Transition::RebaseLanding { plan } => {
@@ -524,14 +513,12 @@ impl AgentManager {
     /// for the caller's `ActivePlan`, send its role as the full first turn,
     /// and announce it as a live user bubble. The caller moves the plan and
     /// drops the old live session first; the plan name travels inside
-    /// `active` so the prompted flag follows it. Follows its own move
-    /// only: points `current` at the new key when the moved plan was the
-    /// viewed one, otherwise leaves the selection alone.
+    /// `active` so the prompted flag follows it. Follows its own move only.
     async fn spawn_with_first_turn(
         &self,
         repo_root: &std::path::Path,
         branch: &str,
-        from_plan: &str,
+        acted_plan: &str,
         active: ActivePlan,
         text: String,
     ) -> Result<PlansUpdate, AgentError> {
@@ -539,12 +526,7 @@ impl AgentManager {
         let agent = opencode::agent_for(active.phase);
         let (connection, session_id, key) =
             self.spawn_session(repo_root, branch, active, agent).await?;
-        if lock_state(&self.state)
-            .and_then(|state| state.current.clone())
-            .is_some_and(|current| current.plan == from_plan)
-        {
-            self.select_key(key.clone());
-        }
+        self.select_if_viewed(acted_plan, key.clone());
         self.mark_prompted(&plan_name);
         self.start_turn(connection, session_id, key.clone(), text.clone())
             .await?;
@@ -948,48 +930,6 @@ mod tests {
                 ..view("a", phase)
             };
             assert_eq!(next_action(&done), None, "{phase:?} stays put");
-        }
-    }
-
-    fn should_follow(current: Option<SessionKey>, acted: &str) -> bool {
-        current.is_some_and(|key| key.plan == acted)
-    }
-
-    #[test]
-    fn finish_background_leaves_selection() {
-        let current = Some(SessionKey {
-            plan: "aaa".to_string(),
-            role: SessionRole::Executing,
-        });
-        assert!(!should_follow(current, "bbb"));
-    }
-
-    #[test]
-    fn finish_viewed_follows_own_move() {
-        let current = Some(SessionKey {
-            plan: "aaa".to_string(),
-            role: SessionRole::Executing,
-        });
-        assert!(should_follow(current, "aaa"));
-    }
-
-    #[test]
-    fn spawn_background_leaves_selection() {
-        let current = Some(SessionKey {
-            plan: "aaa".to_string(),
-            role: SessionRole::Scoping,
-        });
-        assert!(!should_follow(current, "bbb"));
-    }
-
-    #[test]
-    fn pump_background_leaves_selection() {
-        let current = Some(SessionKey {
-            plan: "aaa".to_string(),
-            role: SessionRole::Executing,
-        });
-        for acted in ["bbb", "ccc"] {
-            assert!(!should_follow(current.clone(), acted));
         }
     }
 }

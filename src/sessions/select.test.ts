@@ -3,8 +3,10 @@ import { testEntryWith, testKey, testStatus } from "../fixtures";
 import { sessionKeyOf } from "../types";
 import {
 	agentStatusOf,
+	followRename,
 	isReadOnly,
 	isSessionBusy,
+	repairSelection,
 	selectedChat,
 } from "./select";
 import { emptyChat } from "./store";
@@ -87,5 +89,82 @@ describe("agentStatusOf", () => {
 		expect(agentStatusOf({ ...emptyChat(), approval: true })).toBe("approval");
 		expect(agentStatusOf({ ...emptyChat(), working: true })).toBe("working");
 		expect(agentStatusOf({ ...emptyChat(), failed: true })).toBe("failed");
+	});
+});
+
+describe("repairSelection", () => {
+	test("keeps the current key when its plan still exists", () => {
+		const plans = [
+			testEntryWith("aaa", "scoping", "Alpha", true, [testStatus("scoping")]),
+			testEntryWith("bbb", "scoping", "Beta", true, [testStatus("scoping")]),
+		];
+		const current = { plan: "aaa", role: "scoping" } as const;
+		expect(repairSelection(plans, current)).toBe(current);
+	});
+
+	test("advances the role when the entry no longer lists it", () => {
+		const plans = [
+			testEntryWith("aaa", "executing", "Alpha", true, [
+				testStatus("executing"),
+			]),
+		];
+		expect(repairSelection(plans, { plan: "aaa", role: "scoping" })).toEqual({
+			plan: "aaa",
+			role: "executing",
+		});
+	});
+
+	test("falls back to most-recent when the viewed plan vanished", () => {
+		const plans = [
+			testEntryWith("bbb", "scoping", "Beta", true, [testStatus("scoping")]),
+		];
+		expect(repairSelection(plans, { plan: "aaa", role: "scoping" })).toEqual({
+			plan: "bbb",
+			role: "scoping",
+		});
+	});
+
+	test("returns null only for an empty list", () => {
+		expect(repairSelection([], { plan: "aaa", role: "scoping" })).toBeNull();
+		expect(repairSelection([], null)).toBeNull();
+	});
+});
+
+describe("followRename", () => {
+	test("honors selected when it derives from the acted plan", () => {
+		const plans = [
+			testEntryWith("aaa.slug", "executing", "Alpha", true, [
+				testStatus("scoping"),
+				testStatus("executing"),
+			]),
+		];
+		expect(
+			followRename(plans, "aaa", { plan: "aaa.slug", role: "executing" }),
+		).toEqual({ plan: "aaa.slug", role: "executing" });
+	});
+
+	test("resolves the renamed entry otherwise", () => {
+		const plans = [
+			testEntryWith("aaa", "scoping", "Alpha", true, [testStatus("scoping")]),
+			testEntryWith("bbb.slug", "executing", "Beta", true, [
+				testStatus("scoping"),
+				testStatus("executing"),
+			]),
+		];
+		expect(
+			followRename(plans, "bbb", { plan: "bbb.slug", role: "executing" }),
+		).toEqual({ plan: "bbb.slug", role: "executing" });
+	});
+
+	test("falls back to most-recent when no rename matches", () => {
+		const plans = [
+			testEntryWith("ccc", "scoping", "Gamma", true, [testStatus("scoping")]),
+		];
+		expect(
+			followRename(plans, "bbb", { plan: "zzz", role: "scoping" }),
+		).toEqual({
+			plan: "ccc",
+			role: "scoping",
+		});
 	});
 });

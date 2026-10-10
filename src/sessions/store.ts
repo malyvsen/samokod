@@ -310,14 +310,15 @@ export function applySessionEvent(
 	}
 }
 
-/// Move the acted-on transcript to its history row when the plan renamed,
-/// and open the new executing session working. `executingRunning` sets the
-/// executing session running for the eager execute path.
+/// Move the acted-on transcript to its history row when the plan renamed.
+/// `markSelectedRunning` opens the new selected session working; callers
+/// pass whether the acted plan is viewed so background work moves its own
+/// bucket without touching the viewed transcript.
 export function carryHistory(
 	chats: Chats,
 	key: SessionKey,
 	update: PlansUpdate,
-	executingRunning: boolean,
+	markSelectedRunning: boolean,
 ): Chats {
 	const historyKey: SessionKey = {
 		plan: update.selected.plan,
@@ -328,7 +329,7 @@ export function carryHistory(
 	delete next[sessionKeyOf(key)];
 	next[sessionKeyOf(historyKey)] = { ...entry, working: false, live: null };
 	if (
-		executingRunning &&
+		markSelectedRunning &&
 		sessionKeyOf(update.selected) !== sessionKeyOf(historyKey)
 	) {
 		const id = sessionKeyOf(update.selected);

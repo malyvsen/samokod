@@ -112,6 +112,22 @@ impl AgentManager {
             }
         }
     }
+
+    /// Follow the acted plan's own move: pin the selection to `next` only
+    /// when the viewed plan is the acted one, otherwise leave it alone so
+    /// background work never steals the selection.
+    pub(crate) fn select_if_viewed(&self, acted_plan: &str, next: SessionKey) {
+        let follows = lock_state(&self.state)
+            .is_some_and(|state| is_viewed(state.current.as_ref(), acted_plan));
+        if follows {
+            self.select_key(next);
+        }
+    }
+}
+
+/// True when the viewed plan is the acted one. Pure.
+pub(crate) fn is_viewed(current: Option<&SessionKey>, acted_plan: &str) -> bool {
+    current.is_some_and(|key| key.plan == acted_plan)
 }
 
 /// Plans sorted by phase, then phase-entry arrival newest first, then
@@ -394,5 +410,16 @@ mod tests {
         assert_eq!(kept.working_title.as_deref(), Some("Login flow fixes"));
         let empty = HashMap::new();
         assert_eq!(entry_title(root, &executing, &empty, &kept), "Real heading");
+    }
+
+    #[test]
+    fn only_the_viewed_plan_follows() {
+        let viewed = SessionKey {
+            plan: "aaa".to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert!(is_viewed(Some(&viewed), "aaa"));
+        assert!(!is_viewed(Some(&viewed), "bbb"));
+        assert!(!is_viewed(None, "aaa"));
     }
 }

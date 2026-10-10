@@ -69,6 +69,10 @@ function mostRecentKeyFor(plans: PlanEntry[]): SessionKey | null {
 	return headerKeyFor(first);
 }
 
+function derivesFrom(candidate: string, base: string): boolean {
+	return candidate === base || candidate.startsWith(`${base}.`);
+}
+
 /// Repair the viewed selection against a pushed plan list without ever
 /// stealing focus: keep the current key when its plan still exists (role
 /// advances only when the entry no longer lists it), fall back to the
@@ -86,4 +90,24 @@ export function repairSelection(
 		return current;
 	}
 	return headerKeyFor(entry);
+}
+
+/// Follow the viewed plan's own rename through an execute/cancel response:
+/// honor `selected` when it derives from the acted plan, otherwise resolve
+/// the renamed entry from the fresh plan list, falling back to most-recent.
+/// Pure.
+export function followRename(
+	plans: PlanEntry[],
+	oldPlan: string,
+	selected: SessionKey,
+): SessionKey {
+	if (derivesFrom(selected.plan, oldPlan)) return selected;
+	const renamed = plans.find((entry) => derivesFrom(entry.name, oldPlan));
+	if (renamed !== undefined) {
+		if (renamed.sessions.some((status) => status.role === selected.role)) {
+			return { plan: renamed.name, role: selected.role };
+		}
+		return headerKeyFor(renamed);
+	}
+	return mostRecentKeyFor(plans) ?? selected;
 }

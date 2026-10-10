@@ -513,7 +513,8 @@ impl AgentManager {
     /// Cancel an active plan. An empty scoping session vanishes without a
     /// `cancelled/` trace; otherwise the plan moves to `cancelled/`,
     /// force-removing the worktree and branch for executing and landing
-    /// plans. The selection stays on the cancelled (now read-only) session.
+    /// plans. The selection follows only when the cancelled plan is viewed,
+    /// landing on the cancelled (now read-only) session.
     pub async fn cancel_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
         ensure_idle(&self.state, &session)?;
         let (repo_root, _) = self
@@ -525,11 +526,7 @@ impl AgentManager {
             let vanished = match self.state.lock() {
                 Ok(mut state) => {
                     if abandon_empty_scoping(&mut state, &repo_root, &session, None, "cancel") {
-                        if state
-                            .current
-                            .as_ref()
-                            .is_some_and(|current| current.plan == session.plan)
-                        {
+                        if plans_list::is_viewed(state.current.as_ref(), &session.plan) {
                             let plans = plans_list::sorted_entries(
                                 &repo_root,
                                 &state.sessions,
@@ -583,16 +580,13 @@ impl AgentManager {
             self.drop_plan_lives(&from.name).await;
         }
         self.carry_prompted(&from.name, &next.name);
-        let cancelled = SessionKey {
-            plan: next.name,
-            role: session.role,
-        };
-        if lock_state(&self.state)
-            .and_then(|state| state.current.clone())
-            .is_some_and(|current| current.plan == session.plan)
-        {
-            self.select_key(cancelled);
-        }
+        self.select_if_viewed(
+            &session.plan,
+            SessionKey {
+                plan: next.name,
+                role: session.role,
+            },
+        );
         Ok(self.plans_update())
     }
 
@@ -1997,83 +1991,6 @@ mod tests {
         assert!(is_empty_scoping(&state, root, name));
         vanish_scoping(&mut state, root, name, "test");
         assert!(!state.pending_scoping.contains_key(name));
-    }
-
-    #[test]
-    fn cancel_background_leaves_current() {
-        let state = State {
-            current: Some(SessionKey {
-                plan: "aaa".to_string(),
-                role: SessionRole::Scoping,
-            }),
-            ..Default::default()
-        };
-        let acted = "bbb";
-        let should_follow = state
-            .current
-            .clone()
-            .is_some_and(|current| current.plan == acted);
-        assert!(!should_follow);
-        assert_eq!(state.current.expect("current").plan, "aaa");
-    }
-
-    #[test]
-    fn cancel_viewed_follows() {
-        let state = State {
-            current: Some(SessionKey {
-                plan: "aaa".to_string(),
-                role: SessionRole::Scoping,
-            }),
-            ..Default::default()
-        };
-        let acted = "aaa";
-        assert!(
-            state
-                .current
-                .clone()
-                .is_some_and(|current| current.plan == acted)
-        );
-    }
-
-    #[test]
-    fn finish_background_leaves_current() {
-        let state = State {
-            current: Some(SessionKey {
-                plan: "aaa".to_string(),
-                role: SessionRole::Executing,
-            }),
-            ..Default::default()
-        };
-        let acted = "bbb";
-        let should_follow = state
-            .current
-            .clone()
-            .is_some_and(|current| current.plan == acted);
-        assert!(!should_follow);
-        assert_eq!(state.current.expect("current").plan, "aaa");
-    }
-
-    #[test]
-    fn spawn_leaves_current_untouched() {
-        let mut state = State {
-            current: Some(SessionKey {
-                plan: "aaa".to_string(),
-                role: SessionRole::Scoping,
-            }),
-            ..Default::default()
-        };
-        let key = SessionKey {
-            plan: "bbb".to_string(),
-            role: SessionRole::Scoping,
-        };
-        state.sessions.insert(
-            key,
-            LiveSession::fresh(
-                ActivePlan::scoping("bbb".to_string()),
-                crate::repo_state::RepoState::default(),
-            ),
-        );
-        assert_eq!(state.current.expect("current").plan, "aaa");
     }
 
     async fn open_test_session(

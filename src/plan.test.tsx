@@ -32,6 +32,10 @@ beforeEach(() => {
 	api.scopingTemplate.mockResolvedValue(null);
 });
 
+function textbox(): HTMLElement {
+	return screen.getByRole("textbox", { name: "Ask for a change…" });
+}
+
 describe("plan", () => {
 	test("session_reset keeps the selected plan", async () => {
 		await openChat(api);
@@ -227,6 +231,8 @@ describe("plan", () => {
 			session: { plan: "bbb", role: "scoping" },
 		});
 		expect(screen.getByText("aaa chat")).toBeInTheDocument();
+		const box = textbox();
+		box.focus();
 		emitAppEvent(api, {
 			type: "plans_changed",
 			plans: [
@@ -237,9 +243,8 @@ describe("plan", () => {
 		});
 		expect(screen.getByText("aaa chat")).toBeInTheDocument();
 		expect(screen.queryByText("bbb chat")).not.toBeInTheDocument();
-		expect(
-			screen.getByRole("textbox", { name: "Ask for a change…" }),
-		).toBeInTheDocument();
+		expect(document.activeElement).toBe(box);
+		expect(textbox()).toBe(box);
 	});
 
 	test("background execute response keeps viewing", async () => {
@@ -253,14 +258,17 @@ describe("plan", () => {
 			selected: { plan: "aaa", role: "scoping" },
 			config_defaults: testDefaults(),
 		});
-		api.executePlan.mockResolvedValue({
-			plans: [
-				testEntry("aaa", "scoping", "Alpha", true),
-				testEntry("bbb.slug", "executing", "Beta", true),
-			],
-			selected: { plan: "bbb.slug", role: "executing" },
-			config_defaults: testDefaults(),
-		});
+		let resolveExecute!: (value: {
+			plans: ReturnType<typeof testEntry>[];
+			selected: { plan: string; role: "executing" };
+			config_defaults: ReturnType<typeof testDefaults>;
+		}) => void;
+		api.executePlan.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolveExecute = resolve;
+				}),
+		);
 		api.sendPrompt.mockResolvedValue(undefined);
 		const user = await openChat(api);
 		await user.keyboard("aaa question{Enter}");
@@ -281,11 +289,20 @@ describe("plan", () => {
 			plan: "bbb",
 			role: "scoping",
 		});
+		const box = textbox();
+		box.focus();
+		resolveExecute({
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb.slug", "executing", "Beta", true),
+			],
+			selected: { plan: "bbb.slug", role: "executing" },
+			config_defaults: testDefaults(),
+		});
 		await screen.findByText("Beta");
 		expect(screen.getByText("aaa chat")).toBeInTheDocument();
-		expect(
-			screen.getByRole("textbox", { name: "Ask for a change…" }),
-		).toBeInTheDocument();
+		expect(document.activeElement).toBe(box);
+		expect(textbox()).toBe(box);
 	});
 
 	test("background cancel response keeps viewing", async () => {
@@ -299,14 +316,17 @@ describe("plan", () => {
 			selected: { plan: "aaa", role: "scoping" },
 			config_defaults: testDefaults(),
 		});
-		api.cancelPlan.mockResolvedValue({
-			plans: [
-				testEntry("aaa", "scoping", "Alpha", true),
-				testEntry("bbb.cancelled", "cancelled", "Beta"),
-			],
-			selected: { plan: "bbb.cancelled", role: "scoping" },
-			config_defaults: testDefaults(),
-		});
+		let resolveCancel!: (value: {
+			plans: ReturnType<typeof testEntry>[];
+			selected: { plan: string; role: "scoping" };
+			config_defaults: ReturnType<typeof testDefaults>;
+		}) => void;
+		api.cancelPlan.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolveCancel = resolve;
+				}),
+		);
 		api.sendPrompt.mockResolvedValue(undefined);
 		const user = await openChat(api);
 		await user.keyboard("aaa question{Enter}");
@@ -327,11 +347,20 @@ describe("plan", () => {
 			plan: "bbb",
 			role: "scoping",
 		});
+		const box = textbox();
+		box.focus();
+		resolveCancel({
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb.cancelled", "cancelled", "Beta"),
+			],
+			selected: { plan: "bbb.cancelled", role: "scoping" },
+			config_defaults: testDefaults(),
+		});
 		await screen.findByText("Beta");
 		expect(screen.getByText("aaa chat")).toBeInTheDocument();
-		expect(
-			screen.getByRole("textbox", { name: "Ask for a change…" }),
-		).toBeInTheDocument();
+		expect(document.activeElement).toBe(box);
+		expect(textbox()).toBe(box);
 	});
 
 	test("viewed execute follows its own rename", async () => {
@@ -399,6 +428,71 @@ describe("plan", () => {
 		expect(
 			screen.getByRole("textbox", { name: "Ask for a change…" }),
 		).toBeInTheDocument();
+	});
+
+	test("background turn keeps focus and transcript", async () => {
+		api.sendPrompt.mockResolvedValue(undefined);
+		const user = await openChat(api);
+		await user.keyboard("viewed question{Enter}");
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: testKey(),
+			chunk: "viewed chat",
+		});
+		emitAppEvent(api, { type: "turn_done", session: testKey() });
+		const box = textbox();
+		box.focus();
+		emitAppEvent(api, {
+			type: "agent_text",
+			session: { plan: "other-plan", role: "scoping" },
+			chunk: "background chat",
+		});
+		emitAppEvent(api, {
+			type: "turn_done",
+			session: { plan: "other-plan", role: "scoping" },
+		});
+		expect(screen.getByText("viewed chat")).toBeInTheDocument();
+		expect(screen.queryByText("background chat")).not.toBeInTheDocument();
+		expect(document.activeElement).toBe(box);
+		expect(textbox()).toBe(box);
+	});
+
+	test("background permission keeps focus", async () => {
+		await openChat(api);
+		const box = textbox();
+		box.focus();
+		emitAppEvent(api, {
+			type: "permission_asked",
+			session: { plan: "other-plan", role: "scoping" },
+			permission: {
+				tool_call_id: "t1",
+				title: "Run",
+				tool: "bash",
+				options: [{ id: "allow", kind: "allow" }],
+				rule_hint: "",
+			},
+		});
+		expect(document.activeElement).toBe(box);
+		expect(textbox()).toBeInTheDocument();
+	});
+
+	test("background spend_tick refresh keeps focus", async () => {
+		await openChat(api);
+		const box = textbox();
+		box.focus();
+		emitAppEvent(api, {
+			type: "spend_tick",
+			session: { plan: "other-plan", role: "scoping" },
+			cost: 1.24,
+			ctx_pct: 38.4,
+		});
+		emitAppEvent(api, {
+			type: "plans_changed",
+			plans: [testEntry()],
+			selected: { plan: "other-plan", role: "scoping" },
+		});
+		expect(document.activeElement).toBe(box);
+		expect(textbox()).toBeInTheDocument();
 	});
 
 	test("selecting a row swaps transcript while scoping shows the plan", async () => {
