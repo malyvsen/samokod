@@ -43,6 +43,19 @@ export function emitAppEvent(apiMock: typeof api, event: AppEvent): void {
 	});
 }
 
+export function emitAppEvents(apiMock: typeof api, events: AppEvent[]): void {
+	type Handler = (event: AppEvent) => void;
+	const calls = apiMock.onAppEvent.mock.calls as unknown as Handler[][];
+	if (calls.length === 0) throw new Error("no app event handler");
+	act(() => {
+		for (const event of events) {
+			for (const call of calls) {
+				call[0]?.(event);
+			}
+		}
+	});
+}
+
 export function stubMatchMedia(): void {
 	Object.defineProperty(window, "matchMedia", {
 		configurable: true,
