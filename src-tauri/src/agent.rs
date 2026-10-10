@@ -516,8 +516,10 @@ impl AgentManager {
                 Ok(mut state) => {
                     if abandon_empty_scoping(&mut state, &repo_root, &session, None, "cancel") {
                         if plans_list::is_viewed(state.current.as_ref(), &session.plan) {
+                            let checkout_branch = state.checkout_branch.clone();
                             let plans = plans_list::sorted_entries(
                                 &repo_root,
+                                &checkout_branch,
                                 &state.sessions,
                                 &state.pending_scoping,
                             );
@@ -1145,7 +1147,7 @@ mod tests {
         write_plan_dir(root, plans::Phase::Evergreening, "g", Some("G"));
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
         write_plan_dir(root, plans::Phase::Scoping, "s", Some("S"));
-        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         let phases: Vec<plans::Phase> = entries.iter().map(|entry| entry.phase).collect();
         assert_eq!(
             phases,
@@ -1169,7 +1171,7 @@ mod tests {
         plans::materialize_scoping(root, "2026-09-26.08-41-03").expect("old");
         std::thread::sleep(std::time::Duration::from_millis(10));
         plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("new");
-        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "2026-09-26.08-41-04");
         assert_eq!(entries[1].name, "2026-09-26.08-41-03");
@@ -1182,7 +1184,7 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Scoping, "first", Some("First"));
         write_plan_dir(root, plans::Phase::Scoping, "second", Some("Second"));
-        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "second");
         assert_eq!(entries[1].name, "first");
@@ -1194,7 +1196,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Scoping, "bare", None);
-        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "Untitled");
         assert_eq!(entries[0].sessions.len(), 1);
@@ -1206,7 +1208,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
-        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(
             most_recent_key(&entries),
             Some(SessionKey {
@@ -1223,7 +1225,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Landing, "m", Some("M"));
-        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 4);
         assert_eq!(
@@ -1241,7 +1243,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Evergreening, "g", Some("G"));
-        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 3);
         assert_eq!(
@@ -1280,7 +1282,7 @@ mod tests {
         live.working = true;
         live.approval = true;
         let sessions = HashMap::from([(key, live)]);
-        let entries = sorted_entries(root, &sessions, &HashMap::new());
+        let entries = sorted_entries(root, "", &sessions, &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 2);
         let executing = entries[0]
@@ -1306,7 +1308,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Cancelled, "c", Some("C"));
-        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 1);
         assert_eq!(entries[0].sessions[0].role, SessionRole::Scoping);
@@ -1327,7 +1329,7 @@ mod tests {
             .exists()
         );
         let pending = HashMap::from([(name.to_string(), None)]);
-        let entries = sorted_entries(root, &HashMap::new(), &pending);
+        let entries = sorted_entries(root, "", &HashMap::new(), &pending);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, name);
         assert_eq!(entries[0].title, "Untitled");
@@ -1347,7 +1349,7 @@ mod tests {
             ("2026-09-26.08-41-03".to_string(), None),
             ("2026-09-26.08-41-04".to_string(), None),
         ]);
-        let entries = sorted_entries(root, &HashMap::new(), &pending);
+        let entries = sorted_entries(root, "", &HashMap::new(), &pending);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "2026-09-26.08-41-04");
         assert_eq!(entries[1].name, "2026-09-26.08-41-03");
@@ -1360,7 +1362,7 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
         let pending = HashMap::from([(name.to_string(), Some("Login flow fixes".to_string()))]);
-        let entries = sorted_entries(root, &HashMap::new(), &pending);
+        let entries = sorted_entries(root, "", &HashMap::new(), &pending);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "Login flow fixes");
     }
@@ -1375,14 +1377,14 @@ mod tests {
         stored.manual = true;
         stored.evergreen = false;
         plans::store_state(&plan.path(root), &stored);
-        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert!(entries[0].manual);
         assert!(!entries[0].evergreen);
         let mut stored = plans::load_state(&plan.path(root));
         stored.manual = false;
         stored.evergreen = true;
         plans::store_state(&plan.path(root), &stored);
-        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert!(!entries[0].manual);
         assert!(entries[0].evergreen);
     }
@@ -1759,7 +1761,7 @@ mod tests {
             .path(root)
             .is_dir()
         );
-        let entries = sorted_entries(root, &state.sessions, &state.pending_scoping);
+        let entries = sorted_entries(root, "", &state.sessions, &state.pending_scoping);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, target.plan);
     }
@@ -1881,7 +1883,7 @@ mod tests {
             Some("... !!! ???".to_string())
         ));
         assert_eq!(state.pending_scoping.get(name), Some(&None));
-        let entries = sorted_entries(root, &state.sessions, &state.pending_scoping);
+        let entries = sorted_entries(root, "", &state.sessions, &state.pending_scoping);
         assert_eq!(entries[0].title, "Untitled");
     }
 

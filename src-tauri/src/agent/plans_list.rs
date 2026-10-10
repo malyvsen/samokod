@@ -24,7 +24,12 @@ impl AgentManager {
         let state = self.state.lock().expect("state poisoned");
         let repo_root = state.repo_root.clone().unwrap_or_default();
         let branch = state.checkout_branch.clone();
-        let plans = sorted_entries(&repo_root, &state.sessions, &state.pending_scoping);
+        let plans = sorted_entries(
+            &repo_root,
+            &state.checkout_branch,
+            &state.sessions,
+            &state.pending_scoping,
+        );
         let selected = fallback_selected(&plans, None);
         let config_defaults = defaults_for(&repo_root);
         let scoping_preview = scoping_preview_for(&state, &repo_root, &selected);
@@ -43,7 +48,12 @@ impl AgentManager {
     pub(crate) fn plans_update(&self) -> PlansUpdate {
         let state = self.state.lock().expect("state poisoned");
         let repo_root = state.repo_root.clone().unwrap_or_default();
-        let plans = sorted_entries(&repo_root, &state.sessions, &state.pending_scoping);
+        let plans = sorted_entries(
+            &repo_root,
+            &state.checkout_branch,
+            &state.sessions,
+            &state.pending_scoping,
+        );
         let selected = fallback_selected(&plans, state.current.as_ref());
         let config_defaults = defaults_for(&repo_root);
         let scoping_preview = scoping_preview_for(&state, &repo_root, &selected);
@@ -127,8 +137,45 @@ pub(crate) fn is_viewed(current: Option<&SessionKey>, acted_plan: &str) -> bool 
 /// scoping `PlanRef`; with no timestamp it orders by name, newest first.
 /// Each plan reads its `state.json` once and reuses it for arrival, title,
 /// flags, and roles; missing files yield the automatic evergreen default.
+/// Branch commits and fast-forward state for one plan row. Empty and false
+/// without touching git when the phase cannot own a worktree or when the
+/// checkout branch is empty; empty and false on any git error so the list
+/// always renders. Pure except the git reads.
+fn branch_state_for(
+    repo_root: &Path,
+    checkout_branch: &str,
+    plan: &plans::PlanRef,
+) -> (Vec<String>, bool) {
+    match plan.phase {
+        plans::Phase::Scoping | plans::Phase::Completed | plans::Phase::Cancelled => {
+            return (Vec::new(), false);
+        }
+        plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Landing => {}
+    }
+    if checkout_branch.is_empty() {
+        return (Vec::new(), false);
+    }
+    let worktree_branch = crate::worktrees::branch_name(&plan.name);
+    let commits = match crate::worktrees::commits(repo_root, checkout_branch, &worktree_branch) {
+        Ok(commits) => commits,
+        Err(error) => {
+            log::warn!("failed to list commits for {}: {error}", plan.name);
+            return (Vec::new(), false);
+        }
+    };
+    let ffable = match crate::worktrees::is_ffable(repo_root, checkout_branch, &worktree_branch) {
+        Ok(ffable) => ffable,
+        Err(error) => {
+            log::warn!("failed to check ffable for {}: {error}", plan.name);
+            return (Vec::new(), false);
+        }
+    };
+    (commits, ffable)
+}
+
 pub(crate) fn sorted_entries(
     repo_root: &Path,
+    checkout_branch: &str,
     sessions: &HashMap<SessionKey, LiveSession>,
     pending: &HashMap<String, Option<String>>,
 ) -> Vec<PlanEntry> {
@@ -163,14 +210,19 @@ pub(crate) fn sorted_entries(
             })
     });
     rows.iter()
-        .map(|(plan, state, _)| PlanEntry {
-            name: plan.name.clone(),
-            phase: plan.phase,
-            title: entry_title(repo_root, plan, pending, state),
-            has_plan_md: plan.has_plan_md(repo_root),
-            sessions: session_statuses(plan, sessions, state),
-            manual: state.manual,
-            evergreen: state.evergreen,
+        .map(|(plan, state, _)| {
+            let (commits, ffable) = branch_state_for(repo_root, checkout_branch, plan);
+            PlanEntry {
+                name: plan.name.clone(),
+                phase: plan.phase,
+                title: entry_title(repo_root, plan, pending, state),
+                has_plan_md: plan.has_plan_md(repo_root),
+                sessions: session_statuses(plan, sessions, state),
+                manual: state.manual,
+                evergreen: state.evergreen,
+                commits,
+                ffable,
+            }
         })
         .collect()
 }
@@ -319,7 +371,13 @@ pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
     let (plans, selected, scoping_preview) = match state.lock() {
         Ok(guard) => {
             let repo_root = guard.repo_root.clone().unwrap_or_default();
-            let plans = sorted_entries(&repo_root, &guard.sessions, &guard.pending_scoping);
+            let checkout_branch = guard.checkout_branch.clone();
+            let plans = sorted_entries(
+                &repo_root,
+                &checkout_branch,
+                &guard.sessions,
+                &guard.pending_scoping,
+            );
             let selected = guard.current.clone().or_else(|| most_recent_key(&plans));
             let scoping_preview = selected
                 .as_ref()
@@ -439,5 +497,99 @@ mod tests {
         assert!(is_viewed(Some(&viewed), "aaa"));
         assert!(!is_viewed(Some(&viewed), "bbb"));
         assert!(!is_viewed(None, "aaa"));
+    }
+
+    fn test_git(repo: &Path, args: &[&str]) -> std::process::Output {
+        crate::git::command(repo).args(args).output().expect("git")
+    }
+
+    fn git_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for args in [
+            vec!["init"],
+            vec!["config", "user.email", "test@example.com"],
+            vec!["config", "user.name", "test"],
+            vec!["commit", "--allow-empty", "-m", "init"],
+        ] {
+            let status = test_git(dir.path(), &args);
+            assert!(status.status.success(), "{args:?}");
+        }
+        dir
+    }
+
+    fn commit_file(repo: &Path, name: &str, contents: &str, message: &str) {
+        std::fs::write(repo.join(name), contents).expect("write");
+        for args in [vec!["add", name], vec!["commit", "-m", message]] {
+            let status = test_git(repo, &args);
+            assert!(status.status.success(), "{args:?}");
+        }
+    }
+
+    fn current_branch(repo: &Path) -> String {
+        let output = test_git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
+        assert!(output.status.success());
+        String::from_utf8(output.stdout)
+            .expect("utf8")
+            .trim()
+            .to_string()
+    }
+
+    #[test]
+    fn branch_state_tracks_diverged_then_ffable() {
+        let dir = git_repo();
+        let root = dir.path();
+        let target = current_branch(root);
+        let base = crate::worktrees::head_commit(root).expect("head");
+        let name = "2026-09-26.14-53-26.branch-check";
+        let plan = plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Landing,
+        };
+        let record = crate::worktrees::create(root, name, &base).expect("create");
+        commit_file(&record.path, "work.txt", "work\n", "plan work");
+        commit_file(&record.path, "more.txt", "more\n", "more work");
+        commit_file(root, "target.txt", "target\n", "target moves on");
+        let (commits, ffable) = branch_state_for(root, &target, &plan);
+        assert_eq!(commits.len(), 2);
+        assert!(commits[0].ends_with("plan work"));
+        assert!(commits[1].ends_with("more work"));
+        assert!(!ffable);
+        crate::worktrees::remove(root, &record.path, &record.worktree_branch, true)
+            .expect("remove");
+        // Fresh ffable branch: target is an ancestor, fast-forward keeps it so.
+        let ff_name = "2026-09-26.14-53-27.ff-check";
+        let ff_plan = plans::PlanRef {
+            name: ff_name.to_string(),
+            phase: plans::Phase::Landing,
+        };
+        let ff_base = crate::worktrees::head_commit(root).expect("head");
+        let ff_record = crate::worktrees::create(root, ff_name, &ff_base).expect("create");
+        commit_file(&ff_record.path, "work.txt", "work\n", "plan work");
+        let branch = crate::worktrees::branch_name(ff_name);
+        crate::worktrees::fast_forward(root, &target, &branch).expect("ff");
+        let (commits, ffable) = branch_state_for(root, &target, &ff_plan);
+        assert!(ffable);
+        assert!(commits.is_empty());
+        crate::worktrees::remove(root, &ff_record.path, &ff_record.worktree_branch, true)
+            .expect("remove");
+    }
+
+    #[test]
+    fn branch_state_skips_scoping_without_git() {
+        let plan = plans::PlanRef {
+            name: "2026-09-26.08-41-03".to_string(),
+            phase: plans::Phase::Scoping,
+        };
+        let missing = Path::new("/definitely/missing/repo");
+        let (commits, ffable) = branch_state_for(missing, "main", &plan);
+        assert!(commits.is_empty());
+        assert!(!ffable);
+        let executing = plans::PlanRef {
+            name: "2026-09-26.08-41-03.slug".to_string(),
+            phase: plans::Phase::Executing,
+        };
+        let (commits, ffable) = branch_state_for(missing, "", &executing);
+        assert!(commits.is_empty());
+        assert!(!ffable);
     }
 }

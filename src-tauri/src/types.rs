@@ -201,6 +201,13 @@ pub struct PlanEntry {
     /// straight from executing. The single copy lives in `PlanState`.
     #[serde(default = "crate::plans::default_evergreen")]
     pub evergreen: bool,
+    /// Branch commits ahead of the target, oldest first. Empty when the
+    /// plan owns no worktree.
+    #[serde(default)]
+    pub commits: Vec<String>,
+    /// True when the target is an ancestor of the plan branch.
+    #[serde(default)]
+    pub ffable: bool,
 }
 
 /// Stored model/effort defaults for the instant disabled picker paint.
@@ -423,6 +430,8 @@ mod tests {
             sessions: Vec::new(),
             manual: false,
             evergreen: true,
+            commits: Vec::new(),
+            ffable: false,
         };
         let value = serde_json::to_value(&entry).expect("serializes");
         let actual: std::collections::BTreeSet<String> =
@@ -435,6 +444,8 @@ mod tests {
             "sessions",
             "manual",
             "evergreen",
+            "commits",
+            "ffable",
         ]
         .into_iter()
         .map(str::to_string)
