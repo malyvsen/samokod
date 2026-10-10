@@ -10,7 +10,12 @@ import type {
 	ToolStatus,
 	TranscriptItem,
 } from "../types";
-import { CollapseControl, isLongMessage, useCollapsed } from "./collapsible";
+import {
+	CollapseControl,
+	type CollapsibleKind,
+	isLongMessage,
+	useCollapsed,
+} from "./collapsible";
 import { MessageMarkdown } from "./MessageMarkdown";
 
 export function Transcript({
@@ -41,13 +46,36 @@ export function Transcript({
 		<>
 			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
 			<div className="tcol">
-				{showLead && <LeadBubble text={lead} />}
+				{showLead && (
+					<MessageBubble
+						collapseKind="lead"
+						tone="user"
+						label="YOU"
+						text={lead}
+					/>
+				)}
 				{items.map((item) => {
 					if (item.kind === "user") {
-						return <UserBubble key={item.id} text={item.text} />;
+						return (
+							<MessageBubble
+								key={item.id}
+								collapseKind="user"
+								tone="user"
+								label="YOU"
+								text={item.text}
+							/>
+						);
 					}
 					if (item.kind === "agent") {
-						return <AgentBubble key={item.id} text={item.text} />;
+						return (
+							<MessageBubble
+								key={item.id}
+								collapseKind="agent"
+								tone="agent"
+								label="AI"
+								text={item.text}
+							/>
+						);
 					}
 					if (item.kind === "tool") {
 						return <ToolRow key={item.id} line={item.line} />;
@@ -150,49 +178,23 @@ export function Transcript({
 	);
 }
 
-function LeadBubble({ text }: { text: string }) {
-	const [collapsed, toggle] = useCollapsed("lead", text);
+function MessageBubble({
+	collapseKind,
+	tone,
+	label,
+	text,
+}: {
+	collapseKind: CollapsibleKind;
+	tone: "user" | "agent";
+	label: string;
+	text: string;
+}) {
+	const [collapsed, toggle] = useCollapsed(collapseKind, text);
 	const long = isLongMessage(text);
 	return (
-		<div className={collapsed ? "msg user collapsed" : "msg user"}>
+		<div className={collapsed ? `msg ${tone} collapsed` : `msg ${tone}`}>
 			<div className="who">
-				<span>YOU</span>
-				<span className="right">
-					{long && <CollapseControl collapsed={collapsed} onToggle={toggle} />}
-				</span>
-			</div>
-			<div className="body">
-				<MessageMarkdown text={text} />
-			</div>
-		</div>
-	);
-}
-
-function UserBubble({ text }: { text: string }) {
-	const [collapsed, toggle] = useCollapsed("user", text);
-	const long = isLongMessage(text);
-	return (
-		<div className={collapsed ? "msg user collapsed" : "msg user"}>
-			<div className="who">
-				<span>YOU</span>
-				<span className="right">
-					{long && <CollapseControl collapsed={collapsed} onToggle={toggle} />}
-				</span>
-			</div>
-			<div className="body">
-				<MessageMarkdown text={text} />
-			</div>
-		</div>
-	);
-}
-
-function AgentBubble({ text }: { text: string }) {
-	const [collapsed, toggle] = useCollapsed("agent", text);
-	const long = isLongMessage(text);
-	return (
-		<div className={collapsed ? "msg agent collapsed" : "msg agent"}>
-			<div className="who">
-				<span>AI</span>
+				<span>{label}</span>
 				<span className="right">
 					{long && <CollapseControl collapsed={collapsed} onToggle={toggle} />}
 				</span>

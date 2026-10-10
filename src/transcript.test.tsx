@@ -140,36 +140,34 @@ describe("transcript user messages", () => {
 		expect(container.querySelector(".msg.user .body ul li")).not.toBeNull();
 	});
 
-	test("message typography matches agent style", () => {
+	test("message bubbles share base typography and padding", () => {
 		const css = readFileSync("src/App.css", "utf8");
 		const baseRule = /\.msg\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 		expect(baseRule).toContain("font-size: 13px");
+		expect(baseRule).toContain("padding: 10px 12px");
 		const userRule = /\.msg\.user\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 		expect(userRule).not.toContain("white-space: pre-wrap");
 		expect(userRule).not.toContain("font-size");
+		expect(userRule).not.toContain("padding");
 		const agentRule = /\.msg\.agent\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 		expect(agentRule).not.toContain("font-size");
+		expect(agentRule).not.toContain("padding");
 	});
 
 	test("user and agent bubbles share body selectors", () => {
 		const md = "# t\n\npara\n\n1. a\n2. b\n\n```\ncode\n```";
-		const user = render(transcript(md));
-		expect(user.container.querySelector(".msg.user .body p")).not.toBeNull();
-		expect(
-			user.container.querySelector(".msg.user .body ol li"),
-		).not.toBeNull();
-		expect(
-			user.container.querySelector(".msg.user .body pre code"),
-		).not.toBeNull();
-		user.unmount();
-		const agent = render(agentTranscript(md));
-		expect(agent.container.querySelector(".msg.agent .body p")).not.toBeNull();
-		expect(
-			agent.container.querySelector(".msg.agent .body ol li"),
-		).not.toBeNull();
-		expect(
-			agent.container.querySelector(".msg.agent .body pre code"),
-		).not.toBeNull();
+		for (const [element, selector] of [
+			[transcript, ".msg.user"],
+			[agentTranscript, ".msg.agent"],
+		] as const) {
+			const { container, unmount } = render(element(md));
+			expect(container.querySelector(`${selector} .body p`)).not.toBeNull();
+			expect(container.querySelector(`${selector} .body ol li`)).not.toBeNull();
+			expect(
+				container.querySelector(`${selector} .body pre code`),
+			).not.toBeNull();
+			unmount();
+		}
 	});
 
 	test("user table renders wrapped table with header cells", () => {

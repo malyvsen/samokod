@@ -472,6 +472,7 @@ button.brand:hover {
 	min-width: 0;
 	overflow-wrap: anywhere;
 	font-size: 13px;
+	padding: 10px 12px;
 }
 
 .msg .who {
@@ -532,14 +533,12 @@ button.brand:hover {
 	align-self: flex-end;
 	border: 1px solid rgba(255, 255, 255, 0.28);
 	background: rgba(255, 255, 255, 0.06);
-	padding: 10px 12px;
 }
 
 .msg.agent {
 	align-self: flex-start;
 	border: 1px solid rgba(255, 255, 255, 0.14);
 	background: rgba(10, 10, 16, 0.55);
-	padding: 10px 12px;
 }
 
 .msg.draft .edit {
