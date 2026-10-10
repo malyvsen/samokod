@@ -104,13 +104,19 @@ export function App() {
 	const selectedRef = useRef<SessionKey | null>(null);
 	selectedRef.current = selectedKey;
 	const chatsRef = useRef<Chats>({});
-	chatsRef.current = chats;
+
+	const applyChats = useCallback((fn: (current: Chats) => Chats): Chats => {
+		const next = fn(chatsRef.current);
+		chatsRef.current = next;
+		setChats(next);
+		return next;
+	}, []);
 
 	const updateChat = useCallback(
 		(key: SessionKey, next: (chat: ChatState) => ChatState) => {
-			setChats((current) => updateEntry(current, key, next));
+			applyChats((current) => updateEntry(current, key, next));
 		},
-		[],
+		[applyChats],
 	);
 
 	const applyPlans = useCallback((update: PlansUpdate) => {
@@ -205,8 +211,7 @@ export function App() {
 					`event ${event.type} session=${sessionKeyOf(event.session)} selected=${selectedId}`,
 				);
 			}
-			const next = applySessionEvent(chatsRef.current, event);
-			setChats(next);
+			const next = applyChats((current) => applySessionEvent(current, event));
 			if (event.type === "turn_done") {
 				maybeDrain(event.session, drainStatusFor(next, event.session));
 			}
@@ -219,7 +224,7 @@ export function App() {
 					);
 			}
 		},
-		[maybeDrain],
+		[maybeDrain, applyChats],
 	);
 
 	useEffect(() => {
@@ -355,7 +360,7 @@ export function App() {
 			const opened = await openRepo(info.root);
 			setRepoRoot(opened.repo_root);
 			setBranch(opened.branch);
-			setChats({});
+			applyChats(() => ({}));
 			applyPlans(opened);
 			setView({ kind: "chat" });
 			setPickerError(null);
@@ -462,7 +467,7 @@ export function App() {
 			if (prev !== null && !keep) {
 				const prevKey = prev;
 				const prevId = sessionKeyOf(prevKey);
-				setChats((current) => {
+				applyChats((current) => {
 					const next = { ...current };
 					delete next[prevId];
 					return next;
@@ -500,7 +505,7 @@ export function App() {
 		try {
 			const options = await setGlobalConfigOption(configId, value);
 			if (configGeneration.current !== generation) return;
-			setChats((current) => {
+			applyChats((current) => {
 				const next: Chats = { ...current };
 				for (const id of Object.keys(next)) {
 					const existing = next[id];
@@ -571,7 +576,7 @@ export function App() {
 			const update = await createPlan(currentDraft);
 			if (current !== null && !sameSession(update.selected, current) && !keep) {
 				const vanished = current;
-				setChats((chats) => {
+				applyChats((chats) => {
 					const next = { ...chats };
 					delete next[sessionKeyOf(vanished)];
 					return next;
@@ -596,7 +601,7 @@ export function App() {
 		updateChat(key, (chat) => ({ ...chat, working: true }));
 		try {
 			const update = await executePlan(key);
-			setChats((current) => carryChats(current, key, update, true));
+			applyChats((current) => carryChats(current, key, update, true));
 			applyPlans(update);
 		} catch (error) {
 			updateChat(key, (chat) => ({ ...chat, working: false }));
@@ -615,14 +620,14 @@ export function App() {
 		try {
 			const update = await cancelPlan(key);
 			if (wasEmpty) {
-				setChats((current) => {
+				applyChats((current) => {
 					const next = { ...current };
 					delete next[sessionKeyOf(key)];
 					return next;
 				});
 				draft.clearDraft(key);
 			} else {
-				setChats((current) => carryChats(current, key, update, false));
+				applyChats((current) => carryChats(current, key, update, false));
 			}
 			applyPlans(update);
 		} catch (error) {
