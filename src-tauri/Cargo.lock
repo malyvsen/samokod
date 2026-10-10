@@ -3187,6 +3187,7 @@ name = "samokod"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "base64 0.23.1",
  "jiff",
  "keepawake",
  "log",

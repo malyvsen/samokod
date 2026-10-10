@@ -14,6 +14,10 @@ pub const LANDING_AGENT: &str = "samokod-landing";
 /// Matches every plan's state file. Each agent's edit rules deny it last.
 const STATE_DENY_GLOB: &str = ".samokod/plans/**/state.json";
 
+/// Matches every plan's image attachments. Agents can read them but never
+/// edit them, denied last so deny wins.
+const ATTACHMENTS_DENY_GLOB: &str = ".samokod/plans/**/attachments/**";
+
 /// Agent id for a phase. Pure.
 pub fn agent_for(phase: Phase) -> &'static str {
     match phase {
@@ -80,6 +84,7 @@ fn scoping_permissions(plan: &PlanRef) -> Value {
             ("*", "deny"),
             (scope.as_str(), "allow"),
             (STATE_DENY_GLOB, "deny"),
+            (ATTACHMENTS_DENY_GLOB, "deny"),
         ]),
         "bash": "allow",
         "question": "deny",
@@ -107,11 +112,12 @@ fn executing_permissions() -> Value {
     })
 }
 
-const EXECUTING_EDIT_RULES: [(&str, &str); 4] = [
+const EXECUTING_EDIT_RULES: [(&str, &str); 5] = [
     ("*", "allow"),
     (".samokod", "ask"),
     (".samokod/**", "ask"),
     (STATE_DENY_GLOB, "deny"),
+    (ATTACHMENTS_DENY_GLOB, "deny"),
 ];
 
 /// Evergreening runs in the same worktree as executing, so it shares the
@@ -127,11 +133,12 @@ fn evergreening_permissions() -> Value {
     })
 }
 
-const EVERGREENING_EDIT_RULES: [(&str, &str); 4] = [
+const EVERGREENING_EDIT_RULES: [(&str, &str); 5] = [
     ("*", "allow"),
     (".samokod", "ask"),
     (".samokod/**", "ask"),
     (STATE_DENY_GLOB, "deny"),
+    (ATTACHMENTS_DENY_GLOB, "deny"),
 ];
 
 /// Landing resolves one plan branch onto its target, so every worktree
@@ -149,7 +156,11 @@ fn landing_permissions() -> Value {
     })
 }
 
-const LANDING_EDIT_RULES: [(&str, &str); 2] = [("*", "allow"), (STATE_DENY_GLOB, "deny")];
+const LANDING_EDIT_RULES: [(&str, &str); 3] = [
+    ("*", "allow"),
+    (STATE_DENY_GLOB, "deny"),
+    (ATTACHMENTS_DENY_GLOB, "deny"),
+];
 
 /// Ordered permission object from `(pattern, effect)` pairs. Insertion
 /// order is the contract: OpenCode grants the last matching rule.
@@ -380,7 +391,8 @@ mod tests {
             vec![
                 "*".to_string(),
                 plan.scope_glob(),
-                STATE_DENY_GLOB.to_string()
+                STATE_DENY_GLOB.to_string(),
+                ATTACHMENTS_DENY_GLOB.to_string(),
             ]
         );
         assert_eq!(
@@ -393,7 +405,8 @@ mod tests {
                 "*".to_string(),
                 ".samokod".to_string(),
                 ".samokod/**".to_string(),
-                STATE_DENY_GLOB.to_string()
+                STATE_DENY_GLOB.to_string(),
+                ATTACHMENTS_DENY_GLOB.to_string(),
             ]
         );
         assert_eq!(
@@ -402,12 +415,17 @@ mod tests {
                 "*".to_string(),
                 ".samokod".to_string(),
                 ".samokod/**".to_string(),
-                STATE_DENY_GLOB.to_string()
+                STATE_DENY_GLOB.to_string(),
+                ATTACHMENTS_DENY_GLOB.to_string(),
             ]
         );
         assert_eq!(
             keys_of(&config, LANDING_AGENT, "edit"),
-            vec!["*".to_string(), STATE_DENY_GLOB.to_string()]
+            vec![
+                "*".to_string(),
+                STATE_DENY_GLOB.to_string(),
+                ATTACHMENTS_DENY_GLOB.to_string(),
+            ]
         );
     }
 
@@ -490,6 +508,44 @@ mod tests {
             format!(".samokod/plans/scoping/other/{STATE_FILE}"),
             format!(".samokod/plans/executing/x/{STATE_FILE}"),
             format!(".samokod/plans/evergreening/x/{STATE_FILE}"),
+        ] {
+            assert_eq!(
+                effect_of(&config, SCOPING_AGENT, "edit", &resource),
+                "deny",
+                "{resource} should deny for scoping"
+            );
+            assert_eq!(
+                effect_of(&config, EXECUTING_AGENT, "edit", &resource),
+                "deny",
+                "{resource} should deny for executing"
+            );
+            assert_eq!(
+                effect_of(&config, EVERGREENING_AGENT, "edit", &resource),
+                "deny",
+                "{resource} should deny for evergreening"
+            );
+            assert_eq!(
+                effect_of(&config, LANDING_AGENT, "edit", &resource),
+                "deny",
+                "{resource} should deny for landing"
+            );
+        }
+    }
+
+    #[test]
+    fn attachments_deny_last_for_every_agent() {
+        let plan = test_plan();
+        let config = config(&plan);
+        let own = format!(
+            ".samokod/plans/scoping/{}/attachments/paste-1-0.png",
+            plan.name
+        );
+        assert_eq!(effect_of(&config, SCOPING_AGENT, "edit", &own), "deny");
+        for resource in [
+            ".samokod/plans/scoping/other/attachments/paste-1-0.png".to_string(),
+            ".samokod/plans/executing/x/attachments/paste-1-0.jpg".to_string(),
+            ".samokod/plans/evergreening/x/attachments/paste-1-0.webp".to_string(),
+            ".samokod/plans/landing/x/attachments/paste-1-0.gif".to_string(),
         ] {
             assert_eq!(
                 effect_of(&config, SCOPING_AGENT, "edit", &resource),

@@ -1,6 +1,7 @@
 // Tauri command edge: thin impure glue over the domain modules.
 mod acp;
 mod agent;
+mod attachments;
 mod awake;
 mod branch;
 mod error_hint;
@@ -230,6 +231,17 @@ async fn plan_md_text(
 }
 
 #[tauri::command]
+fn save_attachment(
+    state: State<'_, AgentManager>,
+    session: SessionKey,
+    data_base64: String,
+) -> Result<String, String> {
+    state
+        .save_attachment(session, data_base64)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn warm_session(state: State<'_, AgentManager>, session: SessionKey) -> Result<(), String> {
     state
         .warm_session(session)
@@ -301,6 +313,7 @@ pub fn run() {
             cancel_turn,
             answer_permission,
             set_global_config_option,
+            save_attachment,
             warm_session,
             load_history
         ])
