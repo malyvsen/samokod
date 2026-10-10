@@ -1391,6 +1391,47 @@ mod tests {
     }
 
     #[test]
+    fn entries_reflect_evergreen_flag() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let plan = plans::materialize_scoping(root, "2026-09-26.08-41-03").expect("materialize");
+        let mut stored = plans::load_state(&plan.path(root));
+        stored.evergreen = false;
+        plans::store_state(&plan.path(root), &stored);
+        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        assert!(!entries[0].evergreen);
+        let mut stored = plans::load_state(&plan.path(root));
+        stored.evergreen = true;
+        plans::store_state(&plan.path(root), &stored);
+        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        assert!(entries[0].evergreen);
+    }
+
+    #[test]
+    fn pending_scoping_defaults_to_evergreen() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let pending = HashMap::from([("2026-09-26.08-41-03".to_string(), None)]);
+        let entries = sorted_entries(root, &HashMap::new(), &pending);
+        assert_eq!(entries.len(), 1);
+        assert!(!entries[0].manual);
+        assert!(entries[0].evergreen);
+    }
+
+    #[test]
+    fn plan_entry_json_carries_evergreen() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        plans::materialize_scoping(root, "2026-09-26.08-41-03").expect("materialize");
+        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        let value = serde_json::to_value(&entries[0]).expect("serializes");
+        assert!(value.get("evergreen").is_some());
+    }
+
+    #[test]
     fn reserve_creates_no_dir_and_avoids_taken_names() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();

@@ -197,6 +197,14 @@ pub struct PlanEntry {
     /// its own. The single copy lives in `PlanState`; this is its view.
     #[serde(default)]
     pub manual: bool,
+    /// Evergreen intent: true cleans up after executing, false lands
+    /// straight from executing. The single copy lives in `PlanState`.
+    #[serde(default = "default_evergreen_true")]
+    pub evergreen: bool,
+}
+
+fn default_evergreen_true() -> bool {
+    true
 }
 
 /// Stored model/effort defaults for the instant disabled picker paint.
