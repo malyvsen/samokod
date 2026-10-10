@@ -291,7 +291,20 @@ describe("todoProgress", () => {
 });
 
 describe("headerProgress", () => {
-	test("delegates to todo progress for now", () => {
+	test("returns null outside executing, evergreening, and landing", () => {
+		expect(plan("a", "scoping", [testStatus("scoping")])).not.toBeNull();
+		expect(
+			headerProgress(plan("a", "scoping", [testStatus("scoping")])),
+		).toBeNull();
+		expect(
+			headerProgress(plan("a", "completed", [testStatus("scoping")])),
+		).toBeNull();
+		expect(
+			headerProgress(plan("a", "cancelled", [testStatus("scoping")])),
+		).toBeNull();
+	});
+
+	test("flows executing through todo progress", () => {
 		const entry = plan("a", "executing", [
 			testStatus("scoping"),
 			testStatus("executing", {
@@ -299,9 +312,56 @@ describe("headerProgress", () => {
 			}),
 		]);
 		expect(headerProgress(entry)).toEqual(todoProgress(entry));
-		expect(
-			headerProgress(plan("a", "landing", [testStatus("scoping")])),
-		).toBeNull();
+	});
+
+	test("landing diverged stays empty", () => {
+		const entry = testEntryWith(
+			"a",
+			"landing",
+			"a",
+			true,
+			[testStatus("scoping"), testStatus("landing")],
+			false,
+			true,
+			["abc plan work", "def more work"],
+			false,
+		);
+		expect(headerProgress(entry)).toEqual({
+			done: 0,
+			total: 2,
+			etaSecs: null,
+		});
+	});
+
+	test("landing ready fills the bar", () => {
+		const entry = testEntryWith(
+			"a",
+			"landing",
+			"a",
+			true,
+			[testStatus("scoping"), testStatus("landing")],
+			false,
+			true,
+			["abc plan work", "def more work"],
+			true,
+		);
+		expect(headerProgress(entry)).toEqual({
+			done: 2,
+			total: 2,
+			etaSecs: null,
+		});
+	});
+
+	test("landing empty shows an empty track", () => {
+		const entry = testEntryWith("a", "landing", "a", true, [
+			testStatus("scoping"),
+			testStatus("landing"),
+		]);
+		expect(headerProgress(entry)).toEqual({
+			done: 0,
+			total: 0,
+			etaSecs: null,
+		});
 	});
 });
 

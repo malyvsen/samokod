@@ -77,7 +77,18 @@ export function todoProgress(plan: PlanEntry): HeaderProgress | null {
 	};
 }
 
+function landingProgress(plan: PlanEntry): HeaderProgress {
+	return {
+		done: plan.ffable ? plan.commits.length : 0,
+		total: plan.commits.length,
+		etaSecs: null,
+	};
+}
+
 export function headerProgress(plan: PlanEntry): HeaderProgress | null {
+	if (plan.phase === "landing") {
+		return landingProgress(plan);
+	}
 	return todoProgress(plan);
 }
 

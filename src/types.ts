@@ -79,6 +79,8 @@ export interface PlanEntry {
 	sessions: SessionStatusView[];
 	manual: boolean;
 	evergreen: boolean;
+	commits: string[];
+	ffable: boolean;
 }
 
 export interface RepoDefaults {

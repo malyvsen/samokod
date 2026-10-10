@@ -44,6 +44,8 @@ export function testEntry(
 	has_plan_md = false,
 	manual = false,
 	evergreen = true,
+	commits: string[] = [],
+	ffable = false,
 ): PlanEntry {
 	const sessions =
 		phase === "scoping"
@@ -62,7 +64,17 @@ export function testEntry(
 							testStatus("landing"),
 						]
 					: [testStatus("scoping"), testStatus("executing")];
-	return { name, phase, title, has_plan_md, sessions, manual, evergreen };
+	return {
+		name,
+		phase,
+		title,
+		has_plan_md,
+		sessions,
+		manual,
+		evergreen,
+		commits,
+		ffable,
+	};
 }
 
 export function testEntryWith(
@@ -73,6 +85,8 @@ export function testEntryWith(
 	statuses: SessionStatusView[],
 	manual = false,
 	evergreen = true,
+	commits: string[] = [],
+	ffable = false,
 ): PlanEntry {
 	return {
 		name,
@@ -82,5 +96,7 @@ export function testEntryWith(
 		sessions: statuses,
 		manual,
 		evergreen,
+		commits,
+		ffable,
 	};
 }
