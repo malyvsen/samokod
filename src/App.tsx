@@ -55,8 +55,9 @@ import {
 	applySessionEvent,
 	type ChatState,
 	type Chats,
-	carryHistory as carryChats,
+	carryHistory,
 	errorItem,
+	removeEntry,
 	updateEntry,
 } from "./sessions/store";
 import { useThoughtTimers } from "./sessions/thoughts";
@@ -105,8 +106,10 @@ export function App() {
 	selectedRef.current = selectedKey;
 	const chatsRef = useRef<Chats>({});
 
-	const applyChats = useCallback((fn: (current: Chats) => Chats): Chats => {
-		const next = fn(chatsRef.current);
+	// Single write path for chats. The ref publishes synchronously so events
+	// arriving before the next render chain off each other instead of racing.
+	const applyChats = useCallback((update: (current: Chats) => Chats): Chats => {
+		const next = update(chatsRef.current);
 		chatsRef.current = next;
 		setChats(next);
 		return next;
@@ -466,12 +469,7 @@ export function App() {
 			const update = await selectPlan(key, prevDraft);
 			if (prev !== null && !keep) {
 				const prevKey = prev;
-				const prevId = sessionKeyOf(prevKey);
-				applyChats((current) => {
-					const next = { ...current };
-					delete next[prevId];
-					return next;
-				});
+				applyChats((current) => removeEntry(current, prevKey));
 				draft.clearDraft(prevKey);
 			}
 			applyPlans(update);
@@ -576,11 +574,7 @@ export function App() {
 			const update = await createPlan(currentDraft);
 			if (current !== null && !sameSession(update.selected, current) && !keep) {
 				const vanished = current;
-				applyChats((chats) => {
-					const next = { ...chats };
-					delete next[sessionKeyOf(vanished)];
-					return next;
-				});
+				applyChats((chats) => removeEntry(chats, vanished));
 				draft.clearDraft(vanished);
 			}
 			applyPlans(update);
@@ -601,7 +595,7 @@ export function App() {
 		updateChat(key, (chat) => ({ ...chat, working: true }));
 		try {
 			const update = await executePlan(key);
-			applyChats((current) => carryChats(current, key, update, true));
+			applyChats((current) => carryHistory(current, key, update, true));
 			applyPlans(update);
 		} catch (error) {
 			updateChat(key, (chat) => ({ ...chat, working: false }));
@@ -620,14 +614,10 @@ export function App() {
 		try {
 			const update = await cancelPlan(key);
 			if (wasEmpty) {
-				applyChats((current) => {
-					const next = { ...current };
-					delete next[sessionKeyOf(key)];
-					return next;
-				});
+				applyChats((current) => removeEntry(current, key));
 				draft.clearDraft(key);
 			} else {
-				applyChats((current) => carryChats(current, key, update, false));
+				applyChats((current) => carryHistory(current, key, update, false));
 			}
 			applyPlans(update);
 		} catch (error) {

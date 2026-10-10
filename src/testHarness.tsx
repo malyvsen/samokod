@@ -32,25 +32,35 @@ export const dialog = {
 	open: vi.fn(),
 };
 
-export function emitAppEvent(apiMock: typeof api, event: AppEvent): void {
-	type Handler = (event: AppEvent) => void;
-	const calls = apiMock.onAppEvent.mock.calls as unknown as Handler[][];
+type AppEventHandler = (event: AppEvent) => void;
+
+function appEventHandlers(apiMock: typeof api): AppEventHandler[] {
+	const calls = apiMock.onAppEvent.mock.calls as unknown as AppEventHandler[][];
 	if (calls.length === 0) throw new Error("no app event handler");
-	act(() => {
-		for (const call of calls) {
-			call[0]?.(event);
-		}
+	return calls.map((call) => {
+		const handler = call[0];
+		if (handler === undefined) throw new Error("no app event handler");
+		return handler;
 	});
 }
 
+export function appEventHandler(apiMock: typeof api): AppEventHandler {
+	const handlers = appEventHandlers(apiMock);
+	const handler = handlers[0];
+	if (handler === undefined) throw new Error("no app event handler");
+	return handler;
+}
+
+export function emitAppEvent(apiMock: typeof api, event: AppEvent): void {
+	emitAppEvents(apiMock, [event]);
+}
+
 export function emitAppEvents(apiMock: typeof api, events: AppEvent[]): void {
-	type Handler = (event: AppEvent) => void;
-	const calls = apiMock.onAppEvent.mock.calls as unknown as Handler[][];
-	if (calls.length === 0) throw new Error("no app event handler");
+	const handlers = appEventHandlers(apiMock);
 	act(() => {
 		for (const event of events) {
-			for (const call of calls) {
-				call[0]?.(event);
+			for (const handler of handlers) {
+				handler(event);
 			}
 		}
 	});

@@ -56,6 +56,12 @@ export function updateEntry(
 	return { ...chats, [id]: next(chats[id] ?? emptyChat()) };
 }
 
+export function removeEntry(chats: Chats, key: SessionKey): Chats {
+	const next = { ...chats };
+	delete next[sessionKeyOf(key)];
+	return next;
+}
+
 export function errorItem(
 	raw: string,
 	hint: string,

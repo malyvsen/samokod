@@ -2,8 +2,13 @@ import { act, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { testDefaults, testEntry, testKey } from "./fixtures";
 import { clearPreviewCache } from "./sessions/preview";
-import { api, emitAppEvents, openChat, stubMatchMedia } from "./testHarness";
-import type { AppEvent } from "./types";
+import {
+	api,
+	appEventHandler,
+	emitAppEvents,
+	openChat,
+	stubMatchMedia,
+} from "./testHarness";
 
 vi.mock("./api", async () => {
 	const { api } = await import("./testHarness");
@@ -34,28 +39,22 @@ beforeEach(() => {
 	api.sendPrompt.mockResolvedValue(undefined);
 });
 
-describe("rapid chat events", () => {
-	test("three agent_text chunks in one act concatenate", async () => {
+describe("streaming", () => {
+	test("concatenates chunks arriving before render", async () => {
 		await openChat(api);
 		emitAppEvents(api, [
-			{ type: "agent_text", session: testKey(), chunk: "Ever" },
-			{ type: "agent_text", session: testKey(), chunk: "greened the " },
-			{ type: "agent_text", session: testKey(), chunk: "title-only" },
+			{ type: "agent_text", session: testKey(), chunk: "Hello " },
+			{ type: "agent_text", session: testKey(), chunk: "brave " },
+			{ type: "agent_text", session: testKey(), chunk: "world" },
 		]);
-		expect(screen.getByText("Evergreened the title-only")).toBeInTheDocument();
+		expect(screen.getByText("Hello brave world")).toBeInTheDocument();
 	});
 
-	test("optimistic user bubble survives a racing agent chunk", async () => {
+	test("keeps the optimistic user message when an agent chunk arrives before render", async () => {
 		const user = await openChat(api);
-		type Handler = (event: AppEvent) => void;
-		const calls = api.onAppEvent.mock.calls as unknown as Handler[][];
-		const handler = calls[0]?.[0];
-		if (handler === undefined) throw new Error("no app event handler");
+		const handler = appEventHandler(api);
 		await act(async () => {
-			const typing = user.keyboard("hello{Enter}");
-			await typing;
-			await Promise.resolve();
-			await Promise.resolve();
+			await user.keyboard("hello{Enter}");
 			handler({
 				type: "agent_text",
 				session: testKey(),
