@@ -114,16 +114,11 @@ impl AgentManager {
     }
 }
 
-/// Manual and evergreen flags for one plan row, read together from a
-/// single `load_state` so adding a flag never needs a new disk read.
-pub(crate) struct PlanFlags {
-    pub manual: bool,
-    pub evergreen: bool,
-}
-
 /// Plans sorted by phase, then phase-entry arrival newest first, then
 /// name descending. Each pending name missing on disk appends a synthetic
 /// scoping `PlanRef`; with no timestamp it orders by name, newest first.
+/// Each plan reads its `state.json` once and reuses it for arrival, title,
+/// flags, and roles; missing files yield the automatic evergreen default.
 pub(crate) fn sorted_entries(
     repo_root: &Path,
     sessions: &HashMap<SessionKey, LiveSession>,
@@ -141,48 +136,51 @@ pub(crate) fn sorted_entries(
             });
         }
     }
-    plans.sort_by(|left, right| {
-        plans::phase_rank(left.phase)
-            .cmp(&plans::phase_rank(right.phase))
+    let mut rows: Vec<(plans::PlanRef, plans::PlanState, Option<i64>)> = plans
+        .into_iter()
+        .map(|plan| {
+            let state = plans::load_state(&plan.path(repo_root));
+            let arrival = plans::arrival_ms_with_state(repo_root, &plan, &state);
+            (plan, state, arrival)
+        })
+        .collect();
+    rows.sort_by(|left, right| {
+        plans::phase_rank(left.0.phase)
+            .cmp(&plans::phase_rank(right.0.phase))
             .then_with(|| {
-                plans::arrival_ms(repo_root, right)
-                    .cmp(&plans::arrival_ms(repo_root, left))
-                    .then_with(|| right.name.cmp(&left.name))
+                right
+                    .2
+                    .cmp(&left.2)
+                    .then_with(|| right.0.name.cmp(&left.0.name))
             })
     });
-    plans
-        .iter()
-        .map(|plan| {
-            let flags = entry_flags(repo_root, plan);
-            PlanEntry {
-                name: plan.name.clone(),
-                phase: plan.phase,
-                title: entry_title(repo_root, plan, pending),
-                has_plan_md: plan.has_plan_md(repo_root),
-                sessions: session_statuses(repo_root, plan, sessions),
-                manual: flags.manual,
-                evergreen: flags.evergreen,
-            }
+    rows.iter()
+        .map(|(plan, state, _)| PlanEntry {
+            name: plan.name.clone(),
+            phase: plan.phase,
+            title: entry_title(repo_root, plan, pending, state),
+            has_plan_md: plan.has_plan_md(repo_root),
+            sessions: session_statuses(plan, sessions, state),
+            manual: state.manual,
+            evergreen: state.evergreen,
         })
         .collect()
 }
 
 /// Display title: `plan.md` heading first, else stored working title
-/// (disk or the pending-map value), else `Untitled`. Pure except the reads.
+/// (disk or the pending-map value), else `Untitled`. Pure except the read.
 fn entry_title(
     repo_root: &Path,
     plan: &plans::PlanRef,
     pending: &HashMap<String, Option<String>>,
+    stored: &plans::PlanState,
 ) -> String {
     let text = std::fs::read_to_string(plan.plan_md(repo_root)).unwrap_or_default();
     if let Some(heading) = plans::extract_title(&text) {
         return heading;
     }
-    if plan.path(repo_root).is_dir() {
-        let stored = plans::load_state(&plan.path(repo_root));
-        if let Some(title) = stored.working_title {
-            return title;
-        }
+    if let Some(title) = &stored.working_title {
+        return title.clone();
     }
     if let Some(Some(title)) = pending.get(&plan.name) {
         return title.clone();
@@ -190,31 +188,15 @@ fn entry_title(
     "Untitled".to_string()
 }
 
-/// Manual and evergreen flags from disk state in one read; pending names
-/// with no directory stay automatic and evergreen. Pure except the read.
-fn entry_flags(repo_root: &Path, plan: &plans::PlanRef) -> PlanFlags {
-    if !plan.path(repo_root).is_dir() {
-        return PlanFlags {
-            manual: false,
-            evergreen: true,
-        };
-    }
-    let stored = plans::load_state(&plan.path(repo_root));
-    PlanFlags {
-        manual: stored.manual,
-        evergreen: stored.evergreen,
-    }
-}
-
 /// One status row per session a plan owns, from `roles_for`: scoping
 /// always, executing once approved, landing on the conflict path, finished
 /// plans keeping their rows as history from the stored session IDs.
 pub(crate) fn session_statuses(
-    repo_root: &Path,
     plan: &plans::PlanRef,
     sessions: &HashMap<SessionKey, LiveSession>,
+    stored: &plans::PlanState,
 ) -> Vec<SessionStatusView> {
-    plans::roles_for(repo_root, plan)
+    plans::roles_for(stored, plan.phase)
         .into_iter()
         .map(|role| {
             let key = SessionKey {
@@ -363,13 +345,18 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         let empty = HashMap::new();
         let bare = plans::materialize_scoping(root, "2026-09-26.08-41-03").expect("bare");
-        assert_eq!(entry_title(root, &bare, &empty), "Untitled");
+        let stored = plans::load_state(&bare.path(root));
+        assert_eq!(entry_title(root, &bare, &empty, &stored), "Untitled");
         let mut stored = plans::load_state(&bare.path(root));
         stored.working_title = Some("Login flow fixes".to_string());
         plans::store_state(&bare.path(root), &stored);
-        assert_eq!(entry_title(root, &bare, &empty), "Login flow fixes");
+        let stored = plans::load_state(&bare.path(root));
+        assert_eq!(
+            entry_title(root, &bare, &empty, &stored),
+            "Login flow fixes"
+        );
         std::fs::write(bare.plan_md(root), "# Real heading\n").expect("write");
-        assert_eq!(entry_title(root, &bare, &empty), "Real heading");
+        assert_eq!(entry_title(root, &bare, &empty, &stored), "Real heading");
     }
 
     #[test]
@@ -383,9 +370,13 @@ mod tests {
             phase: plans::Phase::Scoping,
         };
         let empty: HashMap<String, Option<String>> = HashMap::new();
-        assert_eq!(entry_title(root, &pending, &empty), "Untitled");
+        let stored = plans::PlanState::default();
+        assert_eq!(entry_title(root, &pending, &empty, &stored), "Untitled");
         let titled = HashMap::from([(name.to_string(), Some("Login flow fixes".to_string()))]);
-        assert_eq!(entry_title(root, &pending, &titled), "Login flow fixes");
+        assert_eq!(
+            entry_title(root, &pending, &titled, &stored),
+            "Login flow fixes"
+        );
     }
 
     #[test]
@@ -402,6 +393,6 @@ mod tests {
         let kept = plans::load_state(&executing.path(root));
         assert_eq!(kept.working_title.as_deref(), Some("Login flow fixes"));
         let empty = HashMap::new();
-        assert_eq!(entry_title(root, &executing, &empty), "Real heading");
+        assert_eq!(entry_title(root, &executing, &empty, &kept), "Real heading");
     }
 }

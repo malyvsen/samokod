@@ -124,7 +124,7 @@ impl Default for PlanState {
             entered_at: None,
             working_title: None,
             manual: false,
-            evergreen: true,
+            evergreen: default_evergreen(),
             prompted: false,
         }
     }
@@ -341,10 +341,21 @@ pub(crate) fn unix_ms(time: std::time::SystemTime) -> Option<i64> {
 /// the existing `plan_mtime`, else `None` so the caller falls back to the
 /// name. Pure except the metadata probes.
 pub(crate) fn arrival_ms(repo_root: &Path, plan: &PlanRef) -> Option<i64> {
-    let dir = plan.path(repo_root);
-    if let Some(stamped) = load_state(&dir).entered_at {
+    let state = load_state(&plan.path(repo_root));
+    arrival_ms_with_state(repo_root, plan, &state)
+}
+
+/// Arrival time from an already-loaded state, so list builds read each
+/// `state.json` once. Pure except the metadata probes.
+pub(crate) fn arrival_ms_with_state(
+    repo_root: &Path,
+    plan: &PlanRef,
+    state: &PlanState,
+) -> Option<i64> {
+    if let Some(stamped) = state.entered_at {
         return Some(stamped);
     }
+    let dir = plan.path(repo_root);
     if let Some(ctime) = dir_ctime_ms(&dir) {
         return Some(ctime);
     }
@@ -398,9 +409,9 @@ pub fn phase_rank(phase: Phase) -> u8 {
 /// Session roles one plan owns: scoping always, executing once approved,
 /// evergreening on the cleanup path, landing on the conflict path.
 /// Completed and cancelled plans keep their rows as history from the
-/// stored session IDs. Pure except the state read.
-pub fn roles_for(repo_root: &Path, plan: &PlanRef) -> Vec<SessionRole> {
-    match plan.phase {
+/// stored session IDs. Pure.
+pub fn roles_for(state: &PlanState, phase: Phase) -> Vec<SessionRole> {
+    match phase {
         Phase::Scoping => vec![SessionRole::Scoping],
         Phase::Executing => vec![SessionRole::Scoping, SessionRole::Executing],
         Phase::Evergreening => vec![
@@ -415,7 +426,6 @@ pub fn roles_for(repo_root: &Path, plan: &PlanRef) -> Vec<SessionRole> {
             SessionRole::Landing,
         ],
         Phase::Completed | Phase::Cancelled => {
-            let state = load_state(&plan.path(repo_root));
             let mut roles = vec![SessionRole::Scoping];
             if state.session(SessionRole::Executing).is_some() {
                 roles.push(SessionRole::Executing);
@@ -580,6 +590,11 @@ mod tests {
         let mut state = load_state(&plan.path(root));
         state.set_session(role, id.to_string());
         store_state(&plan.path(root), &state);
+    }
+
+    fn stored_roles(root: &Path, plan: &PlanRef) -> Vec<SessionRole> {
+        let state = load_state(&plan.path(root));
+        roles_for(&state, plan.phase)
     }
 
     #[test]
@@ -755,13 +770,13 @@ mod tests {
         let root = dir.path();
         ensure_structure(root).expect("ensure");
         let plain = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
-        assert_eq!(roles_for(root, &plain), scoping_only);
+        assert_eq!(stored_roles(root, &plain), scoping_only);
         std::fs::write(plain.plan_md(root), "# Shiny\n").expect("write");
         let executing = execute(root, &plain).expect("execute");
         seed_session(root, &executing, SessionRole::Executing, "ses_executing");
-        assert_eq!(roles_for(root, &executing), both);
+        assert_eq!(stored_roles(root, &executing), both);
         let done = complete(root, &executing).expect("complete");
-        assert_eq!(roles_for(root, &done), both);
+        assert_eq!(stored_roles(root, &done), both);
         let second = materialize_scoping(root, "2026-09-26.08-41-04").expect("second");
         std::fs::write(second.plan_md(root), "# Second\n").expect("write");
         let running = execute(root, &second).expect("execute");
@@ -778,12 +793,12 @@ mod tests {
             SessionRole::Evergreening,
             "ses_second_evergreening",
         );
-        assert_eq!(roles_for(root, &greened), greening);
+        assert_eq!(stored_roles(root, &greened), greening);
         let landing = begin_landing(root, &greened).expect("begin");
         seed_session(root, &landing, SessionRole::Landing, "ses_second_landing");
-        assert_eq!(roles_for(root, &landing), all);
+        assert_eq!(stored_roles(root, &landing), all);
         let landed = finish_landing(root, &landing).expect("finish");
-        assert_eq!(roles_for(root, &landed), all);
+        assert_eq!(stored_roles(root, &landed), all);
         let third = materialize_scoping(root, "2026-09-26.08-41-05").expect("third");
         std::fs::write(third.plan_md(root), "# Third\n").expect("write");
         let diverged = execute(root, &third).expect("execute");
@@ -794,10 +809,10 @@ mod tests {
             "ses_third_executing",
         );
         let dropped = cancel(root, &diverged).expect("cancel");
-        assert_eq!(roles_for(root, &dropped), both);
+        assert_eq!(stored_roles(root, &dropped), both);
         let fresh = materialize_scoping(root, "2026-09-26.08-41-06").expect("fresh");
         let bare = cancel(root, &fresh).expect("cancel");
-        assert_eq!(roles_for(root, &bare), scoping_only);
+        assert_eq!(stored_roles(root, &bare), scoping_only);
     }
 
     #[test]

@@ -593,7 +593,7 @@ impl AgentManager {
         plan: String,
         manual: bool,
     ) -> Result<PlansUpdate, AgentError> {
-        self.update_plan_state(plan, |state| state.manual = manual, |_| !manual)
+        self.update_plan_state(plan, |state| state.manual = manual)
             .await
     }
 
@@ -606,22 +606,17 @@ impl AgentManager {
         plan: String,
         evergreen: bool,
     ) -> Result<PlansUpdate, AgentError> {
-        self.update_plan_state(
-            plan,
-            |state| state.evergreen = evergreen,
-            |state| !state.manual,
-        )
-        .await
+        self.update_plan_state(plan, |state| state.evergreen = evergreen)
+            .await
     }
 
-    /// Shared plan-state mutator for the mode and evergreen setters:
-    /// locate plus load plus mutate plus store, then a conditional pump
-    /// and the refreshed list. Pure except the disk and pump effects.
+    /// Shared plan-state mutator for the mode and evergreen setters: locate
+    /// plus load plus mutate plus store, then a pump when the stored plan
+    /// is on auto, then the refreshed list.
     async fn update_plan_state(
         &self,
         plan: String,
         mutate: impl FnOnce(&mut plans::PlanState),
-        should_pump: impl FnOnce(&plans::PlanState) -> bool,
     ) -> Result<PlansUpdate, AgentError> {
         let (repo_root, _) = self
             .reopen_snapshot()
@@ -635,9 +630,8 @@ impl AgentManager {
         };
         let mut state = plans::load_state(&plan_dir);
         mutate(&mut state);
-        let pump = should_pump(&state);
         plans::store_state(&plan_dir, &state);
-        if pump {
+        if !state.manual {
             self.pump().await;
         }
         Ok(self.plans_update())
@@ -1364,6 +1358,8 @@ mod tests {
         assert!(!entries[0].has_plan_md);
         assert_eq!(entries[0].sessions.len(), 1);
         assert_eq!(entries[0].sessions[0].role, SessionRole::Scoping);
+        assert!(!entries[0].manual);
+        assert!(entries[0].evergreen);
     }
 
     #[test]
@@ -1394,44 +1390,25 @@ mod tests {
     }
 
     #[test]
-    fn entries_reflect_evergreen_flag() {
+    fn entries_reflect_stored_flags() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let plan = plans::materialize_scoping(root, "2026-09-26.08-41-03").expect("materialize");
         let mut stored = plans::load_state(&plan.path(root));
+        stored.manual = true;
         stored.evergreen = false;
         plans::store_state(&plan.path(root), &stored);
         let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
+        assert!(entries[0].manual);
         assert!(!entries[0].evergreen);
         let mut stored = plans::load_state(&plan.path(root));
+        stored.manual = false;
         stored.evergreen = true;
         plans::store_state(&plan.path(root), &stored);
         let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
-        assert!(entries[0].evergreen);
-    }
-
-    #[test]
-    fn pending_scoping_defaults_to_evergreen() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        let pending = HashMap::from([("2026-09-26.08-41-03".to_string(), None)]);
-        let entries = sorted_entries(root, &HashMap::new(), &pending);
-        assert_eq!(entries.len(), 1);
         assert!(!entries[0].manual);
         assert!(entries[0].evergreen);
-    }
-
-    #[test]
-    fn plan_entry_json_carries_evergreen() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        plans::materialize_scoping(root, "2026-09-26.08-41-03").expect("materialize");
-        let entries = sorted_entries(root, &HashMap::new(), &HashMap::new());
-        let value = serde_json::to_value(&entries[0]).expect("serializes");
-        assert!(value.get("evergreen").is_some());
     }
 
     #[test]
