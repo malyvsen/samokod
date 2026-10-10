@@ -306,7 +306,7 @@ describe("formatEta", () => {
 describe("headerMeta", () => {
 	test("empty shows no text and an empty track", () => {
 		expect(headerMeta({ done: 0, total: 0, etaSecs: null }, null)).toEqual({
-			text: null,
+			eta: null,
 			pct: 0,
 			barClass: "",
 		});
@@ -314,7 +314,7 @@ describe("headerMeta", () => {
 
 	test("estimating shows no text and an empty track", () => {
 		expect(headerMeta({ done: 0, total: 5, etaSecs: null }, null)).toEqual({
-			text: null,
+			eta: null,
 			pct: 0,
 			barClass: "",
 		});
@@ -322,7 +322,7 @@ describe("headerMeta", () => {
 
 	test("partial shows ETA and a green bar", () => {
 		expect(headerMeta({ done: 2, total: 5, etaSecs: 480 }, null)).toEqual({
-			text: "8m",
+			eta: "8m",
 			pct: 40,
 			barClass: "",
 		});
@@ -331,7 +331,7 @@ describe("headerMeta", () => {
 	test("waiting dims the bar but keeps the ETA", () => {
 		for (const attention of ["idle", "approval", "failed"] as const) {
 			const meta = headerMeta({ done: 2, total: 5, etaSecs: 480 }, attention);
-			expect(meta.text).toBe("8m");
+			expect(meta.eta).toBe("8m");
 			expect(meta.pct).toBe(40);
 			expect(meta.barClass).toBe("paused");
 		}
@@ -339,7 +339,7 @@ describe("headerMeta", () => {
 
 	test("done shows a full green bar with no text even when idle", () => {
 		expect(headerMeta({ done: 5, total: 5, etaSecs: null }, "idle")).toEqual({
-			text: null,
+			eta: null,
 			pct: 100,
 			barClass: "",
 		});

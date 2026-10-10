@@ -85,7 +85,7 @@ export function formatEta(secs: number): string {
 }
 
 export interface HeaderMeta {
-	text: string | null;
+	eta: string | null;
 	pct: number;
 	barClass: string;
 }
@@ -94,17 +94,17 @@ export function headerMeta(
 	progress: ExecutingProgress,
 	attention: AttentionKind | null,
 ): HeaderMeta {
+	const paused = attention === null ? "" : "paused";
 	if (progress.total === 0) {
 		return {
-			text: null,
+			eta: null,
 			pct: 0,
-			barClass: attention === null ? "" : "paused",
+			barClass: paused,
 		};
 	}
-	const done = progress.done >= progress.total;
-	if (done) {
+	if (progress.done >= progress.total) {
 		return {
-			text: null,
+			eta: null,
 			pct: 100,
 			barClass: "",
 		};
@@ -112,16 +112,15 @@ export function headerMeta(
 	const pct = Math.round((progress.done / progress.total) * 100);
 	if (progress.etaSecs === null) {
 		return {
-			text: null,
+			eta: null,
 			pct,
-			barClass: attention === null ? "" : "paused",
+			barClass: paused,
 		};
 	}
-	const text = formatEta(progress.etaSecs);
 	return {
-		text,
+		eta: formatEta(progress.etaSecs),
 		pct,
-		barClass: attention === null ? "" : "paused",
+		barClass: paused,
 	};
 }
 

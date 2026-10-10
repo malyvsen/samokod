@@ -169,46 +169,35 @@ function PlanHeader({
 				onSetEvergreen={onSetEvergreen}
 			/>
 		);
-	if (progress === null) {
+	const meta = progress === null ? null : headerMeta(progress, attention);
+	const button = (
+		<button
+			className="plan-name"
+			type="button"
+			onClick={() => onSelect(target)}
+			aria-label={`${plan.title}, ${plan.phase}, opens ${roleLabel(target.role)}`}
+			data-full={plan.title}
+		>
+			<span
+				className={`ptitle${attention === null ? "" : ` sheen-${attention}`}`}
+			>
+				{plan.title}
+			</span>
+			{meta?.eta == null ? null : <span className="pmeta">{meta.eta}</span>}
+		</button>
+	);
+	if (meta === null) {
 		return (
 			<div className="phead">
-				<button
-					className="plan-name"
-					type="button"
-					onClick={() => onSelect(target)}
-					aria-label={`${plan.title}, ${plan.phase}, opens ${roleLabel(target.role)}`}
-					data-full={plan.title}
-				>
-					<span
-						className={`ptitle${attention === null ? "" : ` sheen-${attention}`}`}
-					>
-						{plan.title}
-					</span>
-				</button>
+				{button}
 				{controls}
 			</div>
 		);
 	}
-	const meta = headerMeta(progress, attention);
 	return (
 		<div className="phead stack">
 			<div className="phead-top">
-				<button
-					className="plan-name"
-					type="button"
-					onClick={() => onSelect(target)}
-					aria-label={`${plan.title}, ${plan.phase}, opens ${roleLabel(target.role)}`}
-					data-full={plan.title}
-				>
-					<span
-						className={`ptitle${attention === null ? "" : ` sheen-${attention}`}`}
-					>
-						{plan.title}
-					</span>
-					{meta.text === null ? null : (
-						<span className="pmeta">{meta.text}</span>
-					)}
-				</button>
+				{button}
 				{controls}
 			</div>
 			<div className={`hbar-in${meta.barClass ? ` ${meta.barClass}` : ""}`}>
