@@ -43,35 +43,31 @@ describe("secondsForMs", () => {
 
 describe("liveForThought", () => {
 	test("starts a burst from waiting or idle", () => {
-		expect(liveForThought(null, "hello", 1000)).toEqual({
+		expect(liveForThought(null, 1000)).toEqual({
 			kind: "thinking",
-			tail: "hello",
 			burstStart: 1000,
 			updatedAt: 1000,
 		});
-		expect(liveForThought({ kind: "waiting" }, "hello", 1000)).toEqual({
+		expect(liveForThought({ kind: "waiting" }, 1000)).toEqual({
 			kind: "thinking",
-			tail: "hello",
 			burstStart: 1000,
 			updatedAt: 1000,
 		});
 	});
 
-	test("appends within the burst window", () => {
-		const live = liveForThought(null, "hello", 1000);
-		expect(liveForThought(live, " world", 2500)).toEqual({
+	test("advances within the burst window", () => {
+		const live = liveForThought(null, 1000);
+		expect(liveForThought(live, 2500)).toEqual({
 			kind: "thinking",
-			tail: "hello world",
 			burstStart: 1000,
 			updatedAt: 2500,
 		});
 	});
 
 	test("starts fresh past burst silence", () => {
-		const live = liveForThought(null, "hello", 1000);
-		expect(liveForThought(live, "again", 1000 + BURST_SILENCE_MS)).toEqual({
+		const live = liveForThought(null, 1000);
+		expect(liveForThought(live, 1000 + BURST_SILENCE_MS)).toEqual({
 			kind: "thinking",
-			tail: "again",
 			burstStart: 1000 + BURST_SILENCE_MS,
 			updatedAt: 1000 + BURST_SILENCE_MS,
 		});
@@ -79,18 +75,14 @@ describe("liveForThought", () => {
 });
 
 describe("freezeBurst", () => {
-	test("freezes thinking into a trace and drops the tail", () => {
-		const transcript = freezeBurst([], liveForThought(null, "hello", 1000));
+	test("freezes thinking into wall-clock milliseconds", () => {
+		const transcript = freezeBurst([], liveForThought(null, 1000));
 		expect(transcript).toHaveLength(1);
 		expect(transcript[0]).toMatchObject({ kind: "thought", ms: 0 });
 	});
 
 	test("stores the wall-clock burst duration", () => {
-		const live = liveForThought(
-			liveForThought(null, "hello", 1000),
-			" world",
-			2500,
-		);
+		const live = liveForThought(liveForThought(null, 1000), 2500);
 		const transcript = freezeBurst([], live);
 		expect(transcript[0]).toMatchObject({ kind: "thought", ms: 1500 });
 	});

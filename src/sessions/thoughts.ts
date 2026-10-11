@@ -4,28 +4,26 @@ import type { ChatState } from "./store";
 
 export type LiveStatus =
 	| { kind: "waiting" }
-	| { kind: "thinking"; tail: string; burstStart: number; updatedAt: number };
+	| { kind: "thinking"; burstStart: number; updatedAt: number };
 
 export const BURST_SILENCE_MS = 3000;
 export const WAITING_DELAY_MS = 2000;
 
 export function liveForThought(
 	live: LiveStatus | null,
-	chunk: string,
 	now: number,
 ): LiveStatus {
 	if (live !== null && live.kind === "thinking") {
 		if (now - live.updatedAt >= BURST_SILENCE_MS) {
-			return { kind: "thinking", tail: chunk, burstStart: now, updatedAt: now };
+			return { kind: "thinking", burstStart: now, updatedAt: now };
 		}
 		return {
 			kind: "thinking",
-			tail: live.tail + chunk,
 			burstStart: live.burstStart,
 			updatedAt: now,
 		};
 	}
-	return { kind: "thinking", tail: chunk, burstStart: now, updatedAt: now };
+	return { kind: "thinking", burstStart: now, updatedAt: now };
 }
 
 export function freezeBurst(

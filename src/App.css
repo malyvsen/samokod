@@ -660,32 +660,6 @@ button.brand:hover {
 	color: #7dffc4;
 }
 
-.arow.thinking {
-	color: #9d9a92;
-	display: flex;
-	gap: 8px;
-}
-
-.arow.thinking::before {
-	content: "▸";
-	color: #7dffc4;
-	flex: none;
-}
-
-.arow.thinking .tlabel {
-	flex: none;
-}
-
-.arow.thinking .tscroll {
-	position: relative;
-	flex: 1;
-	min-width: 0;
-	white-space: nowrap;
-	overflow: hidden;
-	color: #8f8c85;
-}
-
-.arow .tscroll[data-full]:hover::after,
 .tool[data-full]:hover::after,
 .approval h3[data-full]:hover::after,
 .erow span[data-full]:hover::after {

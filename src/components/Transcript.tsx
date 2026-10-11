@@ -1,7 +1,11 @@
-import { type ReactNode, useEffect, useRef } from "react";
+import type { ReactNode } from "react";
 import { assertNever } from "../assert";
 import type { SessionStart } from "../sessions/store";
-import { type LiveStatus, secondsForMs } from "../sessions/thoughts";
+import {
+	type LiveStatus,
+	msForBurst,
+	secondsForMs,
+} from "../sessions/thoughts";
 import { todoMark, todoRowClass } from "../todos";
 import type {
 	PermissionOptionView,
@@ -42,6 +46,145 @@ export function Transcript({
 	const showLead =
 		lead !== null &&
 		!items.some((item) => item.kind === "user" && item.text === lead);
+	const thinkingLive =
+		live !== null && live !== undefined && live.kind === "thinking"
+			? live
+			: null;
+	const rows: ReactNode[] = [];
+	let index = 0;
+	while (index < items.length) {
+		const item = items[index];
+		if (item === undefined) break;
+		if (item.kind === "thought") {
+			const firstId = item.id;
+			let totalMs = 0;
+			let end = index;
+			while (end < items.length) {
+				const next = items[end];
+				if (next === undefined || next.kind !== "thought") break;
+				totalMs += next.ms;
+				end++;
+			}
+			if (end === items.length && thinkingLive !== null) {
+				totalMs += msForBurst(thinkingLive.burstStart, thinkingLive.updatedAt);
+			}
+			rows.push(
+				<div className="arow thought" key={firstId}>
+					thinking: {secondsForMs(totalMs)}s
+				</div>,
+			);
+			index = end;
+			continue;
+		}
+		if (item.kind === "user") {
+			rows.push(
+				<MessageBubble
+					key={item.id}
+					collapseKind="user"
+					tone="user"
+					label="YOU"
+					text={item.text}
+				/>,
+			);
+			index++;
+			continue;
+		}
+		if (item.kind === "agent") {
+			rows.push(
+				<MessageBubble
+					key={item.id}
+					collapseKind="agent"
+					tone="agent"
+					label="AI"
+					text={item.text}
+				/>,
+			);
+			index++;
+			continue;
+		}
+		if (item.kind === "tool") {
+			rows.push(<ToolRow key={item.id} line={item.line} />);
+			index++;
+			continue;
+		}
+		if (item.kind === "todos") {
+			rows.push(
+				<div className="todo" key={item.id}>
+					<div className="head">
+						<span>TODOS</span>
+					</div>
+					{item.changes.map((change) => (
+						<div
+							className={`row ${todoRowClass(change.status)}`}
+							data-full={change.content}
+							key={change.content}
+						>
+							<span className="mark">[{todoMark(change.status)}]</span>
+							{change.content}
+						</div>
+					))}
+				</div>,
+			);
+			index++;
+			continue;
+		}
+		if (item.kind === "approval") {
+			const permission: PermissionView = item.permission;
+			const allow = permission.options.find(
+				(option: PermissionOptionView) => option.kind === "allow",
+			);
+			const reject = permission.options.find(
+				(option: PermissionOptionView) => option.kind === "reject",
+			);
+			rows.push(
+				<div className="approval" key={item.id}>
+					<h3 data-full={permission.title}>{permission.title}</h3>
+					<p>
+						{permission.tool} · {permission.rule_hint}
+					</p>
+					<p className="hint">
+						Reject skips just this command - the agent keeps working.
+					</p>
+					<div className="row">
+						{allow !== undefined && (
+							<button
+								className="tbtn primary"
+								type="button"
+								disabled={item.resolved}
+								onClick={() => onAnswer(permission.tool_call_id, allow.id)}
+							>
+								allow once
+							</button>
+						)}
+						{reject !== undefined && (
+							<button
+								className="tbtn danger"
+								type="button"
+								disabled={item.resolved}
+								onClick={() => onAnswer(permission.tool_call_id, reject.id)}
+							>
+								reject
+							</button>
+						)}
+					</div>
+				</div>,
+			);
+			index++;
+			continue;
+		}
+		rows.push(
+			<ErrorBar
+				key={item.id}
+				raw={item.raw}
+				hint={item.hint}
+				onRetry={item.retryable ? onRetry : null}
+			/>,
+		);
+		index++;
+	}
+	const endsWithThought =
+		items.length > 0 && items[items.length - 1]?.kind === "thought";
+	const showLiveThinking = thinkingLive !== null && !endsWithThought;
 	return (
 		<>
 			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
@@ -54,117 +197,19 @@ export function Transcript({
 						text={lead}
 					/>
 				)}
-				{items.map((item) => {
-					if (item.kind === "user") {
-						return (
-							<MessageBubble
-								key={item.id}
-								collapseKind="user"
-								tone="user"
-								label="YOU"
-								text={item.text}
-							/>
-						);
-					}
-					if (item.kind === "agent") {
-						return (
-							<MessageBubble
-								key={item.id}
-								collapseKind="agent"
-								tone="agent"
-								label="AI"
-								text={item.text}
-							/>
-						);
-					}
-					if (item.kind === "tool") {
-						return <ToolRow key={item.id} line={item.line} />;
-					}
-					if (item.kind === "todos") {
-						return (
-							<div className="todo" key={item.id}>
-								<div className="head">
-									<span>TODOS</span>
-								</div>
-								{item.changes.map((change) => (
-									<div
-										className={`row ${todoRowClass(change.status)}`}
-										data-full={change.content}
-										key={change.content}
-									>
-										<span className="mark">[{todoMark(change.status)}]</span>
-										{change.content}
-									</div>
-								))}
-							</div>
-						);
-					}
-					if (item.kind === "approval") {
-						const permission: PermissionView = item.permission;
-						const allow = permission.options.find(
-							(option: PermissionOptionView) => option.kind === "allow",
-						);
-						const reject = permission.options.find(
-							(option: PermissionOptionView) => option.kind === "reject",
-						);
-						return (
-							<div className="approval" key={item.id}>
-								<h3 data-full={permission.title}>{permission.title}</h3>
-								<p>
-									{permission.tool} · {permission.rule_hint}
-								</p>
-								<p className="hint">
-									Reject skips just this command - the agent keeps working.
-								</p>
-								<div className="row">
-									{allow !== undefined && (
-										<button
-											className="tbtn primary"
-											type="button"
-											disabled={item.resolved}
-											onClick={() =>
-												onAnswer(permission.tool_call_id, allow.id)
-											}
-										>
-											allow once
-										</button>
-									)}
-									{reject !== undefined && (
-										<button
-											className="tbtn danger"
-											type="button"
-											disabled={item.resolved}
-											onClick={() =>
-												onAnswer(permission.tool_call_id, reject.id)
-											}
-										>
-											reject
-										</button>
-									)}
-								</div>
-							</div>
-						);
-					}
-					if (item.kind === "thought") {
-						return (
-							<div className="arow thought" key={item.id}>
-								thinking: {secondsForMs(item.ms)}s
-							</div>
-						);
-					}
-					return (
-						<ErrorBar
-							key={item.id}
-							raw={item.raw}
-							hint={item.hint}
-							onRetry={item.retryable ? onRetry : null}
-						/>
-					);
-				})}
+				{rows}
 				{live?.kind === "waiting" && (
 					<div className="arow waiting">waiting</div>
 				)}
-				{live?.kind === "thinking" && <ThinkingRow tail={live.tail} />}
+				{showLiveThinking && thinkingLive !== null && (
+					<div className="arow thought">
+						thinking:{" "}
+						{secondsForMs(
+							msForBurst(thinkingLive.burstStart, thinkingLive.updatedAt),
+						)}
+						s
+					</div>
+				)}
 				{start?.kind === "failed" && (
 					<ErrorBar
 						raw={start.error.raw}
@@ -269,24 +314,6 @@ function ErrorBar({
 				)}
 			</div>
 			<div className="ehint">{hint}</div>
-		</div>
-	);
-}
-
-function ThinkingRow({ tail }: { tail: string }) {
-	const scrollRef = useRef<HTMLSpanElement>(null);
-	useEffect(() => {
-		const node = scrollRef.current;
-		if (node !== null && tail.length > 0) {
-			node.scrollLeft = node.scrollWidth;
-		}
-	}, [tail]);
-	return (
-		<div className="arow thinking">
-			<span className="tlabel">thinking:</span>
-			<span ref={scrollRef} className="tscroll" data-full={tail}>
-				{tail}
-			</span>
 		</div>
 	);
 }

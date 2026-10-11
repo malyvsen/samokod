@@ -316,6 +316,44 @@ describe("transcript thought rows", () => {
 		expect(screen.getByText("thinking: 8s")).toBeInTheDocument();
 	});
 
+	test("adjacent thoughts render one row with summed seconds", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{ kind: "thought", id: "t1", ms: 1500 },
+					{ kind: "thought", id: "t2", ms: 1500 },
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		const rows = container.querySelectorAll(".arow.thought");
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.textContent).toBe("thinking: 3s");
+	});
+
+	test("separated thoughts stay separate", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{ kind: "thought", id: "t1", ms: 8000 },
+					{ kind: "agent", id: "a1", text: "hello" },
+					{ kind: "thought", id: "t2", ms: 8000 },
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		const rows = container.querySelectorAll(".arow.thought");
+		expect(rows).toHaveLength(2);
+		expect(rows[0]?.textContent).toBe("thinking: 8s");
+		expect(rows[1]?.textContent).toBe("thinking: 8s");
+	});
+
 	test("waiting shows a static row", () => {
 		const { container } = render(
 			<Transcript
@@ -332,7 +370,29 @@ describe("transcript thought rows", () => {
 		);
 	});
 
-	test("thinking shows the live tail with the full text tooltip", () => {
+	test("live thinking merges with the trailing run into one total row", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{ kind: "thought", id: "t1", ms: 2000 },
+					{ kind: "thought", id: "t2", ms: 1000 },
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				live={{ kind: "thinking", burstStart: 0, updatedAt: 1000 }}
+			/>,
+		);
+		const rows = container.querySelectorAll(".arow.thought");
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.textContent).toBe("thinking: 4s");
+		expect(container.querySelector(".arow.thinking")).toBeNull();
+		expect(container.querySelector(".tscroll")).toBeNull();
+		expect(container.textContent).not.toContain("checking");
+	});
+
+	test("live thinking without preceding thoughts renders the live total", () => {
 		const { container } = render(
 			<Transcript
 				items={[{ kind: "user", id: "u1", text: "hello" }]}
@@ -340,19 +400,57 @@ describe("transcript thought rows", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
-				live={{
-					kind: "thinking",
-					tail: "checking the directory",
-					burstStart: 0,
-					updatedAt: 1000,
-				}}
+				live={{ kind: "thinking", burstStart: 0, updatedAt: 2500 }}
 			/>,
 		);
-		const row = container.querySelector(".arow.thinking");
-		expect(row?.textContent).toContain("thinking:");
-		expect(row?.textContent).toContain("checking the directory");
-		expect(container.querySelector(".tscroll")?.getAttribute("data-full")).toBe(
-			"checking the directory",
+		const rows = container.querySelectorAll(".arow.thought");
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.textContent).toBe("thinking: 3s");
+		expect(container.querySelector(".arow.thinking")).toBeNull();
+	});
+
+	test("new chunks advance the total while freeze leaves it unchanged", () => {
+		const { container, rerender, unmount } = render(
+			<Transcript
+				items={[{ kind: "thought", id: "t1", ms: 2000 }]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				live={{ kind: "thinking", burstStart: 1000, updatedAt: 2000 }}
+			/>,
+		);
+		expect(container.querySelector(".arow.thought")?.textContent).toBe(
+			"thinking: 3s",
+		);
+		rerender(
+			<Transcript
+				items={[{ kind: "thought", id: "t1", ms: 2000 }]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				live={{ kind: "thinking", burstStart: 1000, updatedAt: 3500 }}
+			/>,
+		);
+		expect(container.querySelector(".arow.thought")?.textContent).toBe(
+			"thinking: 5s",
+		);
+		unmount();
+		const { container: frozen } = render(
+			<Transcript
+				items={[
+					{ kind: "thought", id: "t1", ms: 2000 },
+					{ kind: "thought", id: "t2", ms: 2500 },
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		expect(frozen.querySelector(".arow.thought")?.textContent).toBe(
+			"thinking: 5s",
 		);
 	});
 });
