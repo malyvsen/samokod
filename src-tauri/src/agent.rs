@@ -488,10 +488,14 @@ impl AgentManager {
         self.transition(action).await
     }
 
-    /// Move a clean diverged executing plan to landing via the shared core.
-    /// Thin over `transition`; the pump drives the same core automatically.
+    /// Move a clean diverged executing or evergreening plan into the landing
+    /// queue via the shared core. Move-only: explicit commands never spawn;
+    /// the pump starts the head. Thin over `transition`.
     pub async fn begin_landing(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
-        if session.role != SessionRole::Executing {
+        if !matches!(
+            session.role,
+            SessionRole::Executing | SessionRole::Evergreening
+        ) {
             return Err(AgentError::RequestFailed {
                 raw: "no executing plan to land".to_string(),
             });

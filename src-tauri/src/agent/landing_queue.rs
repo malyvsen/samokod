@@ -17,7 +17,6 @@ pub(crate) enum LandingPosition {
 
 /// Queue position for one plan name. Scans `landing/` once, resolves
 /// arrivals via `plans::arrival_ms`, oldest first.
-#[allow(dead_code)]
 pub(crate) fn position(repo_root: &Path, plan_name: &str) -> LandingPosition {
     position_in(&sorted_landing_names(repo_root), plan_name)
 }
@@ -51,10 +50,13 @@ pub(crate) fn sorted_landing_names(repo_root: &Path) -> Vec<String> {
 
 /// Position inside a precomputed queue. Pure.
 pub(crate) fn position_in(queue: &[String], plan_name: &str) -> LandingPosition {
-    match queue.iter().position(|name| name == plan_name) {
-        None => LandingPosition::NotLanding,
-        Some(0) => LandingPosition::Head,
-        Some(_) => LandingPosition::Queued,
+    if !queue.contains(&plan_name.to_string()) {
+        return LandingPosition::NotLanding;
+    }
+    if head(queue) == Some(plan_name) {
+        LandingPosition::Head
+    } else {
+        LandingPosition::Queued
     }
 }
 
@@ -65,7 +67,6 @@ pub(crate) fn sort_names(mut entries: Vec<(String, i64)>) -> Vec<String> {
 }
 
 /// Oldest entry in a precomputed queue. Pure.
-#[allow(dead_code)]
 pub(crate) fn head(queue: &[String]) -> Option<&str> {
     queue.first().map(String::as_str)
 }

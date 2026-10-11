@@ -15,15 +15,16 @@ use crate::opencode;
 use crate::plans::{self, Phase};
 use crate::types::{AgentError, PlansUpdate, SessionKey, SessionRole};
 
+use super::landing_queue::{LandingPosition, position, position_in};
 use super::session::ActivePlan;
 use super::{AgentManager, lock_state};
 
 /// Pump: advance every automatic idle executing, evergreening, or landing
 /// plan that is ready, oldest arrivals first, at most one transition per
 /// plan per pass. Scoping plans always wait for the manual `>` click and
-/// never fire here. Landing serializes by only ever moving one waiter into
-/// `landing/` at a time; fast finishes never touch `landing/` so they
-/// proceed even while a rebase is active. Evergreening needs no gate:
+/// never fire here. Many waiters sit in `landing/`, one agent runs at the
+/// head; fast finishes never need the agent so they proceed from any
+/// position even while a rebase is active. Evergreening needs no gate:
 /// worktrees are independent.
 // Dirty or diverged plans hold and are skipped until a later trigger,
 // showing only their existing markers. A landing whose target moved under
@@ -46,8 +47,10 @@ impl AgentManager {
         // Every fired transition makes its plan ineligible for the next
         // pass (its turn starts, or it leaves the phase), so the pump
         // settles on its own. The set below only backstops that invariant:
-        // a plan firing twice means a transition stopped sticking.
-        let mut fired_plans = HashSet::new();
+        // the same transition firing twice means it stopped sticking. A
+        // `BeginLanding` followed by `StartLanding` for the same plan is
+        // one move plus one spawn, so the key pairs plan with kind.
+        let mut fired_plans: HashSet<(String, TransitionKind)> = HashSet::new();
         'pump: while let Some((repo_root, _)) = self.reopen_snapshot() {
             let mut scanned = plans::scan_plans(&repo_root);
             scanned.retain(|plan| plan.phase.is_active());
@@ -61,18 +64,20 @@ impl AgentManager {
                         arrival_key(&repo_root, left).cmp(&arrival_key(&repo_root, right))
                     })
             });
+            let landing_queue = super::landing_queue::sorted_landing_names(&repo_root);
             let mut fired = false;
             for plan in &scanned {
-                let view = self.plan_view(&repo_root, plan);
+                let view = self.plan_view(&repo_root, plan, &landing_queue);
                 let Some(action) = next_action(&view) else {
                     continue;
                 };
                 let plan_name = action.plan_name().to_string();
+                let kind = action.kind();
                 match self.transition(action).await {
                     Ok(_) => {
                         fired = true;
                         fired_any = true;
-                        if !fired_plans.insert(plan_name.clone()) {
+                        if !fired_plans.insert((plan_name.clone(), kind)) {
                             log::warn!("pump fired twice for {plan_name}; stopping");
                             break 'pump;
                         }
@@ -95,8 +100,14 @@ impl AgentManager {
 
     /// Plain view of one plan for the pure decision. Worktree probes fail
     /// safe (dirty holds, ffable false, no commits) with a warn-log, per
-    /// the preserve-evidence rule.
-    fn plan_view(&self, repo_root: &std::path::Path, plan: &plans::PlanRef) -> PlanView {
+    /// the preserve-evidence rule. The landing queue arrives precomputed
+    /// once per pump pass so every plan shares one scan.
+    fn plan_view(
+        &self,
+        repo_root: &std::path::Path,
+        plan: &plans::PlanRef,
+        landing_queue: &[String],
+    ) -> PlanView {
         let stored = plans::load_state(&plan.path(repo_root));
         let manual = stored.manual;
         let evergreen = stored.evergreen;
@@ -138,9 +149,8 @@ impl AgentManager {
             },
             Phase::Scoping | Phase::Completed | Phase::Cancelled => (false, false, false),
         };
-        let landing_active = super::landing_queue::sorted_landing_names(repo_root)
-            .iter()
-            .any(|other| other != &plan.name);
+        let landing = position_in(landing_queue, &plan.name);
+        let landing_started = stored.landing.is_some();
         PlanView {
             name: plan.name.clone(),
             phase: plan.phase,
@@ -150,7 +160,8 @@ impl AgentManager {
             dirty,
             ffable,
             has_commits,
-            landing_active,
+            landing,
+            landing_started,
         }
     }
 
@@ -183,11 +194,13 @@ impl AgentManager {
     /// The manual commands map their session onto a `Transition` and
     /// delegate; the pump calls this directly.
     pub(crate) async fn transition(&self, action: Transition) -> Result<PlansUpdate, AgentError> {
-        // A rebase that finds its landing ffable after all finishes
-        // instead. Redirected up front so the core below stays a single
-        // straight match with no recursion.
+        // A landing that finds itself ffable after all finishes instead.
+        // Redirected up front so the core below stays a single straight
+        // match with no recursion.
         let action = match action {
-            Transition::RebaseLanding { plan } if self.landing_is_ffable(&plan)? => {
+            Transition::StartLanding { plan } | Transition::RebaseLanding { plan }
+                if self.landing_is_ffable(&plan)? =>
+            {
                 Transition::FinishLanding { plan }
             }
             action => action,
@@ -282,14 +295,17 @@ impl AgentManager {
                     .await
             }
             Transition::BeginLanding { plan } => {
-                let (repo_root, branch) =
+                let (repo_root, _) =
                     self.reopen_snapshot()
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
                 // The work phase travels: diverged executing plans land
                 // straight from executing, diverged evergreening plans from
-                // evergreening. Names stay unique across phases.
+                // evergreening. Names stay unique across phases. Move-only:
+                // the pump starts the head with `StartLanding` on a later
+                // pass, so explicit moves queue behind an active landing
+                // instead of erroring.
                 let (from, session) = {
                     let executing = plans::PlanRef {
                         name: plan.clone(),
@@ -319,30 +335,63 @@ impl AgentManager {
                     }
                 };
                 super::ensure_idle(&self.state, &session)?;
-                if plans::scan_plans(&repo_root)
-                    .iter()
-                    .any(|other| other.phase == Phase::Landing)
-                {
-                    return Err(AgentError::RequestFailed {
-                        raw: "landing is busy, waiting its turn".to_string(),
-                    });
-                }
                 let status = self.worktree_status_for(&repo_root, &from.name)?;
                 super::gate_landing(status.dirty, status.ffable, super::LandingStep::Begin)?;
                 let next = plans::begin_landing(&repo_root, &from)?;
                 self.drop_live(&session).await;
-                let mut active = ActivePlan::landing(next.name.clone());
+                self.carry_prompted(&from.name, &next.name);
+                self.select_if_viewed(
+                    &plan,
+                    SessionKey {
+                        plan: next.name,
+                        role: SessionRole::Landing,
+                    },
+                );
+                Ok(self.plans_update())
+            }
+            Transition::StartLanding { plan } => {
+                let session = SessionKey {
+                    plan: plan.clone(),
+                    role: SessionRole::Landing,
+                };
+                super::ensure_idle(&self.state, &session)?;
+                let (repo_root, branch) =
+                    self.reopen_snapshot()
+                        .ok_or_else(|| AgentError::NoSession {
+                            raw: "open a repository first".to_string(),
+                        })?;
+                if position(&repo_root, &plan) != LandingPosition::Head {
+                    return Err(AgentError::RequestFailed {
+                        raw: "landing is queued, waiting its turn".to_string(),
+                    });
+                }
+                let from = plans::PlanRef {
+                    name: plan.clone(),
+                    phase: Phase::Landing,
+                };
+                if !from.path(&repo_root).is_dir() {
+                    return Err(AgentError::RequestFailed {
+                        raw: "no active plan to complete".to_string(),
+                    });
+                }
+                let status = self.worktree_status_for(&repo_root, &from.name)?;
+                if status.dirty {
+                    return Err(AgentError::RequestFailed {
+                        raw: "commit or discard worktree changes first".to_string(),
+                    });
+                }
+                if status.ffable {
+                    return Err(AgentError::RequestFailed {
+                        raw: "already fast-forwardable, land it directly".to_string(),
+                    });
+                }
+                let mut active = ActivePlan::landing(from.name.clone());
                 // The role goes out as the full first turn below, so later
                 // turns never prefix again.
                 active.prefixed = true;
-                let plan_md_abs = next.plan_md(&repo_root).to_string_lossy().to_string();
-                let text = opencode::landing_first_message(
-                    &status.worktree_branch,
-                    &status.target_branch,
-                    &status.path.to_string_lossy(),
-                    &plan_md_abs,
-                );
-                self.spawn_with_first_turn(&repo_root, &branch, &from.name, active, text)
+                let plan_md_abs = from.plan_md(&repo_root).to_string_lossy().to_string();
+                let text = landing_first_turn_text(&status, &plan_md_abs);
+                self.spawn_with_first_turn(&repo_root, &branch, &plan, active, text)
                     .await
             }
             Transition::FinishExecuting { plan } => {
@@ -476,6 +525,11 @@ impl AgentManager {
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
+                if position(&repo_root, &plan) != LandingPosition::Head {
+                    return Err(AgentError::RequestFailed {
+                        raw: "landing is queued, waiting its turn".to_string(),
+                    });
+                }
                 let from = plans::PlanRef {
                     name: plan.clone(),
                     phase: Phase::Landing,
@@ -492,12 +546,7 @@ impl AgentManager {
                     });
                 }
                 let plan_md_abs = from.plan_md(&repo_root).to_string_lossy().to_string();
-                let text = opencode::landing_first_message(
-                    &status.worktree_branch,
-                    &status.target_branch,
-                    &status.path.to_string_lossy(),
-                    &plan_md_abs,
-                );
+                let text = landing_first_turn_text(&status, &plan_md_abs);
                 let (connection, session_id) = self.ensure_live(&session).await?;
                 self.mark_prompted(&from.name);
                 self.start_turn(connection, session_id, session.clone(), text.clone())
@@ -509,7 +558,7 @@ impl AgentManager {
     }
 
     /// Shared spawn-plus-first-turn for the three agent-start transitions
-    /// (`Execute`, `BeginEvergreening`, `BeginLanding`): spawn the session
+    /// (`Execute`, `BeginEvergreening`, `StartLanding`): spawn the session
     /// for the caller's `ActivePlan`, send its role as the full first turn,
     /// and announce it as a live user bubble. The caller moves the plan and
     /// drops the old live session first; the plan name travels inside
@@ -539,8 +588,9 @@ impl AgentManager {
 /// plan per pump pass. `Execute` is manual-only (the header `>` click) and
 /// never fires from the pump; `BeginEvergreening` starts the cleanup agent
 /// in the same worktree; `FinishExecuting` and `FinishEvergreening` are the
-/// fast paths straight to completed when ffable; `RebaseLanding` re-runs
-/// the rebase when the target moved under an active landing.
+/// fast paths straight to completed when ffable; `BeginLanding` only moves
+/// a diverged plan into the queue; `StartLanding` spawns the head's agent
+/// fresh; `RebaseLanding` re-runs the head that already started.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Transition {
     Execute { plan: String },
@@ -549,7 +599,21 @@ pub(crate) enum Transition {
     FinishExecuting { plan: String },
     FinishEvergreening { plan: String },
     FinishLanding { plan: String },
+    StartLanding { plan: String },
     RebaseLanding { plan: String },
+}
+
+/// Kind of one transition, for the pump's Begin-then-Start chain guard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum TransitionKind {
+    Execute,
+    BeginEvergreening,
+    BeginLanding,
+    FinishExecuting,
+    FinishEvergreening,
+    FinishLanding,
+    StartLanding,
+    RebaseLanding,
 }
 
 impl Transition {
@@ -561,15 +625,29 @@ impl Transition {
             | Transition::FinishExecuting { plan }
             | Transition::FinishEvergreening { plan }
             | Transition::FinishLanding { plan }
+            | Transition::StartLanding { plan }
             | Transition::RebaseLanding { plan } => plan,
+        }
+    }
+
+    fn kind(&self) -> TransitionKind {
+        match self {
+            Transition::Execute { .. } => TransitionKind::Execute,
+            Transition::BeginEvergreening { .. } => TransitionKind::BeginEvergreening,
+            Transition::BeginLanding { .. } => TransitionKind::BeginLanding,
+            Transition::FinishExecuting { .. } => TransitionKind::FinishExecuting,
+            Transition::FinishEvergreening { .. } => TransitionKind::FinishEvergreening,
+            Transition::FinishLanding { .. } => TransitionKind::FinishLanding,
+            Transition::StartLanding { .. } => TransitionKind::StartLanding,
+            Transition::RebaseLanding { .. } => TransitionKind::RebaseLanding,
         }
     }
 }
 
 /// Plain view of one plan for the pure decision: phase, stored mode and
 /// evergreen intent, idle (no turn running), worktree dirtiness and
-/// fast-forwardability, commit presence, and whether another landing
-/// already occupies `landing/`.
+/// fast-forwardability, commit presence, queue position, and whether the
+/// landing agent already started (stored session ID).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlanView {
     pub name: String,
@@ -580,17 +658,19 @@ pub(crate) struct PlanView {
     pub dirty: bool,
     pub ffable: bool,
     pub has_commits: bool,
-    pub landing_active: bool,
+    pub landing: LandingPosition,
+    pub landing_started: bool,
 }
 
 /// Pure automation decision over one plan: at most one transition. Scoping
 /// always waits for the manual `>` click and never fires here. Manual
 /// plans hold; running turns hold; dirty worktrees hold. Executing plans
 /// with evergreen intent and fresh commits clean up first; without intent
-/// or without commits they take today's finish-or-land path. Evergreening
-/// plans finish directly when ffable, else wait while another landing
-/// occupies `landing/`; clean non-ffable landings rebase again (the
-/// moved-target case). Pure.
+/// or without commits they queue for landing. Evergreening plans finish
+/// directly when ffable, else queue for landing. Landing plans finish
+/// directly when ffable from any position; clean non-ffable landings start
+/// fresh at the head or rebase when already started, and hold while
+/// queued. Pure.
 pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
     if view.manual || !view.idle {
         return None;
@@ -608,8 +688,6 @@ pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
                 Some(Transition::FinishExecuting {
                     plan: view.name.clone(),
                 })
-            } else if view.landing_active {
-                None
             } else {
                 Some(Transition::BeginLanding {
                     plan: view.name.clone(),
@@ -623,8 +701,6 @@ pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
                 Some(Transition::FinishEvergreening {
                     plan: view.name.clone(),
                 })
-            } else if view.landing_active {
-                None
             } else {
                 Some(Transition::BeginLanding {
                     plan: view.name.clone(),
@@ -639,12 +715,30 @@ pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
                     plan: view.name.clone(),
                 })
             } else {
-                Some(Transition::RebaseLanding {
-                    plan: view.name.clone(),
-                })
+                match view.landing {
+                    LandingPosition::Head if view.landing_started => {
+                        Some(Transition::RebaseLanding {
+                            plan: view.name.clone(),
+                        })
+                    }
+                    LandingPosition::Head => Some(Transition::StartLanding {
+                        plan: view.name.clone(),
+                    }),
+                    LandingPosition::Queued | LandingPosition::NotLanding => None,
+                }
             }
         }
     }
+}
+
+/// Landing first turn shared by the fresh spawn and the re-run. Pure.
+fn landing_first_turn_text(status: &super::WorktreeLive, plan_md_abs: &str) -> String {
+    opencode::landing_first_message(
+        &status.worktree_branch,
+        &status.target_branch,
+        &status.path.to_string_lossy(),
+        plan_md_abs,
+    )
 }
 
 /// Arrival key for the pump: oldest phase-entry first, unstamped plans
@@ -671,7 +765,12 @@ mod tests {
             dirty: false,
             ffable: false,
             has_commits: false,
-            landing_active: false,
+            landing: if phase == Phase::Landing {
+                LandingPosition::Head
+            } else {
+                LandingPosition::NotLanding
+            },
+            landing_started: false,
         }
     }
 
@@ -747,7 +846,7 @@ mod tests {
     fn evergreening_needs_no_landing_gate() {
         let busy = PlanView {
             has_commits: true,
-            landing_active: true,
+            landing: LandingPosition::Queued,
             ..view("a", Phase::Executing)
         };
         assert_eq!(
@@ -762,7 +861,6 @@ mod tests {
     fn executing_without_commits_takes_the_landing_path() {
         let done = PlanView {
             ffable: true,
-            landing_active: true,
             ..view("a", Phase::Executing)
         };
         assert_eq!(
@@ -786,7 +884,6 @@ mod tests {
             evergreen: false,
             has_commits: true,
             ffable: true,
-            landing_active: true,
             ..view("a", Phase::Executing)
         };
         assert_eq!(
@@ -812,7 +909,6 @@ mod tests {
     fn executing_finishes_directly_when_ffable() {
         let done = PlanView {
             ffable: true,
-            landing_active: true,
             ..view("a", Phase::Executing)
         };
         assert_eq!(
@@ -824,12 +920,17 @@ mod tests {
     }
 
     #[test]
-    fn executing_waits_serially_while_landing_is_active() {
+    fn executing_queues_behind_active_landing() {
         let waiter = PlanView {
-            landing_active: true,
+            landing: LandingPosition::NotLanding,
             ..view("b", Phase::Executing)
         };
-        assert_eq!(next_action(&waiter), None);
+        assert_eq!(
+            next_action(&waiter),
+            Some(Transition::BeginLanding {
+                plan: "b".to_string()
+            })
+        );
         let first = view("a", Phase::Executing);
         assert_eq!(
             next_action(&first),
@@ -843,7 +944,6 @@ mod tests {
     fn evergreening_finishes_directly_when_ffable() {
         let done = PlanView {
             ffable: true,
-            landing_active: true,
             ..view("a", Phase::Evergreening)
         };
         assert_eq!(
@@ -864,10 +964,15 @@ mod tests {
             })
         );
         let waiter = PlanView {
-            landing_active: true,
+            landing: LandingPosition::NotLanding,
             ..view("b", Phase::Evergreening)
         };
-        assert_eq!(next_action(&waiter), None);
+        assert_eq!(
+            next_action(&waiter),
+            Some(Transition::BeginLanding {
+                plan: "b".to_string()
+            })
+        );
     }
 
     #[test]
@@ -904,13 +1009,34 @@ mod tests {
                 plan: "a".to_string()
             })
         );
+        let queued_done = PlanView {
+            ffable: true,
+            landing: LandingPosition::Queued,
+            ..view("b", Phase::Landing)
+        };
+        assert_eq!(
+            next_action(&queued_done),
+            Some(Transition::FinishLanding {
+                plan: "b".to_string()
+            })
+        );
     }
 
     #[test]
-    fn moved_target_rebases_while_still_automatic() {
-        let moved = view("a", Phase::Landing);
+    fn head_starts_fresh_and_rebases_once_started() {
+        let fresh = view("a", Phase::Landing);
         assert_eq!(
-            next_action(&moved),
+            next_action(&fresh),
+            Some(Transition::StartLanding {
+                plan: "a".to_string()
+            })
+        );
+        let started = PlanView {
+            landing_started: true,
+            ..view("a", Phase::Landing)
+        };
+        assert_eq!(
+            next_action(&started),
             Some(Transition::RebaseLanding {
                 plan: "a".to_string()
             })
@@ -920,6 +1046,26 @@ mod tests {
             ..view("a", Phase::Landing)
         };
         assert_eq!(next_action(&held), None);
+    }
+
+    #[test]
+    fn queued_landings_hold_until_ffable() {
+        let queued = PlanView {
+            landing: LandingPosition::Queued,
+            ..view("b", Phase::Landing)
+        };
+        assert_eq!(next_action(&queued), None);
+    }
+
+    #[test]
+    fn begin_then_start_chain_uses_distinct_kinds() {
+        let begin = Transition::BeginLanding {
+            plan: "a".to_string(),
+        };
+        let start = Transition::StartLanding {
+            plan: "a".to_string(),
+        };
+        assert_ne!(begin.kind(), start.kind());
     }
 
     #[test]
