@@ -168,7 +168,7 @@ describe("scoping preview", () => {
 		expect(emptyChat().scopingPreview).toBeNull();
 	});
 
-	test("history_begin clears scopingPreview while keeping the transcript", () => {
+	test("history_begin preserves scopingPreview while keeping the transcript", () => {
 		let chats = updateEntry(withChat(), testKey(), (chat) => ({
 			...chat,
 			scopingPreview: "TEMPLATE",
@@ -179,7 +179,7 @@ describe("scoping preview", () => {
 			session: testKey(),
 		});
 		const chat = chatOf(chats);
-		expect(chat.scopingPreview).toBeNull();
+		expect(chat.scopingPreview).toBe("TEMPLATE");
 		expect(chat.transcript).toHaveLength(1);
 		expect(chat.transcript[0]).toMatchObject({ kind: "user", text: "hello" });
 	});
@@ -202,7 +202,7 @@ describe("scoping preview", () => {
 			type: "history_begin",
 			session: testKey(),
 		});
-		expect(chatOf(chats).scopingPreview).toBeNull();
+		expect(chatOf(chats).scopingPreview).toBe("TEMPLATE");
 	});
 
 	test("identical preview keeps the same chat object", () => {
@@ -212,11 +212,14 @@ describe("scoping preview", () => {
 		expect(chatOf(after).scopingPreview).toBe("TEMPLATE");
 	});
 
-	test("payload preview overwrites including null clearing", () => {
+	test("null preview never overwrites while a new template does", () => {
 		const shown = withScopingPreview(withChat(), testKey(), "TEMPLATE");
 		expect(chatOf(shown).scopingPreview).toBe("TEMPLATE");
-		const cleared = withScopingPreview(shown, testKey(), null);
-		expect(chatOf(cleared).scopingPreview).toBeNull();
+		const kept = withScopingPreview(shown, testKey(), null);
+		expect(kept[KEY_ID]).toBe(shown[KEY_ID]);
+		expect(chatOf(kept).scopingPreview).toBe("TEMPLATE");
+		const replaced = withScopingPreview(shown, testKey(), "NEXT");
+		expect(chatOf(replaced).scopingPreview).toBe("NEXT");
 	});
 
 	test("carried history drops the preview on rename", () => {
