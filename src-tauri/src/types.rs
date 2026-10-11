@@ -345,7 +345,6 @@ pub enum AppEvent {
     PlansChanged {
         plans: Vec<PlanEntry>,
         selected: SessionKey,
-        scoping_preview: Option<String>,
     },
 }
 

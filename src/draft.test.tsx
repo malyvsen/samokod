@@ -382,7 +382,7 @@ describe("draft bubble in chat", () => {
 		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
 	});
 
-	test("repeated plans_changed with same preview keeps one lead", async () => {
+	test("repeated plans_changed keeps one lead", async () => {
 		await openChat(api);
 		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
 		const plans = [testEntry()];
@@ -391,13 +391,11 @@ describe("draft bubble in chat", () => {
 			type: "plans_changed",
 			plans,
 			selected,
-			scopingPreview: "TEMPLATE",
 		});
 		emitAppEvent(api, {
 			type: "plans_changed",
 			plans,
 			selected,
-			scopingPreview: "TEMPLATE",
 		});
 		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
 		expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);

@@ -139,19 +139,10 @@ export function App() {
 		[applyChats],
 	);
 
-	const applyPushedUpdate = useCallback(
-		(pushed: PlansChangedEvent) => {
-			setPlans(pushed.plans);
-			setSelectedKey((prev) => repairSelection(pushed.plans, prev));
-			const current = selectedRef.current;
-			if (current !== null && sameSession(current, pushed.selected)) {
-				applyChats((chats) =>
-					withScopingPreview(chats, current, pushed.scopingPreview),
-				);
-			}
-		},
-		[applyChats],
-	);
+	const applyPushedUpdate = useCallback((pushed: PlansChangedEvent) => {
+		setPlans(pushed.plans);
+		setSelectedKey((prev) => repairSelection(pushed.plans, prev));
+	}, []);
 
 	const applyOwnedUpdate = useCallback(
 		(oldPlan: string, update: PlansUpdate) => {

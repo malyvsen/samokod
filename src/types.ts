@@ -92,17 +92,18 @@ export interface RepoDefaults {
 interface PlansView {
 	plans: PlanEntry[];
 	selected: SessionKey;
-	scopingPreview: string | null;
 }
 
 export interface PlansUpdate extends PlansView {
 	config_defaults: RepoDefaults;
+	scopingPreview: string | null;
 }
 
 export interface OpenRepoResult extends PlansView {
 	repo_root: string;
 	branch: string;
 	config_defaults: RepoDefaults;
+	scopingPreview: string | null;
 }
 
 export interface RecentRepo {

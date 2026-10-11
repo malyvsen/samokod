@@ -62,9 +62,9 @@ export function removeEntry(chats: Chats, key: SessionKey): Chats {
 	return next;
 }
 
-/// Authoritative preview sync from a plans payload. Sticky: null never
-/// overwrites an existing preview so pushes and replay keep the lead.
-/// Identical values keep the same object so repeated pushes never flicker.
+/// Preview from a response payload, set once. Null never sets and an
+/// existing preview never overwrites, so the lead stays stable across
+/// responses. Identical values keep the same object.
 export function withScopingPreview(
 	chats: Chats,
 	key: SessionKey,
@@ -72,9 +72,8 @@ export function withScopingPreview(
 ): Chats {
 	return updateEntry(chats, key, (chat) => {
 		if (preview === null) return chat;
-		return chat.scopingPreview === preview
-			? chat
-			: { ...chat, scopingPreview: preview };
+		if (chat.scopingPreview !== null) return chat;
+		return { ...chat, scopingPreview: preview };
 	});
 }
 

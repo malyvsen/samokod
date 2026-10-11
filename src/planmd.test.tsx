@@ -92,7 +92,6 @@ describe("scoping right pane", () => {
 				testEntry("2026-09-25.10-54-59.slug", "executing", "Shiny", true),
 			],
 			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
-			scopingPreview: null,
 		});
 		await screen.findByText("TODOS");
 		expect(screen.queryByText("Live plan")).not.toBeInTheDocument();

@@ -68,7 +68,6 @@ impl AgentManager {
             AppEvent::PlansChanged {
                 plans: update.plans,
                 selected: update.selected,
-                scoping_preview: update.scoping_preview,
             },
         );
     }
@@ -420,7 +419,7 @@ fn fallback_selected(plans: &[PlanEntry], current: Option<&SessionKey>) -> Sessi
 /// Rebuild the plans list from a spawned task holding only state and app.
 /// Titles re-read here, so every finished turn refreshes plan names.
 pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
-    let (plans, selected, scoping_preview) = match state.lock() {
+    let (plans, selected) = match state.lock() {
         Ok(guard) => {
             let repo_root = guard.repo_root.clone().unwrap_or_default();
             let checkout_branch = guard.checkout_branch.clone();
@@ -431,10 +430,7 @@ pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
                 &guard.pending_scoping,
             );
             let selected = guard.current.clone().or_else(|| most_recent_key(&plans));
-            let scoping_preview = selected
-                .as_ref()
-                .and_then(|selected| scoping_preview_for(&guard, &repo_root, selected));
-            (plans, selected, scoping_preview)
+            (plans, selected)
         }
         Err(error) => {
             log::warn!("failed to rebuild plans list: {error}");
@@ -442,14 +438,7 @@ pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
         }
     };
     if let Some(selected) = selected {
-        emit_event(
-            app,
-            AppEvent::PlansChanged {
-                plans,
-                selected,
-                scoping_preview,
-            },
-        );
+        emit_event(app, AppEvent::PlansChanged { plans, selected });
     }
 }
 

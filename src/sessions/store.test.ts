@@ -212,14 +212,15 @@ describe("scoping preview", () => {
 		expect(chatOf(after).scopingPreview).toBe("TEMPLATE");
 	});
 
-	test("null preview never overwrites while a new template does", () => {
+	test("response preview sets once and never overwrites", () => {
 		const shown = withScopingPreview(withChat(), testKey(), "TEMPLATE");
 		expect(chatOf(shown).scopingPreview).toBe("TEMPLATE");
 		const kept = withScopingPreview(shown, testKey(), null);
 		expect(kept[KEY_ID]).toBe(shown[KEY_ID]);
 		expect(chatOf(kept).scopingPreview).toBe("TEMPLATE");
-		const replaced = withScopingPreview(shown, testKey(), "NEXT");
-		expect(chatOf(replaced).scopingPreview).toBe("NEXT");
+		const frozen = withScopingPreview(shown, testKey(), "NEXT");
+		expect(frozen[KEY_ID]).toBe(shown[KEY_ID]);
+		expect(chatOf(frozen).scopingPreview).toBe("TEMPLATE");
 	});
 
 	test("carried history drops the preview on rename", () => {
