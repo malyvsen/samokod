@@ -13,34 +13,39 @@ export function liveForThought(
 	live: LiveStatus | null,
 	now: number,
 ): LiveStatus {
-	if (live !== null && live.kind === "thinking") {
-		if (now - live.updatedAt >= BURST_SILENCE_MS) {
-			return { kind: "thinking", burstStart: now, updatedAt: now };
-		}
-		return {
-			kind: "thinking",
-			burstStart: live.burstStart,
-			updatedAt: now,
-		};
-	}
-	return { kind: "thinking", burstStart: now, updatedAt: now };
+	const burstStart =
+		live?.kind === "thinking" && now - live.updatedAt < BURST_SILENCE_MS
+			? live.burstStart
+			: now;
+	return { kind: "thinking", burstStart, updatedAt: now };
 }
 
 export function freezeBurst(
 	transcript: TranscriptItem[],
 	live: LiveStatus | null,
 ): TranscriptItem[] {
-	if (live === null || live.kind !== "thinking") return transcript;
-	const ms = msForBurst(live.burstStart, live.updatedAt);
-	return [...transcript, { kind: "thought", id: crypto.randomUUID(), ms }];
+	if (live?.kind !== "thinking") return transcript;
+	return [
+		...transcript,
+		{
+			kind: "thought",
+			id: crypto.randomUUID(),
+			ms: burstMs(live.burstStart, live.updatedAt),
+		},
+	];
 }
 
-export function msForBurst(burstStart: number, updatedAt: number): number {
-	return Math.max(0, updatedAt - burstStart);
+export function liveThinkingMs(live: LiveStatus | null): number | null {
+	if (live?.kind !== "thinking") return null;
+	return burstMs(live.burstStart, live.updatedAt);
 }
 
-export function secondsForMs(totalMs: number): number {
+export function thinkingSeconds(totalMs: number): number {
 	return Math.max(1, Math.round(totalMs / 1000));
+}
+
+function burstMs(burstStart: number, updatedAt: number): number {
+	return Math.max(0, updatedAt - burstStart);
 }
 
 export function hasRunningTools(transcript: TranscriptItem[]): boolean {

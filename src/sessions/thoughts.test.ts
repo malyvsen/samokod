@@ -8,8 +8,8 @@ import {
 	freezeBurst,
 	hasRunningTools,
 	liveForThought,
-	msForBurst,
-	secondsForMs,
+	liveThinkingMs,
+	thinkingSeconds,
 	useThoughtTimers,
 	WAITING_DELAY_MS,
 } from "./thoughts";
@@ -20,24 +20,35 @@ describe("thought timeouts", () => {
 	});
 });
 
-describe("msForBurst", () => {
-	test("stores wall-clock duration with a zero floor", () => {
-		expect(msForBurst(1000, 1000)).toBe(0);
-		expect(msForBurst(1000, 1400)).toBe(400);
-		expect(msForBurst(2000, 1000)).toBe(0);
+describe("liveThinkingMs", () => {
+	test("idle and waiting have no live thinking time", () => {
+		expect(liveThinkingMs(null)).toBeNull();
+		expect(liveThinkingMs({ kind: "waiting" })).toBeNull();
+	});
+
+	test("live bursts read wall-clock duration with a zero floor", () => {
+		expect(
+			liveThinkingMs({ kind: "thinking", burstStart: 1000, updatedAt: 1000 }),
+		).toBe(0);
+		expect(
+			liveThinkingMs({ kind: "thinking", burstStart: 1000, updatedAt: 1400 }),
+		).toBe(400);
+		expect(
+			liveThinkingMs({ kind: "thinking", burstStart: 2000, updatedAt: 1000 }),
+		).toBe(0);
 	});
 });
 
-describe("secondsForMs", () => {
+describe("thinkingSeconds", () => {
 	test("single-chunk bursts read one second", () => {
-		expect(secondsForMs(0)).toBe(1);
-		expect(secondsForMs(400)).toBe(1);
+		expect(thinkingSeconds(0)).toBe(1);
+		expect(thinkingSeconds(400)).toBe(1);
 	});
 
 	test("rounds to the nearest second with a one-second floor", () => {
-		expect(secondsForMs(8000)).toBe(8);
-		expect(secondsForMs(1500)).toBe(2);
-		expect(secondsForMs(1499)).toBe(1);
+		expect(thinkingSeconds(8000)).toBe(8);
+		expect(thinkingSeconds(1500)).toBe(2);
+		expect(thinkingSeconds(1499)).toBe(1);
 	});
 });
 

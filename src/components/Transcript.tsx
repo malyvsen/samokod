@@ -3,8 +3,8 @@ import { assertNever } from "../assert";
 import type { SessionStart } from "../sessions/store";
 import {
 	type LiveStatus,
-	msForBurst,
-	secondsForMs,
+	liveThinkingMs,
+	thinkingSeconds,
 } from "../sessions/thoughts";
 import { todoMark, todoRowClass } from "../todos";
 import type {
@@ -46,70 +46,119 @@ export function Transcript({
 	const showLead =
 		lead !== null &&
 		!items.some((item) => item.kind === "user" && item.text === lead);
-	const thinkingLive =
-		live !== null && live !== undefined && live.kind === "thinking"
-			? live
-			: null;
-	const rows: ReactNode[] = [];
-	let index = 0;
-	while (index < items.length) {
-		const item = items[index];
-		if (item === undefined) break;
-		if (item.kind === "thought") {
-			const firstId = item.id;
-			let totalMs = 0;
-			let end = index;
-			while (end < items.length) {
-				const next = items[end];
-				if (next === undefined || next.kind !== "thought") break;
-				totalMs += next.ms;
-				end++;
-			}
-			if (end === items.length && thinkingLive !== null) {
-				totalMs += msForBurst(thinkingLive.burstStart, thinkingLive.updatedAt);
-			}
-			rows.push(
-				<div className="arow thought" key={firstId}>
-					thinking: {secondsForMs(totalMs)}s
-				</div>,
-			);
-			index = end;
+	const status = live ?? null;
+	const blocks = transcriptBlocks(items, liveThinkingMs(status));
+	return (
+		<>
+			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
+			<div className="tcol">
+				{showLead && (
+					<MessageBubble
+						collapseKind="lead"
+						tone="user"
+						label="YOU"
+						text={lead}
+					/>
+				)}
+				{blocks.map((block) =>
+					block.kind === "thoughts" ? (
+						<ThoughtRow key={block.id} ms={block.ms} />
+					) : (
+						<ItemRow
+							key={block.item.id}
+							item={block.item}
+							onRetry={onRetry}
+							onAnswer={onAnswer}
+						/>
+					),
+				)}
+				{status?.kind === "waiting" && (
+					<div className="arow waiting">waiting</div>
+				)}
+				{start?.kind === "failed" && (
+					<ErrorBar
+						raw={start.error.raw}
+						hint={start.error.hint}
+						onRetry={onHistoryRetry}
+					/>
+				)}
+				{children}
+			</div>
+		</>
+	);
+}
+
+type TranscriptBlock =
+	| { kind: "thoughts"; id: string; ms: number }
+	| { kind: "item"; item: Exclude<TranscriptItem, { kind: "thought" }> };
+
+/// Adjacent thoughts read as one cumulative row. Live thinking joins a
+/// trailing run, otherwise it opens its own row.
+function transcriptBlocks(
+	items: TranscriptItem[],
+	liveMs: number | null,
+): TranscriptBlock[] {
+	const blocks: TranscriptBlock[] = [];
+	for (const item of items) {
+		if (item.kind !== "thought") {
+			blocks.push({ kind: "item", item });
 			continue;
 		}
-		if (item.kind === "user") {
-			rows.push(
+		const last = blocks[blocks.length - 1];
+		if (last?.kind === "thoughts") {
+			blocks[blocks.length - 1] = { ...last, ms: last.ms + item.ms };
+		} else {
+			blocks.push({ kind: "thoughts", id: item.id, ms: item.ms });
+		}
+	}
+	if (liveMs !== null) {
+		const last = blocks[blocks.length - 1];
+		if (last?.kind === "thoughts") {
+			blocks[blocks.length - 1] = { ...last, ms: last.ms + liveMs };
+		} else {
+			blocks.push({ kind: "thoughts", id: "live", ms: liveMs });
+		}
+	}
+	return blocks;
+}
+
+function ThoughtRow({ ms }: { ms: number }) {
+	return <div className="arow thought">thinking: {thinkingSeconds(ms)}s</div>;
+}
+
+function ItemRow({
+	item,
+	onRetry,
+	onAnswer,
+}: {
+	item: Exclude<TranscriptItem, { kind: "thought" }>;
+	onRetry: (() => void) | null;
+	onAnswer: (toolCallId: string, optionId: string) => void;
+}) {
+	switch (item.kind) {
+		case "user":
+			return (
 				<MessageBubble
-					key={item.id}
 					collapseKind="user"
 					tone="user"
 					label="YOU"
 					text={item.text}
-				/>,
+				/>
 			);
-			index++;
-			continue;
-		}
-		if (item.kind === "agent") {
-			rows.push(
+		case "agent":
+			return (
 				<MessageBubble
-					key={item.id}
 					collapseKind="agent"
 					tone="agent"
 					label="AI"
 					text={item.text}
-				/>,
+				/>
 			);
-			index++;
-			continue;
-		}
-		if (item.kind === "tool") {
-			rows.push(<ToolRow key={item.id} line={item.line} />);
-			index++;
-			continue;
-		}
-		if (item.kind === "todos") {
-			rows.push(
-				<div className="todo" key={item.id}>
+		case "tool":
+			return <ToolRow line={item.line} />;
+		case "todos":
+			return (
+				<div className="todo">
 					<div className="head">
 						<span>TODOS</span>
 					</div>
@@ -123,12 +172,9 @@ export function Transcript({
 							{change.content}
 						</div>
 					))}
-				</div>,
+				</div>
 			);
-			index++;
-			continue;
-		}
-		if (item.kind === "approval") {
+		case "approval": {
 			const permission: PermissionView = item.permission;
 			const allow = permission.options.find(
 				(option: PermissionOptionView) => option.kind === "allow",
@@ -136,8 +182,8 @@ export function Transcript({
 			const reject = permission.options.find(
 				(option: PermissionOptionView) => option.kind === "reject",
 			);
-			rows.push(
-				<div className="approval" key={item.id}>
+			return (
+				<div className="approval">
 					<h3 data-full={permission.title}>{permission.title}</h3>
 					<p>
 						{permission.tool} · {permission.rule_hint}
@@ -167,60 +213,20 @@ export function Transcript({
 							</button>
 						)}
 					</div>
-				</div>,
+				</div>
 			);
-			index++;
-			continue;
 		}
-		rows.push(
-			<ErrorBar
-				key={item.id}
-				raw={item.raw}
-				hint={item.hint}
-				onRetry={item.retryable ? onRetry : null}
-			/>,
-		);
-		index++;
+		case "error":
+			return (
+				<ErrorBar
+					raw={item.raw}
+					hint={item.hint}
+					onRetry={item.retryable ? onRetry : null}
+				/>
+			);
+		default:
+			return assertNever(item);
 	}
-	const endsWithThought =
-		items.length > 0 && items[items.length - 1]?.kind === "thought";
-	const showLiveThinking = thinkingLive !== null && !endsWithThought;
-	return (
-		<>
-			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
-			<div className="tcol">
-				{showLead && (
-					<MessageBubble
-						collapseKind="lead"
-						tone="user"
-						label="YOU"
-						text={lead}
-					/>
-				)}
-				{rows}
-				{live?.kind === "waiting" && (
-					<div className="arow waiting">waiting</div>
-				)}
-				{showLiveThinking && thinkingLive !== null && (
-					<div className="arow thought">
-						thinking:{" "}
-						{secondsForMs(
-							msForBurst(thinkingLive.burstStart, thinkingLive.updatedAt),
-						)}
-						s
-					</div>
-				)}
-				{start?.kind === "failed" && (
-					<ErrorBar
-						raw={start.error.raw}
-						hint={start.error.hint}
-						onRetry={onHistoryRetry}
-					/>
-				)}
-				{children}
-			</div>
-		</>
-	);
 }
 
 function MessageBubble({
