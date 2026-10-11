@@ -582,7 +582,6 @@ mod tests {
         assert!(message.contains("feature"));
         assert!(message.contains("0923748 feat: blabla"));
         assert!(message.contains("009fb12 fix: blabla"));
-        assert!(message.contains("Use TODOs to track progress"));
         assert!(!message.contains("{{WORKTREE_PATH}}"));
         assert!(!message.contains("{{WORKTREE_BRANCH}}"));
         assert!(!message.contains("{{PLAN_MD_ABS_PATH}}"));

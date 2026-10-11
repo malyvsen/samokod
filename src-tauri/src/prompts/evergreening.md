@@ -33,6 +33,8 @@ Note that when this prompt tells you to consider doing something, it does not ne
 The scope is this worktree. The commits listed above and the plan show what was done and what was intended. Consider the edited code plus adjacent and related content.
 
 # Instructions
-Use TODOs to track progress - make them detailed if possible.
+Once you're aware of what needs to be done, use TODOs to track your work.
 
-When you are done, commit, summarize what you did, and stop.
+Commit as you work - everything you do should eventually be committed.
+
+Once done, summarize what you did and stop.
