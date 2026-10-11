@@ -1,6 +1,7 @@
 // Automatic plan progression: one pump, one pure decision, one shared core.
 // The pump scans automatic idle plans in phase then arrival order and fires
-// at most one transition per plan, serializing landing behind the scenes.
+// at most one transition per plan. Many waiters queue in `landing/`, one
+// agent runs at the head.
 // Scoping never rides the pump: approving a plan stays a manual `>` click,
 // and only executing, evergreening, and landing plans carry the
 // auto-manual switch. Executing plans with evergreen intent and fresh
@@ -15,7 +16,7 @@ use crate::opencode;
 use crate::plans::{self, Phase};
 use crate::types::{AgentError, PlansUpdate, SessionKey, SessionRole};
 
-use super::landing_queue::{LandingPosition, position, position_in};
+use super::landing_queue::{self, LandingPosition};
 use super::session::ActivePlan;
 use super::{AgentManager, lock_state};
 
@@ -49,8 +50,9 @@ impl AgentManager {
         // settles on its own. The set below only backstops that invariant:
         // the same transition firing twice means it stopped sticking. A
         // `BeginLanding` followed by `StartLanding` for the same plan is
-        // one move plus one spawn, so the key pairs plan with kind.
-        let mut fired_plans: HashSet<(String, TransitionKind)> = HashSet::new();
+        // one move plus one spawn, so distinct transitions may fire once
+        // each per pump run.
+        let mut fired_once: HashSet<Transition> = HashSet::new();
         'pump: while let Some((repo_root, _)) = self.reopen_snapshot() {
             let mut scanned = plans::scan_plans(&repo_root);
             scanned.retain(|plan| plan.phase.is_active());
@@ -64,7 +66,7 @@ impl AgentManager {
                         arrival_key(&repo_root, left).cmp(&arrival_key(&repo_root, right))
                     })
             });
-            let landing_queue = super::landing_queue::sorted_landing_names(&repo_root);
+            let landing_queue = landing_queue::sorted_landing_names(&repo_root);
             let mut fired = false;
             for plan in &scanned {
                 let view = self.plan_view(&repo_root, plan, &landing_queue);
@@ -72,12 +74,11 @@ impl AgentManager {
                     continue;
                 };
                 let plan_name = action.plan_name().to_string();
-                let kind = action.kind();
-                match self.transition(action).await {
+                match self.transition(action.clone()).await {
                     Ok(_) => {
                         fired = true;
                         fired_any = true;
-                        if !fired_plans.insert((plan_name.clone(), kind)) {
+                        if !fired_once.insert(action) {
                             log::warn!("pump fired twice for {plan_name}; stopping");
                             break 'pump;
                         }
@@ -149,7 +150,7 @@ impl AgentManager {
             },
             Phase::Scoping | Phase::Completed | Phase::Cancelled => (false, false, false),
         };
-        let landing = position_in(landing_queue, &plan.name);
+        let landing = landing_queue::position_in(landing_queue, &plan.name);
         let landing_started = stored.landing.is_some();
         PlanView {
             name: plan.name.clone(),
@@ -324,7 +325,7 @@ impl AgentManager {
                         };
                         if !evergreening.path(&repo_root).is_dir() {
                             return Err(AgentError::RequestFailed {
-                                raw: "no executing plan to land".to_string(),
+                                raw: "no executing or evergreening plan to land".to_string(),
                             });
                         }
                         let session = SessionKey {
@@ -360,31 +361,9 @@ impl AgentManager {
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
-                if position(&repo_root, &plan) != LandingPosition::Head {
-                    return Err(AgentError::RequestFailed {
-                        raw: "landing is queued, waiting its turn".to_string(),
-                    });
-                }
-                let from = plans::PlanRef {
-                    name: plan.clone(),
-                    phase: Phase::Landing,
-                };
-                if !from.path(&repo_root).is_dir() {
-                    return Err(AgentError::RequestFailed {
-                        raw: "no active plan to complete".to_string(),
-                    });
-                }
+                let from = require_landing_head(&repo_root, &plan)?;
                 let status = self.worktree_status_for(&repo_root, &from.name)?;
-                if status.dirty {
-                    return Err(AgentError::RequestFailed {
-                        raw: "commit or discard worktree changes first".to_string(),
-                    });
-                }
-                if status.ffable {
-                    return Err(AgentError::RequestFailed {
-                        raw: "already fast-forwardable, land it directly".to_string(),
-                    });
-                }
+                super::gate_landing(status.dirty, status.ffable, super::LandingStep::Start)?;
                 let mut active = ActivePlan::landing(from.name.clone());
                 // The role goes out as the full first turn below, so later
                 // turns never prefix again.
@@ -525,20 +504,7 @@ impl AgentManager {
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
-                if position(&repo_root, &plan) != LandingPosition::Head {
-                    return Err(AgentError::RequestFailed {
-                        raw: "landing is queued, waiting its turn".to_string(),
-                    });
-                }
-                let from = plans::PlanRef {
-                    name: plan.clone(),
-                    phase: Phase::Landing,
-                };
-                if !from.path(&repo_root).is_dir() {
-                    return Err(AgentError::RequestFailed {
-                        raw: "no active plan to complete".to_string(),
-                    });
-                }
+                let from = require_landing_head(&repo_root, &plan)?;
                 let status = self.worktree_status_for(&repo_root, &from.name)?;
                 if status.dirty {
                     return Err(AgentError::RequestFailed {
@@ -591,7 +557,7 @@ impl AgentManager {
 /// fast paths straight to completed when ffable; `BeginLanding` only moves
 /// a diverged plan into the queue; `StartLanding` spawns the head's agent
 /// fresh; `RebaseLanding` re-runs the head that already started.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Transition {
     Execute { plan: String },
     BeginEvergreening { plan: String },
@@ -601,19 +567,6 @@ pub(crate) enum Transition {
     FinishLanding { plan: String },
     StartLanding { plan: String },
     RebaseLanding { plan: String },
-}
-
-/// Kind of one transition, for the pump's Begin-then-Start chain guard.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum TransitionKind {
-    Execute,
-    BeginEvergreening,
-    BeginLanding,
-    FinishExecuting,
-    FinishEvergreening,
-    FinishLanding,
-    StartLanding,
-    RebaseLanding,
 }
 
 impl Transition {
@@ -627,19 +580,6 @@ impl Transition {
             | Transition::FinishLanding { plan }
             | Transition::StartLanding { plan }
             | Transition::RebaseLanding { plan } => plan,
-        }
-    }
-
-    fn kind(&self) -> TransitionKind {
-        match self {
-            Transition::Execute { .. } => TransitionKind::Execute,
-            Transition::BeginEvergreening { .. } => TransitionKind::BeginEvergreening,
-            Transition::BeginLanding { .. } => TransitionKind::BeginLanding,
-            Transition::FinishExecuting { .. } => TransitionKind::FinishExecuting,
-            Transition::FinishEvergreening { .. } => TransitionKind::FinishEvergreening,
-            Transition::FinishLanding { .. } => TransitionKind::FinishLanding,
-            Transition::StartLanding { .. } => TransitionKind::StartLanding,
-            Transition::RebaseLanding { .. } => TransitionKind::RebaseLanding,
         }
     }
 }
@@ -739,6 +679,30 @@ fn landing_first_turn_text(status: &super::WorktreeLive, plan_md_abs: &str) -> S
         &status.path.to_string_lossy(),
         plan_md_abs,
     )
+}
+
+/// Landing head plus existence, shared by the fresh spawn and the re-run.
+/// Queued landings hold; missing landings fail loud. Pure except the
+/// queue scan.
+fn require_landing_head(
+    repo_root: &std::path::Path,
+    plan: &str,
+) -> Result<plans::PlanRef, AgentError> {
+    if landing_queue::position(repo_root, plan) != LandingPosition::Head {
+        return Err(AgentError::RequestFailed {
+            raw: "landing is queued, waiting its turn".to_string(),
+        });
+    }
+    let from = plans::PlanRef {
+        name: plan.to_string(),
+        phase: Phase::Landing,
+    };
+    if !from.path(repo_root).is_dir() {
+        return Err(AgentError::RequestFailed {
+            raw: "no active plan to complete".to_string(),
+        });
+    }
+    Ok(from)
 }
 
 /// Arrival key for the pump: oldest phase-entry first, unstamped plans
@@ -1058,14 +1022,14 @@ mod tests {
     }
 
     #[test]
-    fn begin_then_start_chain_uses_distinct_kinds() {
+    fn begin_then_start_chain_are_distinct_transitions() {
         let begin = Transition::BeginLanding {
             plan: "a".to_string(),
         };
         let start = Transition::StartLanding {
             plan: "a".to_string(),
         };
-        assert_ne!(begin.kind(), start.kind());
+        assert_ne!(begin, start);
     }
 
     #[test]

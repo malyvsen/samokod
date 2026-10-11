@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use crate::plans;
-use crate::types::{AgentError, SessionKey, SessionRole};
+use crate::types::{AgentError, SessionKey};
 
 use super::AgentManager;
 use super::lock_state;
@@ -44,9 +44,7 @@ impl AgentManager {
             );
             return Ok(());
         }
-        if session.role == SessionRole::Landing
-            && super::landing_queue::is_queued(&repo_root, &session.plan)
-        {
+        if super::landing_queue::is_held(&repo_root, &session) {
             log::debug!(
                 "skipping warm for {} {:?}: queued behind landing head",
                 session.plan,
@@ -93,7 +91,6 @@ impl AgentManager {
 
 #[cfg(test)]
 mod tests {
-    use super::super::landing_queue;
     use super::*;
     use crate::types::SessionRole;
 
@@ -102,42 +99,6 @@ mod tests {
             plan: "2026-09-26.08-52-57".to_string(),
             role: SessionRole::Scoping,
         }
-    }
-
-    fn landing_dir(root: &std::path::Path, name: &str, entered_at: i64) {
-        let plan = plans::PlanRef {
-            name: name.to_string(),
-            phase: plans::Phase::Landing,
-        };
-        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
-        std::fs::write(plan.path(root).join("plan.md"), "# T\n").expect("write");
-        let mut state = plans::load_state(&plan.path(root));
-        state.entered_at = Some(entered_at);
-        plans::store_state(&plan.path(root), &state);
-    }
-
-    #[test]
-    fn queued_landings_skip_warm_without_live_session() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        landing_dir(root, "2026-10-11.02-00-00.old", 100);
-        landing_dir(root, "2026-10-11.02-00-01.new", 200);
-        let head = SessionKey {
-            plan: "2026-10-11.02-00-00.old".to_string(),
-            role: SessionRole::Landing,
-        };
-        let queued = SessionKey {
-            plan: "2026-10-11.02-00-01.new".to_string(),
-            role: SessionRole::Landing,
-        };
-        assert!(!landing_queue::is_queued(root, &head.plan));
-        assert!(landing_queue::is_queued(root, &queued.plan));
-        // Guard mints no live session: early return before any spawn.
-        assert!(
-            queued.role == SessionRole::Landing && landing_queue::is_queued(root, &queued.plan)
-        );
-        assert!(!(head.role == SessionRole::Landing && landing_queue::is_queued(root, &head.plan)));
     }
 
     #[test]

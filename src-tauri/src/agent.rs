@@ -497,7 +497,7 @@ impl AgentManager {
             SessionRole::Executing | SessionRole::Evergreening
         ) {
             return Err(AgentError::RequestFailed {
-                raw: "no executing plan to land".to_string(),
+                raw: "no executing or evergreening plan to land".to_string(),
             });
         }
         self.transition(advance::Transition::BeginLanding { plan: session.plan })
@@ -802,17 +802,19 @@ pub(crate) struct WorktreeLive {
     pub commits: Vec<String>,
 }
 
-/// Which landing step the user asked for.
+/// Which landing step the user asked for. `Begin` moves a diverged work
+/// plan into the queue; `Start` spawns the head's agent fresh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LandingStep {
     Begin,
+    Start,
     Finish,
 }
 
 /// Refuse a landing step that cannot run. A dirty worktree never lands;
 /// an already fast-forwardable branch finishes directly instead of
-/// starting landing; a diverged branch starts landing before finishing.
-/// Pure.
+/// moving or starting landing; a diverged branch moves and starts before
+/// finishing. Pure.
 fn gate_landing(dirty: bool, ffable: bool, step: LandingStep) -> Result<(), AgentError> {
     if dirty {
         return Err(AgentError::RequestFailed {
@@ -820,7 +822,7 @@ fn gate_landing(dirty: bool, ffable: bool, step: LandingStep) -> Result<(), Agen
         });
     }
     match step {
-        LandingStep::Begin => {
+        LandingStep::Begin | LandingStep::Start => {
             if ffable {
                 return Err(AgentError::RequestFailed {
                     raw: "already fast-forwardable, land it directly".to_string(),
@@ -1264,10 +1266,13 @@ mod tests {
     fn landing_gate_refuses_dirty_and_misplaced_steps() {
         assert!(gate_landing(false, true, LandingStep::Finish).is_ok());
         assert!(gate_landing(false, false, LandingStep::Begin).is_ok());
+        assert!(gate_landing(false, false, LandingStep::Start).is_ok());
         assert!(gate_landing(true, true, LandingStep::Finish).is_err());
         assert!(gate_landing(true, false, LandingStep::Begin).is_err());
+        assert!(gate_landing(true, false, LandingStep::Start).is_err());
         assert!(gate_landing(false, false, LandingStep::Finish).is_err());
         assert!(gate_landing(false, true, LandingStep::Begin).is_err());
+        assert!(gate_landing(false, true, LandingStep::Start).is_err());
     }
 
     #[test]

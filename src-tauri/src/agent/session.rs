@@ -606,9 +606,8 @@ impl AgentManager {
             self.emit_history_failed(&session, raw.clone());
             return Err(AgentError::RequestFailed { raw });
         }
-        if session.role == SessionRole::Landing
-            && let Some((repo_root, _)) = self.reopen_snapshot()
-            && super::landing_queue::is_queued(&repo_root, &session.plan)
+        if let Some((repo_root, _)) = self.reopen_snapshot()
+            && super::landing_queue::is_held(&repo_root, &session)
         {
             history_guard.finish();
             emit_event(&self.app, AppEvent::HistoryDone { session });
@@ -903,46 +902,5 @@ impl AgentManager {
     ) -> Option<(ConnectionTo<Agent>, String)> {
         let (connection, session_id, _, _) = self.session_snapshot_for(key)?;
         (!connection.is_incoming_closed()).then_some((connection, session_id))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::landing_queue;
-    use super::*;
-
-    fn landing_dir(root: &std::path::Path, name: &str, entered_at: i64) {
-        let plan = plans::PlanRef {
-            name: name.to_string(),
-            phase: plans::Phase::Landing,
-        };
-        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
-        std::fs::write(plan.path(root).join("plan.md"), "# T\n").expect("write");
-        let mut state = plans::load_state(&plan.path(root));
-        state.entered_at = Some(entered_at);
-        plans::store_state(&plan.path(root), &state);
-    }
-
-    #[test]
-    fn queued_landings_finish_history_without_live_session() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        landing_dir(root, "2026-10-11.02-00-00.old", 100);
-        landing_dir(root, "2026-10-11.02-00-01.new", 200);
-        let queued = SessionKey {
-            plan: "2026-10-11.02-00-01.new".to_string(),
-            role: SessionRole::Landing,
-        };
-        let head = SessionKey {
-            plan: "2026-10-11.02-00-00.old".to_string(),
-            role: SessionRole::Landing,
-        };
-        // Same guard as `finish_empty_history`: queued landings finish
-        // with `HistoryDone` and no spawn, so no live entry is minted.
-        assert!(
-            queued.role == SessionRole::Landing && landing_queue::is_queued(root, &queued.plan)
-        );
-        assert!(!(head.role == SessionRole::Landing && landing_queue::is_queued(root, &head.plan)));
     }
 }
