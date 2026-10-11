@@ -185,6 +185,16 @@ pub struct TodoProgressView {
     pub eta_secs: Option<u64>,
 }
 
+/// Landing commit progress for the plans list. Same shape as
+/// `TodoProgressView`: `eta_secs` is `None` when no ETA text shows.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LandingProgressView {
+    pub done: usize,
+    pub total: usize,
+    #[serde(default)]
+    pub eta_secs: Option<u64>,
+}
+
 /// One plan row for the plans list.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlanEntry {
@@ -212,6 +222,9 @@ pub struct PlanEntry {
     /// agent; queued landings hold with no live session and no idle dot.
     #[serde(default)]
     pub queued: bool,
+    /// Landing commit progress with ETA. `Some` for landing plans only.
+    #[serde(default)]
+    pub landing_progress: Option<LandingProgressView>,
 }
 
 /// Stored model/effort defaults for the instant disabled picker paint.
@@ -437,6 +450,7 @@ mod tests {
             commits: Vec::new(),
             ffable: false,
             queued: false,
+            landing_progress: None,
         };
         let value = serde_json::to_value(&entry).expect("serializes");
         let actual: std::collections::BTreeSet<String> =
@@ -452,6 +466,7 @@ mod tests {
             "commits",
             "ffable",
             "queued",
+            "landing_progress",
         ]
         .into_iter()
         .map(str::to_string)

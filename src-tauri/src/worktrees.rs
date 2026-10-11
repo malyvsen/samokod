@@ -166,7 +166,6 @@ pub fn prune(repo_root: &Path) -> Result<(), WorktreeError> {
 /// `done = msgnum - 1` saturated and clamped to `total = end`. `None`
 /// without an in-flight `rebase -i` or on any unreadable state. Pure
 /// except the file reads.
-#[allow(dead_code)]
 pub fn rebase_progress(worktree_path: &Path) -> Option<(usize, usize)> {
     let progress = rebase_progress_inner(worktree_path);
     if progress.is_none() {

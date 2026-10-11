@@ -9,8 +9,8 @@ use tauri::AppHandle;
 use crate::plans;
 use crate::todos::estimate_remaining;
 use crate::types::{
-    AppEvent, OpenRepoResult, PlanEntry, PlansUpdate, RepoDefaults, SessionKey, SessionRole,
-    SessionStatusView, SpendStatusView, TodoProgressView, TodoStatus,
+    AppEvent, LandingProgressView, OpenRepoResult, PlanEntry, PlansUpdate, RepoDefaults,
+    SessionKey, SessionRole, SessionStatusView, SpendStatusView, TodoProgressView, TodoStatus,
 };
 
 use super::AgentManager;
@@ -212,6 +212,7 @@ pub(crate) fn sorted_entries(
         .map(|(plan, state, _)| {
             let (commits, ffable) = branch_state_for(repo_root, checkout_branch, plan);
             let queued = landing_queue::is_queued_in(&landing_queue, &plan.name);
+            let landing_progress = landing_progress_for(repo_root, plan, state, &commits, ffable);
             PlanEntry {
                 name: plan.name.clone(),
                 phase: plan.phase,
@@ -223,9 +224,51 @@ pub(crate) fn sorted_entries(
                 commits,
                 ffable,
                 queued,
+                landing_progress,
             }
         })
         .collect()
+}
+
+/// Landing commit progress with ETA for one plan row. `Some` for landing
+/// plans only: rebase `done/total` when a `rebase -i` is in flight, else
+/// the commit fallback (`ffable ? n : 0` over `n`). The ETA reuses the
+/// todo rate from `entered_at`. Pure except the file and clock reads.
+fn landing_progress_for(
+    repo_root: &Path,
+    plan: &plans::PlanRef,
+    state: &plans::PlanState,
+    commits: &[String],
+    ffable: bool,
+) -> Option<LandingProgressView> {
+    if plan.phase != plans::Phase::Landing {
+        return None;
+    }
+    let worktree_path = crate::worktrees::worktree_path(repo_root, &plan.name);
+    let (done, total) = match crate::worktrees::rebase_progress(&worktree_path) {
+        Some((done, total)) => (done.min(total), total),
+        None => (if ffable { commits.len() } else { 0 }, commits.len()),
+    };
+    let eta_secs = if total == 0 || done == 0 || done >= total {
+        None
+    } else {
+        state
+            .entered_at
+            .and_then(|millis| {
+                u64::try_from(millis).ok().and_then(|ms| {
+                    std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_millis(ms))
+                })
+            })
+            .and_then(|started| {
+                estimate_remaining(done, total, started, std::time::SystemTime::now())
+                    .map(|remaining| remaining.as_secs())
+            })
+    };
+    Some(LandingProgressView {
+        done,
+        total,
+        eta_secs,
+    })
 }
 
 /// Display title: `plan.md` heading first, else stored working title
@@ -598,5 +641,131 @@ mod tests {
         let (commits, ffable) = branch_state_for(missing, "", &executing);
         assert!(commits.is_empty());
         assert!(!ffable);
+    }
+
+    fn landing_plan(name: &str) -> plans::PlanRef {
+        plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Landing,
+        }
+    }
+
+    fn fake_rebase(repo_root: &Path, plan_name: &str, msgnum: &str, end: &str) {
+        let worktree = crate::worktrees::worktree_path(repo_root, plan_name);
+        let gitdir = repo_root.join("git-admin").join(plan_name);
+        std::fs::create_dir_all(&worktree).expect("worktree dir");
+        std::fs::create_dir_all(gitdir.join("rebase-merge")).expect("gitdir dir");
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", gitdir.display()),
+        )
+        .expect("git file");
+        std::fs::write(gitdir.join("rebase-merge").join("msgnum"), msgnum).expect("msgnum");
+        std::fs::write(gitdir.join("rebase-merge").join("end"), end).expect("end");
+    }
+
+    fn entered_at_ms(time: std::time::SystemTime) -> i64 {
+        crate::plans::unix_ms(time).expect("millis")
+    }
+
+    #[test]
+    fn landing_falls_back_to_diverged_commits_without_rebase() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plan = landing_plan("2026-09-26.14-53-26.branch-check");
+        let state = plans::PlanState::default();
+        let commits = vec!["abc plan work".to_string(), "def more work".to_string()];
+        let progress = landing_progress_for(dir.path(), &plan, &state, &commits, false)
+            .expect("landing progress");
+        assert_eq!(progress.done, 0);
+        assert_eq!(progress.total, 2);
+        assert_eq!(progress.eta_secs, None);
+    }
+
+    #[test]
+    fn landing_falls_back_to_full_when_ffable_without_rebase() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plan = landing_plan("2026-09-26.14-53-27.ready-check");
+        let state = plans::PlanState::default();
+        let commits = vec!["abc plan work".to_string(), "def more work".to_string()];
+        let progress = landing_progress_for(dir.path(), &plan, &state, &commits, true)
+            .expect("landing progress");
+        assert_eq!(progress.done, 2);
+        assert_eq!(progress.total, 2);
+        assert_eq!(progress.eta_secs, None);
+    }
+
+    #[test]
+    fn landing_empty_commits_show_empty_track() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let plan = landing_plan("2026-09-26.14-53-28.empty-check");
+        let state = plans::PlanState::default();
+        let progress =
+            landing_progress_for(dir.path(), &plan, &state, &[], false).expect("landing progress");
+        assert_eq!(progress.done, 0);
+        assert_eq!(progress.total, 0);
+        assert_eq!(progress.eta_secs, None);
+    }
+
+    #[test]
+    fn landing_rebase_without_entered_at_has_no_eta() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let name = "2026-09-26.14-53-29.rebase-check";
+        fake_rebase(dir.path(), name, "2\n", "2\n");
+        let plan = landing_plan(name);
+        let state = plans::PlanState::default();
+        let commits = vec!["abc plan work".to_string(), "def more work".to_string()];
+        let progress =
+            landing_progress_for(dir.path(), &plan, &state, &commits, false).expect("landing");
+        assert_eq!((progress.done, progress.total), (1, 2));
+        assert_eq!(progress.eta_secs, None);
+    }
+
+    #[test]
+    fn landing_rebase_with_entered_at_scales_eta() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let name = "2026-09-26.14-53-30.eta-check";
+        fake_rebase(dir.path(), name, "2\n", "2\n");
+        let started = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
+        let state = plans::PlanState {
+            entered_at: Some(entered_at_ms(started)),
+            ..Default::default()
+        };
+        let plan = landing_plan(name);
+        let commits = vec!["abc plan work".to_string(), "def more work".to_string()];
+        let progress =
+            landing_progress_for(dir.path(), &plan, &state, &commits, false).expect("landing");
+        assert_eq!((progress.done, progress.total), (1, 2));
+        let eta = progress.eta_secs.expect("eta");
+        let expected = estimate_remaining(1, 2, started, std::time::SystemTime::now())
+            .expect("estimate")
+            .as_secs();
+        assert!(
+            eta.abs_diff(expected) <= 2,
+            "eta {eta} close to expected {expected}"
+        );
+    }
+
+    #[test]
+    fn non_landing_phases_send_no_landing_progress() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state = plans::PlanState::default();
+        let commits = vec!["abc plan work".to_string()];
+        for phase in [
+            plans::Phase::Scoping,
+            plans::Phase::Executing,
+            plans::Phase::Evergreening,
+            plans::Phase::Completed,
+            plans::Phase::Cancelled,
+        ] {
+            let plan = plans::PlanRef {
+                name: "2026-09-26.08-41-03.slug".to_string(),
+                phase,
+            };
+            assert_eq!(
+                landing_progress_for(dir.path(), &plan, &state, &commits, false),
+                None,
+                "{phase:?}"
+            );
+        }
     }
 }
