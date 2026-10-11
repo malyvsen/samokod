@@ -1,11 +1,7 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import type { QueuedMessage, QueueMoveDirection } from "../sessions/queue";
 import type { SessionKey } from "../types";
-import {
-	collectDropImages,
-	collectPasteImages,
-	handleImageFiles,
-} from "./attachments";
+import { attachmentHandlers } from "./attachments";
 import { CollapseControl, isLongMessage, useCollapsed } from "./collapsible";
 import {
 	extractText,
@@ -163,6 +159,13 @@ function QueuedBubbleEditor({
 		onCommit(extractText(node));
 	}
 
+	const pasteDrop = attachmentHandlers(() => ref.current, session, {
+		onPlainText: (data) => {
+			insertPlainText(data.getData("text/plain"));
+		},
+		onError: onAttachmentError,
+	});
+
 	return (
 		<div
 			ref={containerRef}
@@ -188,33 +191,9 @@ function QueuedBubbleEditor({
 					event.preventDefault();
 					commit();
 				}}
-				onPaste={(event) => {
-					const images = collectPasteImages(event.clipboardData);
-					if (images.length > 0) {
-						event.preventDefault();
-						const node = ref.current;
-						if (node === null) return;
-						void handleImageFiles(node, session, images, {
-							onError: onAttachmentError,
-						});
-						return;
-					}
-					event.preventDefault();
-					insertPlainText(event.clipboardData.getData("text/plain"));
-				}}
-				onDragOver={(event) => {
-					event.preventDefault();
-				}}
-				onDrop={(event) => {
-					event.preventDefault();
-					const images = collectDropImages(event.dataTransfer.files);
-					if (images.length === 0) return;
-					const node = ref.current;
-					if (node === null) return;
-					void handleImageFiles(node, session, images, {
-						onError: onAttachmentError,
-					});
-				}}
+				onPaste={pasteDrop.onPaste}
+				onDragOver={pasteDrop.onDragOver}
+				onDrop={pasteDrop.onDrop}
 				onBlur={(event) => {
 					if (
 						event.relatedTarget instanceof Node &&

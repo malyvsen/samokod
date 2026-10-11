@@ -121,7 +121,7 @@ describe("session commands", () => {
 	});
 
 	test("save_attachment sends camelCase data", async () => {
-		vi.mocked(invoke).mockResolvedValue("/abs/paste-1-0.png");
+		vi.mocked(invoke).mockResolvedValue("/abs/image-1-0.png");
 		await saveAttachment(testKey(), "aGVsbG8=");
 		expect(invoke).toHaveBeenCalledWith("save_attachment", {
 			session: testKey(),

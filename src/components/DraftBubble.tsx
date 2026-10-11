@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { SessionKey } from "../types";
-import {
-	collectDropImages,
-	collectPasteImages,
-	handleImageFiles,
-} from "./attachments";
+import { attachmentHandlers } from "./attachments";
 import {
 	applyInitialText,
 	extractText,
@@ -65,6 +61,15 @@ export function DraftBubble({
 		onEdit();
 	}
 
+	const pasteDrop = attachmentHandlers(() => ref.current, session, {
+		onPlainText: (data) => {
+			insertPlainText(data.getData("text/plain"));
+			handleInput();
+		},
+		onInput: syncAfterAttachment,
+		onError: onAttachmentError,
+	});
+
 	return (
 		<div className="msg user draft">
 			<div className="who">YOU</div>
@@ -83,36 +88,9 @@ export function DraftBubble({
 					event.preventDefault();
 					send();
 				}}
-				onPaste={(event) => {
-					const images = collectPasteImages(event.clipboardData);
-					if (images.length > 0) {
-						event.preventDefault();
-						const node = ref.current;
-						if (node === null) return;
-						void handleImageFiles(node, session, images, {
-							onInput: syncAfterAttachment,
-							onError: onAttachmentError,
-						});
-						return;
-					}
-					event.preventDefault();
-					insertPlainText(event.clipboardData.getData("text/plain"));
-					handleInput();
-				}}
-				onDragOver={(event) => {
-					event.preventDefault();
-				}}
-				onDrop={(event) => {
-					event.preventDefault();
-					const images = collectDropImages(event.dataTransfer.files);
-					if (images.length === 0) return;
-					const node = ref.current;
-					if (node === null) return;
-					void handleImageFiles(node, session, images, {
-						onInput: syncAfterAttachment,
-						onError: onAttachmentError,
-					});
-				}}
+				onPaste={pasteDrop.onPaste}
+				onDragOver={pasteDrop.onDragOver}
+				onDrop={pasteDrop.onDrop}
 			/>
 		</div>
 	);

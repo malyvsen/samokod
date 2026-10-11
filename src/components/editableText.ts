@@ -3,28 +3,32 @@ export function extractText(root: HTMLElement): string {
 }
 
 export function insertPlainText(text: string): void {
-	const selection = window.getSelection();
-	if (selection === null || selection.rangeCount === 0) return;
-	const range = selection.getRangeAt(0);
-	range.deleteContents();
-	const node = document.createTextNode(text);
-	range.insertNode(node);
-	range.setStartAfter(node);
-	range.collapse(true);
-	selection.removeAllRanges();
-	selection.addRange(range);
+	const range = currentRange();
+	if (range === null) return;
+	placeText(range, text);
 }
 
 export function insertTextAtCaret(root: HTMLElement, text: string): void {
-	const selection = window.getSelection();
-	if (selection === null || selection.rangeCount === 0) return;
-	const range = selection.getRangeAt(0);
+	const range = currentRange();
+	if (range === null) return;
 	if (!root.contains(range.commonAncestorContainer)) return;
+	placeText(range, text);
+}
+
+function currentRange(): Range | null {
+	const selection = window.getSelection();
+	if (selection === null || selection.rangeCount === 0) return null;
+	return selection.getRangeAt(0);
+}
+
+function placeText(range: Range, text: string): void {
 	range.deleteContents();
 	const node = document.createTextNode(text);
 	range.insertNode(node);
 	range.setStartAfter(node);
 	range.collapse(true);
+	const selection = window.getSelection();
+	if (selection === null) return;
 	selection.removeAllRanges();
 	selection.addRange(range);
 }

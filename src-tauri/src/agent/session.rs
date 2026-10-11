@@ -698,8 +698,6 @@ impl AgentManager {
     }
 
     /// True while a scoping name is still a reserved pending session.
-    /// Attachments materialize the directory but leave the pending entry
-    /// for `send_prompt` to clear.
     pub(crate) fn is_pending_scoping(&self, name: &str) -> bool {
         lock_state(&self.state)
             .map(|state| state.pending_scoping.contains_key(name))

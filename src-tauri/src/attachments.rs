@@ -22,32 +22,27 @@ impl AgentManager {
         let repo_root = self.current_repo().ok_or_else(|| AgentError::NoSession {
             raw: "open a repository first".to_string(),
         })?;
-        let pending = self.is_pending_scoping(&session.plan);
-        let path = save_plan_attachment(
-            &repo_root,
-            &session.plan,
-            session.role,
-            pending,
-            &data_base64,
-        )?;
+        let materialize =
+            session.role == SessionRole::Scoping && self.is_pending_scoping(&session.plan);
+        let path = save_plan_attachment(&repo_root, &session.plan, materialize, &data_base64)?;
         Ok(path.to_string_lossy().to_string())
     }
 }
 
-/// Save one base64 image for a plan name, locating its directory across all
-/// phases. A missing scoping dir materializes when still pending, otherwise
-/// the plan reports gone. Pure except directory probes and the write.
+/// Save one base64 image for a plan name, locating its directory with the
+/// shared plan search. A missing directory materializes only for a pending
+/// scoping session, otherwise the plan reports gone. Pure except directory
+/// probes and the write.
 pub(crate) fn save_plan_attachment(
     repo_root: &Path,
     plan_name: &str,
-    role: SessionRole,
-    is_pending_scoping: bool,
+    materialize_pending: bool,
     data_base64: &str,
 ) -> Result<PathBuf, AgentError> {
-    let mut plan_dir = locate_plan_dir(repo_root, plan_name);
-    if plan_dir.is_none() && role == SessionRole::Scoping && is_pending_scoping {
+    let mut plan_dir = crate::plans::locate(repo_root, plan_name);
+    if plan_dir.is_none() && materialize_pending {
         crate::plans::materialize_scoping(repo_root, plan_name)?;
-        plan_dir = locate_plan_dir(repo_root, plan_name);
+        plan_dir = crate::plans::locate(repo_root, plan_name);
     }
     let Some(plan_dir) = plan_dir else {
         return Err(AgentError::NoSession {
@@ -61,50 +56,26 @@ pub(crate) fn save_plan_attachment(
     save_bytes(&plan_dir, &bytes).map_err(|raw| AgentError::RequestFailed { raw })
 }
 
-/// Locate the on-disk directory for a plan name across all phases. Plan
-/// names stay unique across phases since moves rename. Pure except the
-/// directory probes.
-fn locate_plan_dir(repo_root: &Path, plan_name: &str) -> Option<PathBuf> {
-    for phase in [
-        crate::plans::Phase::Scoping,
-        crate::plans::Phase::Executing,
-        crate::plans::Phase::Evergreening,
-        crate::plans::Phase::Landing,
-        crate::plans::Phase::Completed,
-        crate::plans::Phase::Cancelled,
-    ] {
-        let candidate = crate::plans::PlanRef {
-            name: plan_name.to_string(),
-            phase,
-        }
-        .path(repo_root);
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
 /// Detect the image type by magic bytes, never the client hint. Returns the
-/// file extension plus mime type. Pure.
-pub fn detect_mime(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
+/// file extension. Pure.
+pub fn detect_extension(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
-        return Some(("png", "image/png"));
+        return Some("png");
     }
     if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        return Some(("jpg", "image/jpeg"));
+        return Some("jpg");
     }
     if bytes.starts_with(&[0x47, 0x49, 0x46]) {
-        return Some(("gif", "image/gif"));
+        return Some("gif");
     }
     if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        return Some(("webp", "image/webp"));
+        return Some("webp");
     }
     None
 }
 
 /// Save raw image bytes into the plan's `attachments/` directory as
-/// `paste-<unix_ms>-<n>.<ext>`, bumping `n` until free so same-name pastes
+/// `image-<unix_ms>-<n>.<ext>`, bumping `n` until free so rapid pastes
 /// never collide. Rejects oversize, unknown, and over-count uploads.
 pub fn save_bytes(plan_dir: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
     if bytes.len() > MAX_BYTES {
@@ -113,7 +84,7 @@ pub fn save_bytes(plan_dir: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
             bytes.len()
         ));
     }
-    let Some((ext, _)) = detect_mime(bytes) else {
+    let Some(ext) = detect_extension(bytes) else {
         return Err("unsupported image type".to_string());
     };
     let dir = plan_dir.join(ATTACHMENTS_DIR);
@@ -130,7 +101,7 @@ pub fn save_bytes(plan_dir: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
     let ms = crate::plans::unix_ms(std::time::SystemTime::now()).unwrap_or(0);
     let mut counter = 0;
     loop {
-        let path = dir.join(format!("paste-{ms}-{counter}.{ext}"));
+        let path = dir.join(format!("image-{ms}-{counter}.{ext}"));
         if !path.exists() {
             std::fs::write(&path, bytes)
                 .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
@@ -163,16 +134,16 @@ mod tests {
 
     #[test]
     fn detects_every_supported_format() {
-        assert_eq!(detect_mime(&png_bytes()), Some(("png", "image/png")));
-        assert_eq!(detect_mime(&jpeg_bytes()), Some(("jpg", "image/jpeg")));
-        assert_eq!(detect_mime(&gif_bytes()), Some(("gif", "image/gif")));
-        assert_eq!(detect_mime(&webp_bytes()), Some(("webp", "image/webp")));
+        assert_eq!(detect_extension(&png_bytes()), Some("png"));
+        assert_eq!(detect_extension(&jpeg_bytes()), Some("jpg"));
+        assert_eq!(detect_extension(&gif_bytes()), Some("gif"));
+        assert_eq!(detect_extension(&webp_bytes()), Some("webp"));
     }
 
     #[test]
     fn rejects_text_bytes() {
-        assert_eq!(detect_mime(b"hello world"), None);
-        assert_eq!(detect_mime(b""), None);
+        assert_eq!(detect_extension(b"hello world"), None);
+        assert_eq!(detect_extension(b""), None);
     }
 
     #[test]
@@ -217,10 +188,9 @@ mod tests {
     fn pending_scoping_materializes() {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");
-        let name = "2026-10-11.01-26-06";
+        let name = "test-plan";
         let encoded = base64::engine::general_purpose::STANDARD.encode(png_bytes());
-        let path = save_plan_attachment(dir.path(), name, SessionRole::Scoping, true, &encoded)
-            .expect("saved");
+        let path = save_plan_attachment(dir.path(), name, true, &encoded).expect("saved");
         assert!(path.is_file());
         assert!(
             crate::plans::PlanRef {
@@ -237,27 +207,17 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");
         let encoded = base64::engine::general_purpose::STANDARD.encode(png_bytes());
-        let missing =
-            save_plan_attachment(dir.path(), "gone", SessionRole::Scoping, false, &encoded);
+        let missing = save_plan_attachment(dir.path(), "gone", false, &encoded);
         assert!(matches!(missing, Err(AgentError::NoSession { .. })));
-        let executing =
-            save_plan_attachment(dir.path(), "gone", SessionRole::Executing, true, &encoded);
-        assert!(matches!(executing, Err(AgentError::NoSession { .. })));
     }
 
     #[test]
     fn invalid_base64_fails_request() {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");
-        let name = "2026-10-11.01-26-06";
+        let name = "test-plan";
         crate::plans::materialize_scoping(dir.path(), name).expect("materialize");
-        let failed = save_plan_attachment(
-            dir.path(),
-            name,
-            SessionRole::Scoping,
-            false,
-            "!!!not-base64!!!",
-        );
+        let failed = save_plan_attachment(dir.path(), name, false, "!!!not-base64!!!");
         assert!(matches!(failed, Err(AgentError::RequestFailed { .. })));
     }
 }

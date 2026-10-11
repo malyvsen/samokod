@@ -244,32 +244,22 @@ pub(crate) fn reserve_scoping_name(
 }
 
 /// Live `plan.md` text for one session's plan, or `None` when the file is
-/// absent. Searches every phase by name via `PlanRef::plan_md` since the
-/// file travels with renames. Pure file read.
+/// absent. Locates the plan by name since the file travels with renames.
+/// Pure file read.
 pub(crate) fn plan_md_text_for(
     repo_root: &Path,
     session: &SessionKey,
 ) -> Result<Option<String>, String> {
-    for phase in [
-        plans::Phase::Scoping,
-        plans::Phase::Executing,
-        plans::Phase::Evergreening,
-        plans::Phase::Landing,
-        plans::Phase::Completed,
-        plans::Phase::Cancelled,
-    ] {
-        let plan_ref = plans::PlanRef {
-            name: session.plan.clone(),
-            phase,
-        };
-        let path = plan_ref.plan_md(repo_root);
-        if path.is_file() {
-            let text = std::fs::read_to_string(&path)
-                .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-            return Ok(Some(text));
-        }
+    let Some(plan_dir) = plans::locate(repo_root, &session.plan) else {
+        return Ok(None);
+    };
+    let path = plan_dir.join("plan.md");
+    if !path.is_file() {
+        return Ok(None);
     }
-    Ok(None)
+    let text = std::fs::read_to_string(&path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    Ok(Some(text))
 }
 
 #[derive(Clone)]

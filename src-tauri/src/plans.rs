@@ -39,6 +39,35 @@ impl Phase {
             Phase::Scoping | Phase::Executing | Phase::Evergreening | Phase::Landing
         )
     }
+
+    /// Every phase in disk-search order. Plan names stay unique across
+    /// phases since moves rename rather than copy.
+    pub fn all() -> [Phase; 6] {
+        [
+            Phase::Scoping,
+            Phase::Executing,
+            Phase::Evergreening,
+            Phase::Landing,
+            Phase::Completed,
+            Phase::Cancelled,
+        ]
+    }
+}
+
+/// Locate the on-disk directory for a plan name across all phases.
+/// Pure except the directory probes.
+pub fn locate(repo_root: &Path, plan_name: &str) -> Option<PathBuf> {
+    for phase in Phase::all() {
+        let candidate = PlanRef {
+            name: plan_name.to_string(),
+            phase,
+        }
+        .path(repo_root);
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /// A plan directory inside a phase. `name` starts with the creation
@@ -168,14 +197,7 @@ pub enum PlanError {
 /// Create the full structure plus the self-ignoring `.gitignore`.
 /// Idempotent: safe to run on every repo open.
 pub fn ensure_structure(repo_root: &Path) -> Result<(), PlanError> {
-    for phase in [
-        Phase::Scoping,
-        Phase::Executing,
-        Phase::Evergreening,
-        Phase::Landing,
-        Phase::Completed,
-        Phase::Cancelled,
-    ] {
+    for phase in Phase::all() {
         std::fs::create_dir_all(phase_dir(repo_root, phase))?;
     }
     std::fs::write(samokod_dir(repo_root).join(".gitignore"), "*\n")?;

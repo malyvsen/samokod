@@ -73,8 +73,8 @@ pub fn agent_config(plan: &PlanRef) -> String {
     .to_string()
 }
 
-/// Scoping edits stay inside its plan scope, except the state file; the
-/// shell stays fully allowed for investigation.
+/// Scoping edits stay inside its plan scope, except state and
+/// attachments; the shell stays fully allowed for investigation.
 fn scoping_permissions(plan: &PlanRef) -> Value {
     let scope = plan.scope_glob();
     serde_json::json!({
@@ -101,39 +101,33 @@ const SCOPING_TASK_RULES: [(&str, &str); 3] =
 /// ask inside `.samokod` to stop casual rewrites of app state through the
 /// obvious path; `bash` bypass is accepted. The bare `.samokod` key covers
 /// the directory entry itself, since `.samokod/**` only matches paths
-/// starting with `.samokod/`, and state files deny.
+/// starting with `.samokod/`, and state plus attachments deny.
 fn executing_permissions() -> Value {
     serde_json::json!({
         "read": "allow",
         "external_directory": "allow",
-        "edit": rules_object(&EXECUTING_EDIT_RULES),
+        "edit": rules_object(&WORK_EDIT_RULES),
         "bash": "allow",
         "question": "deny",
     })
 }
 
-const EXECUTING_EDIT_RULES: [(&str, &str); 5] = [
-    ("*", "allow"),
-    (".samokod", "ask"),
-    (".samokod/**", "ask"),
-    (STATE_DENY_GLOB, "deny"),
-    (ATTACHMENTS_DENY_GLOB, "deny"),
-];
-
 /// Evergreening runs in the same worktree as executing, so it shares the
-/// executing edit shape: everything editable except the state file, with
+/// work edit shape: everything editable except state and attachments, with
 /// the `.samokod` ask guard and no permission questions.
 fn evergreening_permissions() -> Value {
     serde_json::json!({
         "read": "allow",
         "external_directory": "allow",
-        "edit": rules_object(&EVERGREENING_EDIT_RULES),
+        "edit": rules_object(&WORK_EDIT_RULES),
         "bash": "allow",
         "question": "deny",
     })
 }
 
-const EVERGREENING_EDIT_RULES: [(&str, &str); 5] = [
+/// Shared executing and evergreening edit shape. Denies land last so deny
+/// wins.
+const WORK_EDIT_RULES: [(&str, &str); 5] = [
     ("*", "allow"),
     (".samokod", "ask"),
     (".samokod/**", "ask"),
@@ -142,9 +136,10 @@ const EVERGREENING_EDIT_RULES: [(&str, &str); 5] = [
 ];
 
 /// Landing resolves one plan branch onto its target, so every worktree
-/// file is editable except the state file: a landed commit must cover
-/// files the target branch added on top. No permission questions and no
-/// subagent research: landing is a focused conflict-resolution task.
+/// file is editable except state and attachments: a landed commit must
+/// cover files the target branch added on top. No permission questions
+/// and no subagent research: landing is a focused conflict-resolution
+/// task.
 fn landing_permissions() -> Value {
     serde_json::json!({
         "read": "allow",
@@ -537,15 +532,15 @@ mod tests {
         let plan = test_plan();
         let config = config(&plan);
         let own = format!(
-            ".samokod/plans/scoping/{}/attachments/paste-1-0.png",
+            ".samokod/plans/scoping/{}/attachments/image-1-0.png",
             plan.name
         );
         assert_eq!(effect_of(&config, SCOPING_AGENT, "edit", &own), "deny");
         for resource in [
-            ".samokod/plans/scoping/other/attachments/paste-1-0.png".to_string(),
-            ".samokod/plans/executing/x/attachments/paste-1-0.jpg".to_string(),
-            ".samokod/plans/evergreening/x/attachments/paste-1-0.webp".to_string(),
-            ".samokod/plans/landing/x/attachments/paste-1-0.gif".to_string(),
+            ".samokod/plans/scoping/other/attachments/image-1-0.png".to_string(),
+            ".samokod/plans/executing/x/attachments/image-1-0.jpg".to_string(),
+            ".samokod/plans/evergreening/x/attachments/image-1-0.webp".to_string(),
+            ".samokod/plans/landing/x/attachments/image-1-0.gif".to_string(),
         ] {
             assert_eq!(
                 effect_of(&config, SCOPING_AGENT, "edit", &resource),

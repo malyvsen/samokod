@@ -89,28 +89,10 @@ pub(crate) fn is_finished(repo_root: &Path, plan_name: &str) -> bool {
     false
 }
 
-/// Locate the on-disk directory for a plan name across all phases. Plan
-/// names are unique across phases since moves rename rather than
-/// copy. Pure except the directory probes.
+/// Locate the on-disk directory for a plan name across all phases.
+/// Thin over `plans::locate`, the single search every caller shares.
 pub(crate) fn locate(repo_root: &Path, plan_name: &str) -> Option<PathBuf> {
-    for phase in [
-        crate::plans::Phase::Scoping,
-        crate::plans::Phase::Executing,
-        crate::plans::Phase::Evergreening,
-        crate::plans::Phase::Landing,
-        crate::plans::Phase::Completed,
-        crate::plans::Phase::Cancelled,
-    ] {
-        let candidate = crate::plans::PlanRef {
-            name: plan_name.to_string(),
-            phase,
-        }
-        .path(repo_root);
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-    }
-    None
+    crate::plans::locate(repo_root, plan_name)
 }
 
 /// One listed OpenCode session. Only the matching fields parse; the list
