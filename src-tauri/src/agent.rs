@@ -13,6 +13,7 @@ use crate::types::{AgentError, AppEvent, OpenRepoResult, PlansUpdate, SessionKey
 
 mod advance;
 mod config;
+mod landing_queue;
 mod permissions;
 mod plans_list;
 mod session;

@@ -138,9 +138,9 @@ impl AgentManager {
             },
             Phase::Scoping | Phase::Completed | Phase::Cancelled => (false, false, false),
         };
-        let landing_active = plans::scan_plans(repo_root)
+        let landing_active = super::landing_queue::sorted_landing_names(repo_root)
             .iter()
-            .any(|other| other.phase == Phase::Landing && other.name != plan.name);
+            .any(|other| other != &plan.name);
         PlanView {
             name: plan.name.clone(),
             phase: plan.phase,
