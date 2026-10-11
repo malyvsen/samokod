@@ -208,6 +208,10 @@ pub struct PlanEntry {
     /// True when the target is an ancestor of the plan branch.
     #[serde(default)]
     pub ffable: bool,
+    /// True when the landing waits behind the head. The head runs the
+    /// agent; queued landings hold with no live session and no idle dot.
+    #[serde(default)]
+    pub queued: bool,
 }
 
 /// Stored model/effort defaults for the instant disabled picker paint.
@@ -432,6 +436,7 @@ mod tests {
             evergreen: true,
             commits: Vec::new(),
             ffable: false,
+            queued: false,
         };
         let value = serde_json::to_value(&entry).expect("serializes");
         let actual: std::collections::BTreeSet<String> =
@@ -446,6 +451,7 @@ mod tests {
             "evergreen",
             "commits",
             "ffable",
+            "queued",
         ]
         .into_iter()
         .map(str::to_string)

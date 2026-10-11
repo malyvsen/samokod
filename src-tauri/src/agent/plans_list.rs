@@ -206,9 +206,12 @@ pub(crate) fn sorted_entries(
                     .then_with(|| right.0.name.cmp(&left.0.name))
             })
     });
+    let landing_queue = super::landing_queue::sorted_landing_names(repo_root);
     rows.iter()
         .map(|(plan, state, _)| {
             let (commits, ffable) = branch_state_for(repo_root, checkout_branch, plan);
+            let queued = super::landing_queue::position_in(&landing_queue, &plan.name)
+                == super::landing_queue::LandingPosition::Queued;
             PlanEntry {
                 name: plan.name.clone(),
                 phase: plan.phase,
@@ -219,6 +222,7 @@ pub(crate) fn sorted_entries(
                 evergreen: state.evergreen,
                 commits,
                 ffable,
+                queued,
             }
         })
         .collect()

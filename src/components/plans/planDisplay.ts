@@ -39,6 +39,9 @@ export function attentionFor(plan: PlanEntry): AttentionKind | null {
 	if (plan.phase === "completed" || plan.phase === "cancelled") {
 		return null;
 	}
+	if (plan.phase === "landing" && plan.queued) {
+		return null;
+	}
 	const role = latestRole(plan);
 	const status = plan.sessions.find((candidate) => candidate.role === role);
 	if (status === undefined || status.working) {

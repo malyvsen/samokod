@@ -81,6 +81,7 @@ export interface PlanEntry {
 	evergreen: boolean;
 	commits: string[];
 	ffable: boolean;
+	queued: boolean;
 }
 
 export interface RepoDefaults {

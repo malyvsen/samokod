@@ -46,6 +46,7 @@ export function testEntry(
 	evergreen = true,
 	commits: string[] = [],
 	ffable = false,
+	queued = false,
 ): PlanEntry {
 	const sessions =
 		phase === "scoping"
@@ -74,6 +75,7 @@ export function testEntry(
 		evergreen,
 		commits,
 		ffable,
+		queued,
 	};
 }
 
@@ -87,6 +89,7 @@ export function testEntryWith(
 	evergreen = true,
 	commits: string[] = [],
 	ffable = false,
+	queued = false,
 ): PlanEntry {
 	return {
 		name,
@@ -98,5 +101,6 @@ export function testEntryWith(
 		evergreen,
 		commits,
 		ffable,
+		queued,
 	};
 }

@@ -150,6 +150,35 @@ describe("attentionFor", () => {
 	test("ignores plans without sessions", () => {
 		expect(attentionFor(plan("empty", "scoping", []))).toBeNull();
 	});
+
+	test("suppresses idle for queued landings", () => {
+		const queued = testEntryWith(
+			"queued",
+			"landing",
+			"Queued",
+			true,
+			[testStatus("scoping"), testStatus("landing")],
+			false,
+			true,
+			[],
+			false,
+			true,
+		);
+		expect(attentionFor(queued)).toBeNull();
+		const head = testEntryWith(
+			"head",
+			"landing",
+			"Head",
+			true,
+			[testStatus("scoping"), testStatus("landing")],
+			false,
+			true,
+			[],
+			false,
+			false,
+		);
+		expect(attentionFor(head)).toBe("idle");
+	});
 });
 
 describe("attentionTitle", () => {
