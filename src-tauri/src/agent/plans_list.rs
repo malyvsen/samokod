@@ -9,8 +9,8 @@ use tauri::AppHandle;
 use crate::plans;
 use crate::todos::estimate_remaining;
 use crate::types::{
-    AppEvent, LandingProgressView, OpenRepoResult, PlanEntry, PlansUpdate, RepoDefaults,
-    SessionKey, SessionRole, SessionStatusView, SpendStatusView, TodoProgressView, TodoStatus,
+    AppEvent, OpenRepoResult, PlanEntry, PlansUpdate, ProgressView, RepoDefaults, SessionKey,
+    SessionRole, SessionStatusView, SpendStatusView, TodoStatus,
 };
 
 use super::AgentManager;
@@ -222,7 +222,6 @@ pub(crate) fn sorted_entries(
                 manual: state.manual,
                 evergreen: state.evergreen,
                 commits,
-                ffable,
                 queued,
                 landing_progress,
             }
@@ -230,17 +229,36 @@ pub(crate) fn sorted_entries(
         .collect()
 }
 
-/// Landing commit progress with ETA for one plan row. `Some` for landing
-/// plans only: rebase `done/total` when a `rebase -i` is in flight, else
-/// the commit fallback (`ffable ? n : 0` over `n`). The ETA reuses the
-/// todo rate from `entered_at`. Pure except the file and clock reads.
+/// Done/total progress with an ETA from the completion rate since
+/// `started`. `estimate_remaining` already yields `None` for empty,
+/// estimating, and done. Pure except the clock read.
+fn progress_view(
+    done: usize,
+    total: usize,
+    started: Option<std::time::SystemTime>,
+) -> ProgressView {
+    let eta_secs = started.and_then(|started| {
+        estimate_remaining(done, total, started, std::time::SystemTime::now())
+            .map(|remaining| remaining.as_secs())
+    });
+    ProgressView {
+        done,
+        total,
+        eta_secs,
+    }
+}
+
+/// Landing commit progress for one plan row. `Some` for landing plans
+/// only: rebase `done/total` while a `rebase -i` is in flight, else the
+/// commit fallback (`ffable ? n : 0` over `n`). The ETA runs from the
+/// phase-entry time. Pure except the file and clock reads.
 fn landing_progress_for(
     repo_root: &Path,
     plan: &plans::PlanRef,
     state: &plans::PlanState,
     commits: &[String],
     ffable: bool,
-) -> Option<LandingProgressView> {
+) -> Option<ProgressView> {
     if plan.phase != plans::Phase::Landing {
         return None;
     }
@@ -249,26 +267,11 @@ fn landing_progress_for(
         Some((done, total)) => (done.min(total), total),
         None => (if ffable { commits.len() } else { 0 }, commits.len()),
     };
-    let eta_secs = if total == 0 || done == 0 || done >= total {
-        None
-    } else {
-        state
-            .entered_at
-            .and_then(|millis| {
-                u64::try_from(millis).ok().and_then(|ms| {
-                    std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_millis(ms))
-                })
-            })
-            .and_then(|started| {
-                estimate_remaining(done, total, started, std::time::SystemTime::now())
-                    .map(|remaining| remaining.as_secs())
-            })
-    };
-    Some(LandingProgressView {
+    Some(progress_view(
         done,
         total,
-        eta_secs,
-    })
+        crate::plans::entered_at_time(state),
+    ))
 }
 
 /// Display title: `plan.md` heading first, else stored working title
@@ -330,7 +333,7 @@ pub(crate) fn session_statuses(
 /// Todo progress for one live session: `None` when it holds no todos.
 /// Every role reports uniformly; the frontend picks the executing one.
 /// Pure except the clock read.
-fn progress_for(live: &LiveSession) -> Option<TodoProgressView> {
+fn progress_for(live: &LiveSession) -> Option<ProgressView> {
     if live.todos.is_empty() {
         return None;
     }
@@ -340,15 +343,7 @@ fn progress_for(live: &LiveSession) -> Option<TodoProgressView> {
         .filter(|todo| todo.status == TodoStatus::Completed)
         .count();
     let total = live.todos.len();
-    let eta_secs = live.todos_started_at.and_then(|started| {
-        estimate_remaining(done, total, started, std::time::SystemTime::now())
-            .map(|remaining| remaining.as_secs())
-    });
-    Some(TodoProgressView {
-        done,
-        total,
-        eta_secs,
-    })
+    Some(progress_view(done, total, live.todos_started_at))
 }
 
 /// Stored model/effort defaults for the instant picker paint. Pure file

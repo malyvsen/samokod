@@ -158,7 +158,7 @@ pub struct SessionStatusView {
     pub failed: bool,
     pub live: bool,
     #[serde(default)]
-    pub progress: Option<TodoProgressView>,
+    pub progress: Option<ProgressView>,
     #[serde(default)]
     pub spend: SpendStatusView,
     #[serde(default)]
@@ -175,20 +175,11 @@ pub struct SpendStatusView {
     pub ctx_pct: f64,
 }
 
-/// Per-session todo progress for the plans list. `eta_secs` is `None`
-/// when no ETA text shows (empty, estimating, or done).
+/// Done/total progress with an optional ETA for the plans list.
+/// `eta_secs` is `None` when no ETA text shows (empty, estimating, or
+/// done). Shared by per-session todo progress and landing commit progress.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TodoProgressView {
-    pub done: usize,
-    pub total: usize,
-    #[serde(default)]
-    pub eta_secs: Option<u64>,
-}
-
-/// Landing commit progress for the plans list. Same shape as
-/// `TodoProgressView`: `eta_secs` is `None` when no ETA text shows.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LandingProgressView {
+pub struct ProgressView {
     pub done: usize,
     pub total: usize,
     #[serde(default)]
@@ -215,16 +206,13 @@ pub struct PlanEntry {
     /// plan owns no worktree.
     #[serde(default)]
     pub commits: Vec<String>,
-    /// True when the target is an ancestor of the plan branch.
-    #[serde(default)]
-    pub ffable: bool,
     /// True when the landing waits behind the head. The head runs the
     /// agent; queued landings hold with no live session and no idle dot.
     #[serde(default)]
     pub queued: bool,
     /// Landing commit progress with ETA. `Some` for landing plans only.
     #[serde(default)]
-    pub landing_progress: Option<LandingProgressView>,
+    pub landing_progress: Option<ProgressView>,
 }
 
 /// Stored model/effort defaults for the instant disabled picker paint.
@@ -448,7 +436,6 @@ mod tests {
             manual: false,
             evergreen: true,
             commits: Vec::new(),
-            ffable: false,
             queued: false,
             landing_progress: None,
         };
@@ -464,7 +451,6 @@ mod tests {
             "manual",
             "evergreen",
             "commits",
-            "ffable",
             "queued",
             "landing_progress",
         ]

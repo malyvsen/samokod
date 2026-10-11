@@ -97,7 +97,6 @@ describe("landing sidebar", () => {
 			false,
 			true,
 			["abc plan work", "def more work"],
-			false,
 		);
 		const executing = testEntryWith(
 			"2026-09-25.10-54-59.slug",

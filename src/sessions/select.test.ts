@@ -142,7 +142,6 @@ describe("sideContentFor", () => {
 			false,
 			true,
 			["abc plan work", "def more work"],
-			false,
 		);
 		expect(sideContentFor(entry, { plan: "a", role: "landing" }, [])).toEqual({
 			kind: "commits",
@@ -160,7 +159,6 @@ describe("sideContentFor", () => {
 			false,
 			true,
 			["abc plan work"],
-			false,
 		);
 		const todos = [{ content: "Wire view", status: "pending" } as const];
 		expect(

@@ -1,7 +1,7 @@
 import type {
-	LandingProgressView,
 	PlanEntry,
 	PlanPhase,
+	ProgressView,
 	RepoDefaults,
 	SessionKey,
 	SessionRole,
@@ -46,9 +46,8 @@ export function testEntry(
 	manual = false,
 	evergreen = true,
 	commits: string[] = [],
-	ffable = false,
 	queued = false,
-	landing_progress: LandingProgressView | null = null,
+	landing_progress: ProgressView | null = null,
 ): PlanEntry {
 	const sessions =
 		phase === "scoping"
@@ -76,7 +75,6 @@ export function testEntry(
 		manual,
 		evergreen,
 		commits,
-		ffable,
 		queued,
 		landing_progress,
 	};
@@ -91,9 +89,8 @@ export function testEntryWith(
 	manual = false,
 	evergreen = true,
 	commits: string[] = [],
-	ffable = false,
 	queued = false,
-	landing_progress: LandingProgressView | null = null,
+	landing_progress: ProgressView | null = null,
 ): PlanEntry {
 	return {
 		name,
@@ -104,7 +101,6 @@ export function testEntryWith(
 		manual,
 		evergreen,
 		commits,
-		ffable,
 		queued,
 		landing_progress,
 	};

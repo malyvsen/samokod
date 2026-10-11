@@ -161,38 +161,35 @@ pub fn prune(repo_root: &Path) -> Result<(), WorktreeError> {
     Ok(())
 }
 
+/// Git dir for a checkout: `<checkout>/.git` for a plain repo, else the
+/// `gitdir:` pointer target for a linked worktree (relative pointers
+/// resolve against the checkout). `None` without git state. Pure except
+/// the file read.
+pub fn gitdir(checkout: &Path) -> Option<PathBuf> {
+    let dot_git = checkout.join(".git");
+    if dot_git.is_dir() {
+        return Some(dot_git);
+    }
+    let text = std::fs::read_to_string(&dot_git).ok()?;
+    let pointer = text.strip_prefix("gitdir:")?.trim();
+    if pointer.is_empty() {
+        return None;
+    }
+    let pointed = PathBuf::from(pointer);
+    Some(if pointed.is_absolute() {
+        pointed
+    } else {
+        checkout.join(pointed)
+    })
+}
+
 /// Interactive-rebase commit progress for one worktree checkout:
 /// `(done, total)` read from `<gitdir>/rebase-merge/{msgnum,end}` as
 /// `done = msgnum - 1` saturated and clamped to `total = end`. `None`
 /// without an in-flight `rebase -i` or on any unreadable state. Pure
 /// except the file reads.
 pub fn rebase_progress(worktree_path: &Path) -> Option<(usize, usize)> {
-    let progress = rebase_progress_inner(worktree_path);
-    if progress.is_none() {
-        log::debug!("no rebase progress for {}", worktree_path.display());
-    }
-    progress
-}
-
-fn rebase_progress_inner(worktree_path: &Path) -> Option<(usize, usize)> {
-    let git_path = worktree_path.join(".git");
-    let gitdir = match std::fs::metadata(&git_path) {
-        Ok(metadata) if metadata.is_dir() => git_path,
-        Ok(_) => {
-            let contents = std::fs::read_to_string(&git_path).ok()?;
-            let pointed = contents.strip_prefix("gitdir: ")?.trim();
-            if pointed.is_empty() {
-                return None;
-            }
-            let pointed_path = PathBuf::from(pointed);
-            if pointed_path.is_absolute() {
-                pointed_path
-            } else {
-                worktree_path.join(pointed_path)
-            }
-        }
-        Err(_) => return None,
-    };
+    let gitdir = gitdir(worktree_path)?;
     let read_num = |name: &str| {
         let raw = std::fs::read_to_string(gitdir.join("rebase-merge").join(name)).ok()?;
         let parsed: usize = raw.trim().parse().ok()?;

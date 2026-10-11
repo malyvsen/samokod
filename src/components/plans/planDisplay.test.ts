@@ -161,7 +161,6 @@ describe("attentionFor", () => {
 			false,
 			true,
 			[],
-			false,
 			true,
 		);
 		expect(attentionFor(queued)).toBeNull();
@@ -174,7 +173,6 @@ describe("attentionFor", () => {
 			false,
 			true,
 			[],
-			false,
 			false,
 		);
 		expect(attentionFor(head)).toBe("idle");
@@ -353,6 +351,7 @@ describe("headerProgress", () => {
 			true,
 			["abc plan work", "def more work"],
 			false,
+			{ done: 0, total: 2, eta_secs: null },
 		);
 		expect(headerProgress(entry)).toEqual({
 			done: 0,
@@ -371,7 +370,8 @@ describe("headerProgress", () => {
 			false,
 			true,
 			["abc plan work", "def more work"],
-			true,
+			false,
+			{ done: 2, total: 2, eta_secs: null },
 		);
 		expect(headerProgress(entry)).toEqual({
 			done: 2,
@@ -392,7 +392,7 @@ describe("headerProgress", () => {
 		});
 	});
 
-	test("landing maps landing_progress when present", () => {
+	test("landing partial shows an ETA", () => {
 		const entry = testEntryWith(
 			"a",
 			"landing",
@@ -403,52 +403,12 @@ describe("headerProgress", () => {
 			true,
 			["abc plan work", "def more work"],
 			false,
-			false,
 			{ done: 1, total: 2, eta_secs: 600 },
 		);
 		expect(headerProgress(entry)).toEqual({
 			done: 1,
 			total: 2,
 			etaSecs: 600,
-		});
-	});
-
-	test("landing null falls back to commit derivation", () => {
-		const diverged = testEntryWith(
-			"a",
-			"landing",
-			"a",
-			true,
-			[testStatus("scoping"), testStatus("landing")],
-			false,
-			true,
-			["abc plan work", "def more work"],
-			false,
-			false,
-			null,
-		);
-		expect(headerProgress(diverged)).toEqual({
-			done: 0,
-			total: 2,
-			etaSecs: null,
-		});
-		const ready = testEntryWith(
-			"a",
-			"landing",
-			"a",
-			true,
-			[testStatus("scoping"), testStatus("landing")],
-			false,
-			true,
-			["abc plan work", "def more work"],
-			true,
-			false,
-			null,
-		);
-		expect(headerProgress(ready)).toEqual({
-			done: 2,
-			total: 2,
-			etaSecs: null,
 		});
 	});
 });

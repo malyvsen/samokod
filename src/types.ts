@@ -40,13 +40,7 @@ export function sameSession(
 	return left.plan === right.plan && left.role === right.role;
 }
 
-export interface TodoProgressView {
-	done: number;
-	total: number;
-	eta_secs: number | null;
-}
-
-export interface LandingProgressView {
+export interface ProgressView {
 	done: number;
 	total: number;
 	eta_secs: number | null;
@@ -58,7 +52,7 @@ export interface SessionStatusView {
 	approval: boolean;
 	failed: boolean;
 	live: boolean;
-	progress: TodoProgressView | null;
+	progress: ProgressView | null;
 	spend: SessionSpend;
 	todos: TodoView[];
 }
@@ -86,9 +80,8 @@ export interface PlanEntry {
 	manual: boolean;
 	evergreen: boolean;
 	commits: string[];
-	ffable: boolean;
 	queued: boolean;
-	landing_progress: LandingProgressView | null;
+	landing_progress: ProgressView | null;
 }
 
 export interface RepoDefaults {

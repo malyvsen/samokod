@@ -1,9 +1,9 @@
 import type {
 	PlanEntry,
 	PlanPhase,
+	ProgressView,
 	SessionKey,
 	SessionRole,
-	TodoProgressView,
 } from "../../types";
 
 export const PHASES: PlanPhase[] = [
@@ -62,17 +62,7 @@ export interface HeaderProgress {
 	etaSecs: number | null;
 }
 
-export function todoProgress(plan: PlanEntry): HeaderProgress | null {
-	if (plan.phase !== "executing" && plan.phase !== "evergreening") {
-		return null;
-	}
-	const role: SessionRole =
-		plan.phase === "evergreening" ? "evergreening" : "executing";
-	const status = plan.sessions.find((candidate) => candidate.role === role);
-	const progress: TodoProgressView | null = status?.progress ?? null;
-	if (progress === null) {
-		return { done: 0, total: 0, etaSecs: null };
-	}
+function toHeaderProgress(progress: ProgressView): HeaderProgress {
 	return {
 		done: progress.done,
 		total: progress.total,
@@ -80,20 +70,25 @@ export function todoProgress(plan: PlanEntry): HeaderProgress | null {
 	};
 }
 
-function landingProgress(plan: PlanEntry): HeaderProgress {
-	const landing = plan.landing_progress;
-	if (landing !== null) {
-		return {
-			done: landing.done,
-			total: landing.total,
-			etaSecs: landing.eta_secs ?? null,
-		};
+export function todoProgress(plan: PlanEntry): HeaderProgress | null {
+	if (plan.phase !== "executing" && plan.phase !== "evergreening") {
+		return null;
 	}
-	return {
-		done: plan.ffable ? plan.commits.length : 0,
-		total: plan.commits.length,
-		etaSecs: null,
-	};
+	const role: SessionRole =
+		plan.phase === "evergreening" ? "evergreening" : "executing";
+	const status = plan.sessions.find((candidate) => candidate.role === role);
+	const progress: ProgressView | null = status?.progress ?? null;
+	if (progress === null) {
+		return { done: 0, total: 0, etaSecs: null };
+	}
+	return toHeaderProgress(progress);
+}
+
+function landingProgress(plan: PlanEntry): HeaderProgress {
+	if (plan.landing_progress === null) {
+		return { done: 0, total: 0, etaSecs: null };
+	}
+	return toHeaderProgress(plan.landing_progress);
 }
 
 export function headerProgress(plan: PlanEntry): HeaderProgress | null {

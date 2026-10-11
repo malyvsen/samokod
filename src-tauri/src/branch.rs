@@ -6,21 +6,7 @@ use std::time::Duration;
 /// Resolve the HEAD file for a repo root. Follows the `gitdir:` pointer in
 /// `.git` for linked worktrees; otherwise `<root>/.git/HEAD`.
 pub fn head_path(repo_root: &Path) -> Option<PathBuf> {
-    let dot_git = repo_root.join(".git");
-    if dot_git.is_dir() {
-        return Some(dot_git.join("HEAD"));
-    }
-    if dot_git.is_file() {
-        let text = std::fs::read_to_string(&dot_git).ok()?;
-        let pointer = text.strip_prefix("gitdir:")?.trim();
-        let gitdir = if Path::new(pointer).is_absolute() {
-            PathBuf::from(pointer)
-        } else {
-            repo_root.join(pointer)
-        };
-        return Some(gitdir.join("HEAD"));
-    }
-    None
+    crate::worktrees::gitdir(repo_root).map(|gitdir| gitdir.join("HEAD"))
 }
 
 /// Current branch via `git rev-parse`. Detached HEAD keeps `"HEAD"`.

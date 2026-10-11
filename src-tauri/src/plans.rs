@@ -358,6 +358,14 @@ pub(crate) fn unix_ms(time: std::time::SystemTime) -> Option<i64> {
         .map(|span| span.as_millis() as i64)
 }
 
+/// Phase-entry time as clock time for ETA rates. `None` without a stamp.
+/// Pure.
+pub(crate) fn entered_at_time(state: &PlanState) -> Option<std::time::SystemTime> {
+    let millis = state.entered_at?;
+    let stamp = u64::try_from(millis).ok()?;
+    std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_millis(stamp))
+}
+
 /// Arrival time for sorting: the stamped phase entry when present, else
 /// the directory `ctime` (a rename bumps `ctime` but not `mtime`), else
 /// the existing `plan_mtime`, else `None` so the caller falls back to the
