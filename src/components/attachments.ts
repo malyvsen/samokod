@@ -20,10 +20,6 @@ export function isSupportedImageFile(type: string, size: number): boolean {
 	return ALLOWED_TYPES.has(type) && size <= MAX_BYTES;
 }
 
-export function insertedAttachmentText(abs: string): string {
-	return `Attached image: ${abs} (read it with the read tool)`;
-}
-
 export async function fileToBase64(file: File): Promise<string> {
 	const buffer = await file.arrayBuffer();
 	const bytes = new Uint8Array(buffer);
@@ -58,7 +54,7 @@ async function handleImageFiles(
 		try {
 			const base64 = await fileToBase64(file);
 			const abs = await saveAttachment(session, base64);
-			insertTextAtCaret(node, `\n${insertedAttachmentText(abs)}\n`);
+			insertTextAtCaret(node, `\n${abs}\n`);
 			options.onInput?.(extractText(node));
 		} catch (error) {
 			options.onError(error instanceof Error ? error.message : String(error));
@@ -90,7 +86,7 @@ function collectDropImages(files: FileList | File[]): File[] {
 }
 
 /// Shared paste/drop wiring for the compose boxes. Images save and insert
-/// the attachment line; imageless pastes fall through to `onPlainText` so
+/// the absolute path; imageless pastes fall through to `onPlainText` so
 /// the draft and queued editors keep their own plain-text sync.
 export function attachmentHandlers(
 	getNode: () => HTMLElement | null,

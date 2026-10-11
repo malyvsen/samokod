@@ -1,18 +1,11 @@
 import { describe, expect, test } from "vitest";
 import {
 	fileToBase64,
-	insertedAttachmentText,
 	isSupportedImageFile,
 	MAX_BYTES,
 } from "./components/attachments";
 
 describe("attachments", () => {
-	test("inserted text names the path for the read tool", () => {
-		expect(insertedAttachmentText("/abs/image-1-0.png")).toBe(
-			"Attached image: /abs/image-1-0.png (read it with the read tool)",
-		);
-	});
-
 	test("filters by allowlist and size", () => {
 		for (const type of ["image/png", "image/jpeg", "image/webp", "image/gif"]) {
 			expect(isSupportedImageFile(type, 100)).toBe(true);

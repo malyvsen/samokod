@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { saveAttachment } from "./api";
-import { insertedAttachmentText, MAX_BYTES } from "./components/attachments";
+import { MAX_BYTES } from "./components/attachments";
 import { DraftBubble } from "./components/DraftBubble";
 import { testKey } from "./fixtures";
 
@@ -116,7 +116,7 @@ describe("draft bubble", () => {
 		expect(area.querySelectorAll("*")).toHaveLength(0);
 	});
 
-	test("paste with image saves and inserts the attachment line", async () => {
+	test("paste with image saves and inserts the bare path", async () => {
 		const onInput = vi.fn();
 		const { area } = bubble({ onInput });
 		setCaretAtEnd(area);
@@ -130,8 +130,11 @@ describe("draft bubble", () => {
 				items: [],
 			},
 		});
-		const line = insertedAttachmentText("/plan/attachments/image-1-0.png");
-		await waitFor(() => expect(area.textContent).toContain(line));
+		await waitFor(() =>
+			expect(area.textContent).toContain("/plan/attachments/image-1-0.png"),
+		);
+		expect(area.textContent).not.toContain("Attached image:");
+		expect(area.textContent).not.toContain("read it with");
 		expect(vi.mocked(saveAttachment)).toHaveBeenCalledTimes(1);
 		expect(onInput).toHaveBeenCalled();
 	});
