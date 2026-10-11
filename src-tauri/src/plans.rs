@@ -103,20 +103,30 @@ impl PlanRef {
 /// `.samokod/.gitignore`.
 pub const STATE_FILE: &str = "state.json";
 
-/// Per-plan state: one OpenCode session ID per role the plan has used,
+/// One role's session record: the OpenCode session ID plus its last-seen
+/// cost. Travels with the plan directory through renames for free.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SessionRecord {
+    #[serde(default)]
+    pub session: Option<String>,
+    #[serde(default)]
+    pub cost: f64,
+}
+
+/// Per-plan state: one session record per role the plan has used,
 /// plus the last phase-entry time in epoch millis. `entered_at` stamps the
 /// last move into this phase; session spawns preserve it
 /// while moves preserve the IDs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanState {
     #[serde(default)]
-    pub scoping: Option<String>,
+    pub scoping: SessionRecord,
     #[serde(default)]
-    pub executing: Option<String>,
+    pub executing: SessionRecord,
     #[serde(default)]
-    pub evergreening: Option<String>,
+    pub evergreening: SessionRecord,
     #[serde(default)]
-    pub landing: Option<String>,
+    pub landing: SessionRecord,
     #[serde(default)]
     pub entered_at: Option<i64>,
     /// Working title derived from the first scoping prompt. Set once,
@@ -146,10 +156,10 @@ pub(crate) fn default_evergreen() -> bool {
 impl Default for PlanState {
     fn default() -> Self {
         PlanState {
-            scoping: None,
-            executing: None,
-            evergreening: None,
-            landing: None,
+            scoping: SessionRecord::default(),
+            executing: SessionRecord::default(),
+            evergreening: SessionRecord::default(),
+            landing: SessionRecord::default(),
             entered_at: None,
             working_title: None,
             manual: false,
@@ -163,20 +173,42 @@ impl PlanState {
     /// Session ID for one role. Pure.
     pub(crate) fn session(&self, role: SessionRole) -> Option<&str> {
         match role {
-            SessionRole::Scoping => self.scoping.as_deref(),
-            SessionRole::Executing => self.executing.as_deref(),
-            SessionRole::Evergreening => self.evergreening.as_deref(),
-            SessionRole::Landing => self.landing.as_deref(),
+            SessionRole::Scoping => self.scoping.session.as_deref(),
+            SessionRole::Executing => self.executing.session.as_deref(),
+            SessionRole::Evergreening => self.evergreening.session.as_deref(),
+            SessionRole::Landing => self.landing.session.as_deref(),
         }
     }
 
     /// Record one role's session ID. Pure.
     pub(crate) fn set_session(&mut self, role: SessionRole, id: String) {
         match role {
-            SessionRole::Scoping => self.scoping = Some(id),
-            SessionRole::Executing => self.executing = Some(id),
-            SessionRole::Evergreening => self.evergreening = Some(id),
-            SessionRole::Landing => self.landing = Some(id),
+            SessionRole::Scoping => self.scoping.session = Some(id),
+            SessionRole::Executing => self.executing.session = Some(id),
+            SessionRole::Evergreening => self.evergreening.session = Some(id),
+            SessionRole::Landing => self.landing.session = Some(id),
+        }
+    }
+
+    /// Last-seen cost for one role. Pure.
+    #[allow(dead_code)]
+    pub(crate) fn cost(&self, role: SessionRole) -> f64 {
+        match role {
+            SessionRole::Scoping => self.scoping.cost,
+            SessionRole::Executing => self.executing.cost,
+            SessionRole::Evergreening => self.evergreening.cost,
+            SessionRole::Landing => self.landing.cost,
+        }
+    }
+
+    /// Record one role's cost. Pure.
+    #[allow(dead_code)]
+    pub(crate) fn set_cost(&mut self, role: SessionRole, cost: f64) {
+        match role {
+            SessionRole::Scoping => self.scoping.cost = cost,
+            SessionRole::Executing => self.executing.cost = cost,
+            SessionRole::Evergreening => self.evergreening.cost = cost,
+            SessionRole::Landing => self.landing.cost = cost,
         }
     }
 }
@@ -681,7 +713,7 @@ mod tests {
         std::fs::create_dir_all(plan.path(root)).expect("mkdir");
         std::fs::write(
             plan.path(root).join(STATE_FILE),
-            r#"{"scoping":"ses_old","entered_at":123}"#,
+            r#"{"scoping":{"session":"ses_old"},"entered_at":123}"#,
         )
         .expect("write old state");
         assert!(load_state(&plan.path(root)).evergreen);
@@ -699,7 +731,7 @@ mod tests {
         std::fs::create_dir_all(plan.path(root)).expect("mkdir");
         std::fs::write(
             plan.path(root).join(STATE_FILE),
-            r#"{"scoping":"ses_old","entered_at":123}"#,
+            r#"{"scoping":{"session":"ses_old"},"entered_at":123}"#,
         )
         .expect("write old state");
         assert!(!load_state(&plan.path(root)).prompted);
@@ -1151,11 +1183,104 @@ mod tests {
         std::fs::create_dir_all(plan.path(root)).expect("mkdir");
         std::fs::write(
             plan.path(root).join(STATE_FILE),
-            r#"{"scoping":"ses_old","entered_at":123}"#,
+            r#"{"scoping":{"session":"ses_old"},"entered_at":123}"#,
         )
         .expect("write old state");
         let state = load_state(&plan.path(root));
         assert_eq!(state.session(SessionRole::Scoping), Some("ses_old"));
         assert_eq!(state.working_title, None);
+    }
+
+    #[test]
+    fn role_records_default_to_empty_with_zero_cost() {
+        let state = PlanState::default();
+        for role in [
+            SessionRole::Scoping,
+            SessionRole::Executing,
+            SessionRole::Evergreening,
+            SessionRole::Landing,
+        ] {
+            assert_eq!(state.session(role), None);
+            assert_eq!(state.cost(role), 0.0);
+        }
+    }
+
+    #[test]
+    fn session_and_cost_round_trip_per_role() {
+        let mut state = PlanState::default();
+        let roles = [
+            SessionRole::Scoping,
+            SessionRole::Executing,
+            SessionRole::Evergreening,
+            SessionRole::Landing,
+        ];
+        for (index, role) in roles.iter().enumerate() {
+            state.set_session(*role, format!("ses_{index}"));
+            state.set_cost(*role, 1.25 * (index as f64 + 1.0));
+        }
+        for (index, role) in roles.iter().enumerate() {
+            let expected = format!("ses_{index}");
+            assert_eq!(state.session(*role), Some(expected.as_str()));
+            assert_eq!(state.cost(*role), 1.25 * (index as f64 + 1.0));
+        }
+    }
+
+    #[test]
+    fn omitted_cost_parses_as_zero() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let plan = PlanRef {
+            name: "2026-09-26.08-41-03".to_string(),
+            phase: Phase::Scoping,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        std::fs::write(
+            plan.path(root).join(STATE_FILE),
+            r#"{"scoping":{"session":"ses_old"},"entered_at":123}"#,
+        )
+        .expect("write state");
+        let state = load_state(&plan.path(root));
+        assert_eq!(state.session(SessionRole::Scoping), Some("ses_old"));
+        assert_eq!(state.cost(SessionRole::Scoping), 0.0);
+    }
+
+    #[test]
+    fn cost_writes_preserve_sessions_and_flags() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
+        let before = load_state(&scoping.path(root)).entered_at.expect("stamped");
+        let mut seeded = load_state(&scoping.path(root));
+        seeded.set_session(SessionRole::Scoping, "ses_scoping".to_string());
+        seeded.set_session(SessionRole::Executing, "ses_executing".to_string());
+        seeded.working_title = Some("Login flow fixes".to_string());
+        seeded.manual = true;
+        seeded.evergreen = false;
+        seeded.prompted = true;
+        store_state(&scoping.path(root), &seeded);
+        let mut updated = load_state(&scoping.path(root));
+        updated.set_cost(SessionRole::Scoping, 1.24);
+        updated.set_cost(SessionRole::Executing, 2.5);
+        store_state(&scoping.path(root), &updated);
+        let kept = load_state(&scoping.path(root));
+        assert_eq!(kept.session(SessionRole::Scoping), Some("ses_scoping"));
+        assert_eq!(kept.session(SessionRole::Executing), Some("ses_executing"));
+        assert_eq!(kept.cost(SessionRole::Scoping), 1.24);
+        assert_eq!(kept.cost(SessionRole::Executing), 2.5);
+        assert_eq!(kept.entered_at, Some(before));
+        assert_eq!(kept.working_title.as_deref(), Some("Login flow fixes"));
+        assert!(kept.manual);
+        assert!(!kept.evergreen);
+        assert!(kept.prompted);
+        let mut flipped = load_state(&scoping.path(root));
+        flipped.set_session(SessionRole::Landing, "ses_landing".to_string());
+        store_state(&scoping.path(root), &flipped);
+        let reloaded = load_state(&scoping.path(root));
+        assert_eq!(reloaded.cost(SessionRole::Scoping), 1.24);
+        assert_eq!(reloaded.cost(SessionRole::Executing), 2.5);
+        assert_eq!(reloaded.session(SessionRole::Landing), Some("ses_landing"));
+        assert_eq!(reloaded.entered_at, Some(before));
     }
 }

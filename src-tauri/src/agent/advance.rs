@@ -151,7 +151,7 @@ impl AgentManager {
             Phase::Scoping | Phase::Completed | Phase::Cancelled => (false, false, false),
         };
         let landing = landing_queue::position_in(landing_queue, &plan.name);
-        let landing_started = stored.landing.is_some();
+        let landing_started = stored.session(SessionRole::Landing).is_some();
         PlanView {
             name: plan.name.clone(),
             phase: plan.phase,
