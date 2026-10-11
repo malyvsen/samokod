@@ -46,6 +46,12 @@ export interface TodoProgressView {
 	eta_secs: number | null;
 }
 
+export interface LandingProgressView {
+	done: number;
+	total: number;
+	eta_secs: number | null;
+}
+
 export interface SessionStatusView {
 	role: SessionRole;
 	working: boolean;
@@ -82,6 +88,7 @@ export interface PlanEntry {
 	commits: string[];
 	ffable: boolean;
 	queued: boolean;
+	landing_progress: LandingProgressView | null;
 }
 
 export interface RepoDefaults {

@@ -81,6 +81,14 @@ export function todoProgress(plan: PlanEntry): HeaderProgress | null {
 }
 
 function landingProgress(plan: PlanEntry): HeaderProgress {
+	const landing = plan.landing_progress;
+	if (landing !== null) {
+		return {
+			done: landing.done,
+			total: landing.total,
+			etaSecs: landing.eta_secs ?? null,
+		};
+	}
 	return {
 		done: plan.ffable ? plan.commits.length : 0,
 		total: plan.commits.length,

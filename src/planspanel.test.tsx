@@ -737,6 +737,99 @@ describe("plans panel", () => {
 			expect(bar.className).not.toContain("paused");
 			expect(bar.querySelector("i")?.getAttribute("style")).toContain("100%");
 		});
+
+		test("landing partial shows an ETA and a green bar", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.landing",
+				"landing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing"),
+					testStatus("evergreening"),
+					testStatus("landing", { working: true }),
+				],
+				false,
+				true,
+				["abc plan work", "def more work"],
+				false,
+				false,
+				{ done: 1, total: 2, eta_secs: 600 },
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const header = screen.getByRole("button", {
+				name: "Shiny, landing, opens Landing",
+			});
+			expect(header).toHaveAttribute("data-full", "Shiny");
+			const group = header.closest(".plan-group") as HTMLElement;
+			expect(within(group).getByText("10m").className).toContain("pmeta");
+			const bar = group.querySelector(".hbar-in") as HTMLElement;
+			expect(bar.className).not.toContain("paused");
+			expect(bar.querySelector("i")?.getAttribute("style")).toContain("50%");
+		});
+
+		test("landing estimating shows no ETA and an empty track", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.landing",
+				"landing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing"),
+					testStatus("evergreening"),
+					testStatus("landing", { working: true }),
+				],
+				false,
+				true,
+				["abc plan work", "def more work"],
+				false,
+				false,
+				{ done: 0, total: 2, eta_secs: null },
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const header = screen.getByRole("button", {
+				name: "Shiny, landing, opens Landing",
+			});
+			expect(header).toHaveAttribute("data-full", "Shiny");
+			const group = header.closest(".plan-group") as HTMLElement;
+			expect(group.querySelector(".pmeta")).toBeNull();
+			expect(
+				group.querySelector(".hbar-in i")?.getAttribute("style"),
+			).toContain("0%");
+		});
+
+		test("landing ready from progress shows a full green bar with no ETA", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.landing",
+				"landing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing"),
+					testStatus("evergreening"),
+					testStatus("landing", { working: true }),
+				],
+				false,
+				true,
+				["abc plan work", "def more work"],
+				true,
+				false,
+				{ done: 2, total: 2, eta_secs: null },
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const header = screen.getByRole("button", {
+				name: "Shiny, landing, opens Landing",
+			});
+			expect(header).toHaveAttribute("data-full", "Shiny");
+			const group = header.closest(".plan-group") as HTMLElement;
+			expect(group.querySelector(".pmeta")).toBeNull();
+			const bar = group.querySelector(".hbar-in") as HTMLElement;
+			expect(bar.className).not.toContain("paused");
+			expect(bar.querySelector("i")?.getAttribute("style")).toContain("100%");
+		});
 	});
 
 	describe("expansion", () => {

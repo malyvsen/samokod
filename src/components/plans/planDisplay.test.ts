@@ -391,6 +391,66 @@ describe("headerProgress", () => {
 			etaSecs: null,
 		});
 	});
+
+	test("landing maps landing_progress when present", () => {
+		const entry = testEntryWith(
+			"a",
+			"landing",
+			"a",
+			true,
+			[testStatus("scoping"), testStatus("landing")],
+			false,
+			true,
+			["abc plan work", "def more work"],
+			false,
+			false,
+			{ done: 1, total: 2, eta_secs: 600 },
+		);
+		expect(headerProgress(entry)).toEqual({
+			done: 1,
+			total: 2,
+			etaSecs: 600,
+		});
+	});
+
+	test("landing null falls back to commit derivation", () => {
+		const diverged = testEntryWith(
+			"a",
+			"landing",
+			"a",
+			true,
+			[testStatus("scoping"), testStatus("landing")],
+			false,
+			true,
+			["abc plan work", "def more work"],
+			false,
+			false,
+			null,
+		);
+		expect(headerProgress(diverged)).toEqual({
+			done: 0,
+			total: 2,
+			etaSecs: null,
+		});
+		const ready = testEntryWith(
+			"a",
+			"landing",
+			"a",
+			true,
+			[testStatus("scoping"), testStatus("landing")],
+			false,
+			true,
+			["abc plan work", "def more work"],
+			true,
+			false,
+			null,
+		);
+		expect(headerProgress(ready)).toEqual({
+			done: 2,
+			total: 2,
+			etaSecs: null,
+		});
+	});
 });
 
 describe("formatEta", () => {
