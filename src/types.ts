@@ -99,11 +99,9 @@ export interface PlansUpdate extends PlansView {
 	scopingPreview: string | null;
 }
 
-export interface OpenRepoResult extends PlansView {
+export interface OpenRepoResult extends PlansUpdate {
 	repo_root: string;
 	branch: string;
-	config_defaults: RepoDefaults;
-	scopingPreview: string | null;
 }
 
 export interface RecentRepo {
@@ -142,10 +140,6 @@ export interface TodoView {
 interface TodoChangeView {
 	content: string;
 	status: TodoStatus;
-}
-
-export interface PlansChangedEvent extends PlansView {
-	type: "plans_changed";
 }
 
 export type AppEvent =
@@ -199,7 +193,7 @@ export type AppEvent =
 			retryable: boolean;
 	  }
 	| { type: "branch_changed"; branch: string }
-	| PlansChangedEvent;
+	| (PlansView & { type: "plans_changed" });
 
 export type TranscriptItem =
 	| { kind: "user"; id: string; text: string }

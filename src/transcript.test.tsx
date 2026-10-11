@@ -213,24 +213,7 @@ describe("transcript lead", () => {
 		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
 	});
 
-	test("lead still shows alongside a different user text", () => {
-		const { container } = render(
-			<Transcript
-				items={[{ kind: "user", id: "u1", text: "hello" }]}
-				lead="TEMPLATE"
-				start={IDLE}
-				repoLabel="~/repo"
-				onRetry={vi.fn()}
-				onAnswer={vi.fn()}
-			/>,
-		);
-		const bubbles = container.querySelectorAll(".msg.user");
-		expect(bubbles).toHaveLength(2);
-		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
-		expect(bubbles[1]?.textContent).toContain("hello");
-	});
-
-	test("lead renders first as a YOU bubble", () => {
+	test("lead renders first alongside a different user text", () => {
 		const { container } = render(
 			<Transcript
 				items={[{ kind: "user", id: "u1", text: "hello" }]}

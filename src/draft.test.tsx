@@ -40,6 +40,15 @@ beforeEach(() => {
 	api.sendPrompt.mockResolvedValue(undefined);
 });
 
+function leadBubbles(): NodeListOf<Element> {
+	return document.querySelectorAll(".msg.user:not(.draft)");
+}
+
+function expectSingleLead(): void {
+	expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+	expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);
+}
+
 describe("draft bubble in chat", () => {
 	test("compose box opens empty", async () => {
 		await openChat(api);
@@ -51,10 +60,10 @@ describe("draft bubble in chat", () => {
 
 	test("fresh scoping session previews its template above the draft", async () => {
 		await openChat(api);
-		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		expectSingleLead();
 		const box = screen.getByRole("textbox", { name: "Ask for a change…" });
 		expect(box).toBeInTheDocument();
-		const leads = document.querySelectorAll(".msg.user:not(.draft)");
+		const leads = leadBubbles();
 		expect(leads).toHaveLength(1);
 		expect(leads[0]?.textContent).toContain("TEMPLATE");
 		expect(leads[0]?.querySelector(".body p")).not.toBeNull();
@@ -69,11 +78,11 @@ describe("draft bubble in chat", () => {
 
 	test("send with preview appends only the user bubble and sends pure text", async () => {
 		const user = await openChat(api);
-		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		expectSingleLead();
 		await user.keyboard("hello{Enter}");
 		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello");
 		await screen.findByText("hello");
-		const bubbles = document.querySelectorAll(".msg.user:not(.draft)");
+		const bubbles = leadBubbles();
 		expect(bubbles).toHaveLength(2);
 		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
 		expect(bubbles[1]?.textContent).toContain("hello");
@@ -83,7 +92,7 @@ describe("draft bubble in chat", () => {
 
 	test("send keeps lead after pushed plans_changed", async () => {
 		const user = await openChat(api);
-		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		expectSingleLead();
 		await user.keyboard("hello{Enter}");
 		await screen.findByText("hello");
 		emitAppEvent(api, {
@@ -91,34 +100,32 @@ describe("draft bubble in chat", () => {
 			plans: [testEntry()],
 			selected: testKey(),
 		});
-		const bubbles = document.querySelectorAll(".msg.user:not(.draft)");
+		const bubbles = leadBubbles();
 		expect(bubbles).toHaveLength(2);
 		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
 		expect(bubbles[1]?.textContent).toContain("hello");
-		expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);
+		expectSingleLead();
 		expect(screen.getAllByText("hello")).toHaveLength(1);
 	});
 
 	test("empty replay keeps the lead", async () => {
 		await openChat(api);
-		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		expectSingleLead();
 		emitAppEvent(api, { type: "history_begin", session: testKey() });
 		emitAppEvent(api, { type: "history_done", session: testKey() });
-		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
-		expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);
-		const bubbles = document.querySelectorAll(".msg.user:not(.draft)");
+		expectSingleLead();
+		const bubbles = leadBubbles();
 		expect(bubbles).toHaveLength(1);
 		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
 	});
 
 	test("empty preparing without begin keeps the lead", async () => {
 		await openChat(api);
-		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		expectSingleLead();
 		emitAppEvent(api, { type: "history_preparing", session: testKey() });
 		emitAppEvent(api, { type: "history_done", session: testKey() });
-		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
-		expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);
-		const bubbles = document.querySelectorAll(".msg.user:not(.draft)");
+		expectSingleLead();
+		const bubbles = leadBubbles();
 		expect(bubbles).toHaveLength(1);
 		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
 	});
@@ -131,7 +138,7 @@ describe("draft bubble in chat", () => {
 		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello");
 		await screen.findByText("hello");
 		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
-		const bubbles = document.querySelectorAll(".msg.user:not(.draft)");
+		const bubbles = leadBubbles();
 		expect(bubbles).toHaveLength(1);
 		expect(bubbles[0]?.textContent).toContain("hello");
 	});
@@ -426,7 +433,7 @@ describe("draft bubble in chat", () => {
 
 	test("repeated plans_changed keeps one lead", async () => {
 		await openChat(api);
-		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		expectSingleLead();
 		const plans = [testEntry()];
 		const selected = testKey();
 		emitAppEvent(api, {
@@ -439,8 +446,7 @@ describe("draft bubble in chat", () => {
 			plans,
 			selected,
 		});
-		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
-		expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);
+		expectSingleLead();
 	});
 
 	test("switching to a session without preview clears the lead", async () => {

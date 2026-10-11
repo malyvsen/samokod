@@ -62,19 +62,25 @@ export function removeEntry(chats: Chats, key: SessionKey): Chats {
 	return next;
 }
 
-/// Preview from a response payload, set once. Null never sets and an
-/// existing preview never overwrites, so the lead stays stable across
-/// responses. Identical values keep the same object.
+/// Seeds the scoping lead from a response while ensuring the chat exists,
+/// so a selected session always has an entry. The preview runs once: null
+/// never overwrites and a present preview sticks, keeping the same object
+/// when nothing changes.
 export function withScopingPreview(
 	chats: Chats,
 	key: SessionKey,
 	preview: string | null,
 ): Chats {
-	return updateEntry(chats, key, (chat) => {
-		if (preview === null) return chat;
-		if (chat.scopingPreview !== null) return chat;
-		return { ...chat, scopingPreview: preview };
-	});
+	const id = sessionKeyOf(key);
+	const existing = chats[id];
+	if (existing !== undefined) {
+		if (preview === null || existing.scopingPreview !== null) return chats;
+		return { ...chats, [id]: { ...existing, scopingPreview: preview } };
+	}
+	return {
+		...chats,
+		[id]: { ...emptyChat(), scopingPreview: preview },
+	};
 }
 
 export function errorItem(

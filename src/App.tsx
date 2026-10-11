@@ -67,9 +67,7 @@ import { useThoughtTimers } from "./sessions/thoughts";
 import type {
 	AgentStatus,
 	AppEvent,
-	OpenRepoResult,
 	PlanEntry,
-	PlansChangedEvent,
 	PlansUpdate,
 	RecentRepo,
 	RepoDefaults,
@@ -128,7 +126,7 @@ export function App() {
 	);
 
 	const applyPlans = useCallback(
-		(update: PlansUpdate | OpenRepoResult) => {
+		(update: PlansUpdate) => {
 			setPlans(update.plans);
 			setSelectedKey(update.selected);
 			setConfigDefaults(update.config_defaults);
@@ -138,11 +136,6 @@ export function App() {
 		},
 		[applyChats],
 	);
-
-	const applyPushedUpdate = useCallback((pushed: PlansChangedEvent) => {
-		setPlans(pushed.plans);
-		setSelectedKey((prev) => repairSelection(pushed.plans, prev));
-	}, []);
 
 	const applyOwnedUpdate = useCallback(
 		(oldPlan: string, update: PlansUpdate) => {
@@ -227,7 +220,8 @@ export function App() {
 	const handleEvent = useCallback(
 		(event: AppEvent) => {
 			if (event.type === "plans_changed") {
-				applyPushedUpdate(event);
+				setPlans(event.plans);
+				setSelectedKey((prev) => repairSelection(event.plans, prev));
 				return;
 			}
 			if (event.type === "branch_changed") {
@@ -254,7 +248,7 @@ export function App() {
 					);
 			}
 		},
-		[applyPushedUpdate, maybeDrain, applyChats],
+		[maybeDrain, applyChats],
 	);
 
 	useEffect(() => {

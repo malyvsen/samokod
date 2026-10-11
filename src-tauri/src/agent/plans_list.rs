@@ -1,7 +1,7 @@
-// Plans list: sorting, per-session statuses, and the payloads pushed to
-// the frontend after every prompt, transition, or title change.
+// Plans list: sorting, per-session statuses, and the plans payloads for
+// responses and pushes.
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use tauri::AppHandle;
@@ -23,10 +23,8 @@ impl AgentManager {
     /// Current repo payload: plans plus the most-recent session.
     pub(crate) fn open_result(&self) -> OpenRepoResult {
         let state = self.state.lock().expect("state poisoned");
-        let repo_root = state.repo_root.clone().unwrap_or_default();
         let branch = state.checkout_branch.clone();
-        let plans = sorted_entries(&repo_root, &branch, &state.sessions, &state.pending_scoping);
-        let selected = fallback_selected(&plans, None);
+        let (repo_root, plans, selected) = listed(&state, None);
         let config_defaults = defaults_for(&repo_root);
         let scoping_preview = scoping_preview_for(&state, &repo_root, &selected);
         OpenRepoResult {
@@ -43,14 +41,7 @@ impl AgentManager {
     /// prompt, transition, or title change.
     pub(crate) fn plans_update(&self) -> PlansUpdate {
         let state = self.state.lock().expect("state poisoned");
-        let repo_root = state.repo_root.clone().unwrap_or_default();
-        let plans = sorted_entries(
-            &repo_root,
-            &state.checkout_branch,
-            &state.sessions,
-            &state.pending_scoping,
-        );
-        let selected = fallback_selected(&plans, state.current.as_ref());
+        let (repo_root, plans, selected) = listed(&state, state.current.as_ref());
         let config_defaults = defaults_for(&repo_root);
         let scoping_preview = scoping_preview_for(&state, &repo_root, &selected);
         PlansUpdate {
@@ -61,15 +52,20 @@ impl AgentManager {
         }
     }
 
+    /// Lightweight push: list plus selection only. Responses carry the
+    /// preview and defaults; pushes never do.
     pub(crate) fn push_plans(&self) {
-        let update = self.plans_update();
-        emit_event(
-            &self.app,
-            AppEvent::PlansChanged {
-                plans: update.plans,
-                selected: update.selected,
-            },
-        );
+        let (plans, selected) = match self.state.lock() {
+            Ok(state) => {
+                let (_, plans, selected) = listed(&state, state.current.as_ref());
+                (plans, selected)
+            }
+            Err(error) => {
+                log::warn!("failed to rebuild plans list: {error}");
+                return;
+            }
+        };
+        emit_event(&self.app, AppEvent::PlansChanged { plans, selected });
     }
 
     /// Record one user prompt for the empty-scoping gate, in memory and
@@ -414,6 +410,21 @@ fn fallback_selected(plans: &[PlanEntry], current: Option<&SessionKey>) -> Sessi
                 .unwrap_or_default(),
             role: SessionRole::Scoping,
         })
+}
+
+/// Sorted plans plus selection for one locked state: the shared prefix of
+/// every plans payload. Responses extend it with defaults and the scoping
+/// preview; pushes emit it as-is.
+fn listed(state: &State, current: Option<&SessionKey>) -> (PathBuf, Vec<PlanEntry>, SessionKey) {
+    let repo_root = state.repo_root.clone().unwrap_or_default();
+    let plans = sorted_entries(
+        &repo_root,
+        &state.checkout_branch,
+        &state.sessions,
+        &state.pending_scoping,
+    );
+    let selected = fallback_selected(&plans, current);
+    (repo_root, plans, selected)
 }
 
 /// Rebuild the plans list from a spawned task holding only state and app.

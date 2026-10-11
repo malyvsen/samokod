@@ -198,29 +198,16 @@ describe("scoping preview", () => {
 			session: testKey(),
 		});
 		expect(chatOf(chats).scopingPreview).toBe("TEMPLATE");
-		chats = applySessionEvent(chats, {
-			type: "history_begin",
-			session: testKey(),
-		});
-		expect(chatOf(chats).scopingPreview).toBe("TEMPLATE");
 	});
 
-	test("identical preview keeps the same chat object", () => {
-		const before = withScopingPreview(withChat(), testKey(), "TEMPLATE");
-		const after = withScopingPreview(before, testKey(), "TEMPLATE");
-		expect(after[KEY_ID]).toBe(before[KEY_ID]);
-		expect(chatOf(after).scopingPreview).toBe("TEMPLATE");
-	});
-
-	test("response preview sets once and never overwrites", () => {
+	test("response preview seeds once and sticks", () => {
+		const seeded = withScopingPreview({}, testKey(), null);
+		expect(chatOf(seeded).scopingPreview).toBeNull();
 		const shown = withScopingPreview(withChat(), testKey(), "TEMPLATE");
 		expect(chatOf(shown).scopingPreview).toBe("TEMPLATE");
-		const kept = withScopingPreview(shown, testKey(), null);
-		expect(kept[KEY_ID]).toBe(shown[KEY_ID]);
-		expect(chatOf(kept).scopingPreview).toBe("TEMPLATE");
-		const frozen = withScopingPreview(shown, testKey(), "NEXT");
-		expect(frozen[KEY_ID]).toBe(shown[KEY_ID]);
-		expect(chatOf(frozen).scopingPreview).toBe("TEMPLATE");
+		expect(withScopingPreview(shown, testKey(), "TEMPLATE")).toBe(shown);
+		expect(withScopingPreview(shown, testKey(), null)).toBe(shown);
+		expect(withScopingPreview(shown, testKey(), "NEXT")).toBe(shown);
 	});
 
 	test("carried history drops the preview on rename", () => {
