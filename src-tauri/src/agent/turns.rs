@@ -400,12 +400,14 @@ pub(crate) fn handle_notification(
         acp::SessionUpdate::UsageUpdate(update) => {
             let cost = update.cost.as_ref().map(|cost| cost.amount).unwrap_or(0.0);
             let ctx_pct = context_pct(update.used, update.size);
-            if let Some(mut guard) = lock_state(state)
-                && let Some(live) = guard.sessions.get_mut(key)
-            {
-                live.cost = cost;
-                live.ctx_pct = ctx_pct;
-            }
+            let repo_root = lock_state(state).and_then(|mut guard| {
+                let root = guard.repo_root.clone();
+                if let Some(live) = guard.sessions.get_mut(key) {
+                    live.cost = cost;
+                    live.ctx_pct = ctx_pct;
+                }
+                root
+            });
             emit_event(
                 app,
                 AppEvent::SpendTick {
@@ -415,6 +417,9 @@ pub(crate) fn handle_notification(
                 },
             );
             push_sorted(state, app);
+            if let Some(repo_root) = repo_root {
+                super::session_ids::record_spend(&repo_root, &key.plan, key.role, cost);
+            }
         }
         acp::SessionUpdate::ConfigOptionUpdate(update) => {
             let options = config_views(&update.config_options);

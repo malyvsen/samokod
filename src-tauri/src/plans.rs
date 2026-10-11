@@ -191,7 +191,6 @@ impl PlanState {
     }
 
     /// Last-seen cost for one role. Pure.
-    #[allow(dead_code)]
     pub(crate) fn cost(&self, role: SessionRole) -> f64 {
         match role {
             SessionRole::Scoping => self.scoping.cost,
@@ -202,7 +201,6 @@ impl PlanState {
     }
 
     /// Record one role's cost. Pure.
-    #[allow(dead_code)]
     pub(crate) fn set_cost(&mut self, role: SessionRole, cost: f64) {
         match role {
             SessionRole::Scoping => self.scoping.cost = cost,
