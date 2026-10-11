@@ -161,6 +161,52 @@ pub fn prune(repo_root: &Path) -> Result<(), WorktreeError> {
     Ok(())
 }
 
+/// Interactive-rebase commit progress for one worktree checkout:
+/// `(done, total)` read from `<gitdir>/rebase-merge/{msgnum,end}` as
+/// `done = msgnum - 1` saturated and clamped to `total = end`. `None`
+/// without an in-flight `rebase -i` or on any unreadable state. Pure
+/// except the file reads.
+#[allow(dead_code)]
+pub fn rebase_progress(worktree_path: &Path) -> Option<(usize, usize)> {
+    let progress = rebase_progress_inner(worktree_path);
+    if progress.is_none() {
+        log::debug!("no rebase progress for {}", worktree_path.display());
+    }
+    progress
+}
+
+fn rebase_progress_inner(worktree_path: &Path) -> Option<(usize, usize)> {
+    let git_path = worktree_path.join(".git");
+    let gitdir = match std::fs::metadata(&git_path) {
+        Ok(metadata) if metadata.is_dir() => git_path,
+        Ok(_) => {
+            let contents = std::fs::read_to_string(&git_path).ok()?;
+            let pointed = contents.strip_prefix("gitdir: ")?.trim();
+            if pointed.is_empty() {
+                return None;
+            }
+            let pointed_path = PathBuf::from(pointed);
+            if pointed_path.is_absolute() {
+                pointed_path
+            } else {
+                worktree_path.join(pointed_path)
+            }
+        }
+        Err(_) => return None,
+    };
+    let read_num = |name: &str| {
+        let raw = std::fs::read_to_string(gitdir.join("rebase-merge").join(name)).ok()?;
+        let parsed: usize = raw.trim().parse().ok()?;
+        Some(parsed)
+    };
+    match (read_num("msgnum"), read_num("end")) {
+        (Some(msgnum), Some(end)) if msgnum >= 1 && end > 0 => {
+            Some((msgnum.saturating_sub(1).min(end), end))
+        }
+        _ => None,
+    }
+}
+
 /// Worktree checkout for one plan: `<repo>/.samokod/worktrees/<plan-name>`.
 /// Pure.
 pub fn worktree_path(repo_root: &Path, plan_name: &str) -> PathBuf {
@@ -432,5 +478,89 @@ mod tests {
                 .is_empty()
         );
         run_git(root, &["branch", "-D", record.worktree_branch.as_str()]).expect("cleanup");
+    }
+
+    fn fake_file_worktree(msgnum: Option<&str>, end: Option<&str>) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let worktree = dir.path().join("worktree");
+        let gitdir = dir.path().join("admin");
+        std::fs::create_dir_all(worktree.join(".samokod")).expect("worktree dir");
+        std::fs::create_dir_all(gitdir.join("rebase-merge")).expect("gitdir dir");
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", gitdir.display()),
+        )
+        .expect("git file");
+        if let Some(msgnum) = msgnum {
+            std::fs::write(gitdir.join("rebase-merge").join("msgnum"), msgnum).expect("msgnum");
+        }
+        if let Some(end) = end {
+            std::fs::write(gitdir.join("rebase-merge").join("end"), end).expect("end");
+        }
+        dir
+    }
+
+    #[test]
+    fn rebase_progress_reads_first_stop_as_zero_of_two() {
+        let dir = fake_file_worktree(Some("1\n"), Some("2\n"));
+        assert_eq!(rebase_progress(&dir.path().join("worktree")), Some((0, 2)));
+    }
+
+    #[test]
+    fn rebase_progress_reads_final_stop_without_early_finish() {
+        let dir = fake_file_worktree(Some("2\n"), Some("2\n"));
+        assert_eq!(rebase_progress(&dir.path().join("worktree")), Some((1, 2)));
+    }
+
+    #[test]
+    fn rebase_progress_reads_directory_gitdir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let worktree = dir.path().join("worktree");
+        std::fs::create_dir_all(worktree.join(".git").join("rebase-merge")).expect("git dir");
+        std::fs::write(
+            worktree.join(".git").join("rebase-merge").join("msgnum"),
+            "3\n",
+        )
+        .expect("msgnum");
+        std::fs::write(
+            worktree.join(".git").join("rebase-merge").join("end"),
+            "5\n",
+        )
+        .expect("end");
+        assert_eq!(rebase_progress(&worktree), Some((2, 5)));
+    }
+
+    #[test]
+    fn rebase_progress_resolves_relative_gitdir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let worktree = dir.path().join("worktree");
+        let gitdir = dir.path().join("admin");
+        std::fs::create_dir_all(&worktree).expect("worktree dir");
+        std::fs::create_dir_all(gitdir.join("rebase-merge")).expect("gitdir dir");
+        std::fs::write(worktree.join(".git"), "gitdir: ../admin\n").expect("git file");
+        std::fs::write(gitdir.join("rebase-merge").join("msgnum"), "1\n").expect("msgnum");
+        std::fs::write(gitdir.join("rebase-merge").join("end"), "2\n").expect("end");
+        assert_eq!(rebase_progress(&worktree), Some((0, 2)));
+    }
+
+    #[test]
+    fn rebase_progress_is_none_without_rebase_state() {
+        let dir = fake_file_worktree(None, None);
+        assert_eq!(rebase_progress(&dir.path().join("worktree")), None);
+        assert_eq!(rebase_progress(dir.path().join("missing").as_path()), None);
+    }
+
+    #[test]
+    fn rebase_progress_is_none_on_corrupt_state() {
+        let dir = fake_file_worktree(Some("nope\n"), Some("2\n"));
+        assert_eq!(rebase_progress(&dir.path().join("worktree")), None);
+        let dir = fake_file_worktree(Some("1\n"), Some("nope\n"));
+        assert_eq!(rebase_progress(&dir.path().join("worktree")), None);
+    }
+
+    #[test]
+    fn rebase_progress_is_none_on_zero_end() {
+        let dir = fake_file_worktree(Some("1\n"), Some("0\n"));
+        assert_eq!(rebase_progress(&dir.path().join("worktree")), None);
     }
 }
