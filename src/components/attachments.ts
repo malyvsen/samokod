@@ -53,8 +53,8 @@ async function handleImageFiles(
 		}
 		try {
 			const base64 = await fileToBase64(file);
-			const abs = await saveAttachment(session, base64);
-			insertTextAtCaret(node, `\n${abs}\n`);
+			const absolutePath = await saveAttachment(session, base64);
+			insertTextAtCaret(node, `\n${absolutePath}\n`);
 			options.onInput?.(extractText(node));
 		} catch (error) {
 			options.onError(error instanceof Error ? error.message : String(error));

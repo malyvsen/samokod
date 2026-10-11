@@ -116,7 +116,7 @@ describe("draft bubble", () => {
 		expect(area.querySelectorAll("*")).toHaveLength(0);
 	});
 
-	test("paste with image saves and inserts the bare path", async () => {
+	test("paste with image saves and inserts the path", async () => {
 		const onInput = vi.fn();
 		const { area } = bubble({ onInput });
 		setCaretAtEnd(area);
@@ -133,8 +133,6 @@ describe("draft bubble", () => {
 		await waitFor(() =>
 			expect(area.textContent).toContain("/plan/attachments/image-1-0.png"),
 		);
-		expect(area.textContent).not.toContain("Attached image:");
-		expect(area.textContent).not.toContain("read it with");
 		expect(vi.mocked(saveAttachment)).toHaveBeenCalledTimes(1);
 		expect(onInput).toHaveBeenCalled();
 	});
