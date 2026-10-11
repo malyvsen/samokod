@@ -8,7 +8,8 @@ import {
 	freezeBurst,
 	hasRunningTools,
 	liveForThought,
-	secondsForBurst,
+	msForBurst,
+	secondsForMs,
 	useThoughtTimers,
 	WAITING_DELAY_MS,
 } from "./thoughts";
@@ -19,16 +20,24 @@ describe("thought timeouts", () => {
 	});
 });
 
-describe("secondsForBurst", () => {
+describe("msForBurst", () => {
+	test("stores wall-clock duration with a zero floor", () => {
+		expect(msForBurst(1000, 1000)).toBe(0);
+		expect(msForBurst(1000, 1400)).toBe(400);
+		expect(msForBurst(2000, 1000)).toBe(0);
+	});
+});
+
+describe("secondsForMs", () => {
 	test("single-chunk bursts read one second", () => {
-		expect(secondsForBurst(1000, 1000)).toBe(1);
-		expect(secondsForBurst(1000, 1400)).toBe(1);
+		expect(secondsForMs(0)).toBe(1);
+		expect(secondsForMs(400)).toBe(1);
 	});
 
 	test("rounds to the nearest second with a one-second floor", () => {
-		expect(secondsForBurst(0, 8000)).toBe(8);
-		expect(secondsForBurst(0, 1500)).toBe(2);
-		expect(secondsForBurst(0, 1499)).toBe(1);
+		expect(secondsForMs(8000)).toBe(8);
+		expect(secondsForMs(1500)).toBe(2);
+		expect(secondsForMs(1499)).toBe(1);
 	});
 });
 
@@ -73,7 +82,17 @@ describe("freezeBurst", () => {
 	test("freezes thinking into a trace and drops the tail", () => {
 		const transcript = freezeBurst([], liveForThought(null, "hello", 1000));
 		expect(transcript).toHaveLength(1);
-		expect(transcript[0]).toMatchObject({ kind: "thought", seconds: 1 });
+		expect(transcript[0]).toMatchObject({ kind: "thought", ms: 0 });
+	});
+
+	test("stores the wall-clock burst duration", () => {
+		const live = liveForThought(
+			liveForThought(null, "hello", 1000),
+			" world",
+			2500,
+		);
+		const transcript = freezeBurst([], live);
+		expect(transcript[0]).toMatchObject({ kind: "thought", ms: 1500 });
 	});
 
 	test("leaves waiting and idle untouched", () => {

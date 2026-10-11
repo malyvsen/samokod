@@ -33,12 +33,16 @@ export function freezeBurst(
 	live: LiveStatus | null,
 ): TranscriptItem[] {
 	if (live === null || live.kind !== "thinking") return transcript;
-	const seconds = secondsForBurst(live.burstStart, live.updatedAt);
-	return [...transcript, { kind: "thought", id: crypto.randomUUID(), seconds }];
+	const ms = msForBurst(live.burstStart, live.updatedAt);
+	return [...transcript, { kind: "thought", id: crypto.randomUUID(), ms }];
 }
 
-export function secondsForBurst(burstStart: number, updatedAt: number): number {
-	return Math.max(1, Math.round((updatedAt - burstStart) / 1000));
+export function msForBurst(burstStart: number, updatedAt: number): number {
+	return Math.max(0, updatedAt - burstStart);
+}
+
+export function secondsForMs(totalMs: number): number {
+	return Math.max(1, Math.round(totalMs / 1000));
 }
 
 export function hasRunningTools(transcript: TranscriptItem[]): boolean {
@@ -74,7 +78,6 @@ export function useThoughtTimers(
 			return;
 		}
 		if (live !== null && live.kind === "thinking") {
-			const burstStart = live.burstStart;
 			const updatedAt = live.updatedAt;
 			const timer = setTimeout(() => {
 				const now = Date.now();
@@ -88,11 +91,7 @@ export function useThoughtTimers(
 						return current;
 					}
 					if (now - updatedAt < BURST_SILENCE_MS) return current;
-					const seconds = secondsForBurst(burstStart, updatedAt);
-					const nextTranscript: TranscriptItem[] = [
-						...current.transcript,
-						{ kind: "thought", id: crypto.randomUUID(), seconds },
-					];
+					const nextTranscript = freezeBurst(current.transcript, currentLive);
 					const waiting =
 						current.working &&
 						!current.approval &&

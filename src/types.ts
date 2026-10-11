@@ -203,7 +203,7 @@ export type AppEvent =
 export type TranscriptItem =
 	| { kind: "user"; id: string; text: string }
 	| { kind: "agent"; id: string; text: string }
-	| { kind: "thought"; id: string; seconds: number }
+	| { kind: "thought"; id: string; ms: number }
 	| { kind: "tool"; id: string; line: ToolLineView }
 	| { kind: "todos"; id: string; changes: TodoChangeView[] }
 	| {

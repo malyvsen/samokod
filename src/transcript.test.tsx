@@ -306,7 +306,7 @@ describe("transcript thought rows", () => {
 	test("frozen bursts read as thinking seconds", () => {
 		render(
 			<Transcript
-				items={[{ kind: "thought", id: "t1", seconds: 8 }]}
+				items={[{ kind: "thought", id: "t1", ms: 8000 }]}
 				start={IDLE}
 				repoLabel="~/repo"
 				onRetry={vi.fn()}

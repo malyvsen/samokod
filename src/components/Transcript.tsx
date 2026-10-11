@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useRef } from "react";
 import { assertNever } from "../assert";
 import type { SessionStart } from "../sessions/store";
-import type { LiveStatus } from "../sessions/thoughts";
+import { type LiveStatus, secondsForMs } from "../sessions/thoughts";
 import { todoMark, todoRowClass } from "../todos";
 import type {
 	PermissionOptionView,
@@ -148,7 +148,7 @@ export function Transcript({
 					if (item.kind === "thought") {
 						return (
 							<div className="arow thought" key={item.id}>
-								thinking: {item.seconds}s
+								thinking: {secondsForMs(item.ms)}s
 							</div>
 						);
 					}

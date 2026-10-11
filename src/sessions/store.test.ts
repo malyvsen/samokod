@@ -357,7 +357,7 @@ describe("thought bursts", () => {
 		expect(chat.working).toBe(false);
 	});
 
-	test("content freezes the burst ahead with seconds", () => {
+	test("content freezes the burst ahead with milliseconds", () => {
 		let chats = applySessionEvent(
 			withChat(),
 			{ type: "agent_thought", session: testKey(), chunk: "hello" },
@@ -369,7 +369,7 @@ describe("thought bursts", () => {
 			2000,
 		);
 		const chat = chatOf(chats);
-		expect(chat.transcript[0]).toMatchObject({ kind: "thought", seconds: 1 });
+		expect(chat.transcript[0]).toMatchObject({ kind: "thought", ms: 0 });
 		expect(chat.transcript[1]).toMatchObject({ kind: "agent", text: "answer" });
 		expect(chat.live).toBeNull();
 	});
@@ -390,7 +390,7 @@ describe("thought bursts", () => {
 			2000,
 		);
 		const chat = chatOf(chats);
-		expect(chat.transcript[0]).toMatchObject({ kind: "thought", seconds: 1 });
+		expect(chat.transcript[0]).toMatchObject({ kind: "thought", ms: 0 });
 		expect(chat.transcript[1]).toMatchObject({ kind: "tool" });
 		expect(chat.live).toBeNull();
 	});
@@ -407,7 +407,7 @@ describe("thought bursts", () => {
 			9000,
 		);
 		const chat = chatOf(chats);
-		expect(chat.transcript[0]).toMatchObject({ kind: "thought", seconds: 1 });
+		expect(chat.transcript[0]).toMatchObject({ kind: "thought", ms: 0 });
 		expect(chat.live).toBeNull();
 		expect(chat.working).toBe(false);
 	});
@@ -423,7 +423,7 @@ describe("thought bursts", () => {
 			session: testKey(),
 		});
 		const chat = chatOf(chats);
-		expect(chat.transcript[0]).toMatchObject({ kind: "thought", seconds: 1 });
+		expect(chat.transcript[0]).toMatchObject({ kind: "thought", ms: 0 });
 		expect(chat.live).toBeNull();
 		expect(chat.start).toEqual({ kind: "replaying" });
 	});
