@@ -292,7 +292,6 @@ describe("todoProgress", () => {
 
 describe("headerProgress", () => {
 	test("returns null outside executing, evergreening, and landing", () => {
-		expect(plan("a", "scoping", [testStatus("scoping")])).not.toBeNull();
 		expect(
 			headerProgress(plan("a", "scoping", [testStatus("scoping")])),
 		).toBeNull();

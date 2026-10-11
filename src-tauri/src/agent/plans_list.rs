@@ -24,12 +24,7 @@ impl AgentManager {
         let state = self.state.lock().expect("state poisoned");
         let repo_root = state.repo_root.clone().unwrap_or_default();
         let branch = state.checkout_branch.clone();
-        let plans = sorted_entries(
-            &repo_root,
-            &state.checkout_branch,
-            &state.sessions,
-            &state.pending_scoping,
-        );
+        let plans = sorted_entries(&repo_root, &branch, &state.sessions, &state.pending_scoping);
         let selected = fallback_selected(&plans, None);
         let config_defaults = defaults_for(&repo_root);
         let scoping_preview = scoping_preview_for(&state, &repo_root, &selected);
@@ -132,11 +127,6 @@ pub(crate) fn is_viewed(current: Option<&SessionKey>, acted_plan: &str) -> bool 
     current.is_some_and(|key| key.plan == acted_plan)
 }
 
-/// Plans sorted by phase, then phase-entry arrival newest first, then
-/// name descending. Each pending name missing on disk appends a synthetic
-/// scoping `PlanRef`; with no timestamp it orders by name, newest first.
-/// Each plan reads its `state.json` once and reuses it for arrival, title,
-/// flags, and roles; missing files yield the automatic evergreen default.
 /// Branch commits and fast-forward state for one plan row. Empty and false
 /// without touching git when the phase cannot own a worktree or when the
 /// checkout branch is empty; empty and false on any git error so the list
@@ -173,6 +163,13 @@ fn branch_state_for(
     (commits, ffable)
 }
 
+/// Plans sorted by phase, then phase-entry arrival newest first, then
+/// name descending. Each pending name missing on disk appends a synthetic
+/// scoping `PlanRef`; with no timestamp it orders by name, newest first.
+/// Each plan reads its `state.json` once and reuses it for arrival, title,
+/// flags, roles, and branch state; missing files yield the automatic
+/// evergreen default. `checkout_branch` is empty when no repo is open.
+/// Pure except the file and git reads.
 pub(crate) fn sorted_entries(
     repo_root: &Path,
     checkout_branch: &str,
@@ -535,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn branch_state_tracks_diverged_then_ffable() {
+    fn branch_state_lists_diverged_commits_oldest_first() {
         let dir = git_repo();
         let root = dir.path();
         let target = current_branch(root);
@@ -556,21 +553,27 @@ mod tests {
         assert!(!ffable);
         crate::worktrees::remove(root, &record.path, &record.worktree_branch, true)
             .expect("remove");
-        // Fresh ffable branch: target is an ancestor, fast-forward keeps it so.
-        let ff_name = "2026-09-26.14-53-27.ff-check";
-        let ff_plan = plans::PlanRef {
-            name: ff_name.to_string(),
+    }
+
+    #[test]
+    fn branch_state_is_ffable_once_target_catches_up() {
+        let dir = git_repo();
+        let root = dir.path();
+        let target = current_branch(root);
+        let base = crate::worktrees::head_commit(root).expect("head");
+        let name = "2026-09-26.14-53-27.ready-check";
+        let plan = plans::PlanRef {
+            name: name.to_string(),
             phase: plans::Phase::Landing,
         };
-        let ff_base = crate::worktrees::head_commit(root).expect("head");
-        let ff_record = crate::worktrees::create(root, ff_name, &ff_base).expect("create");
-        commit_file(&ff_record.path, "work.txt", "work\n", "plan work");
-        let branch = crate::worktrees::branch_name(ff_name);
+        let record = crate::worktrees::create(root, name, &base).expect("create");
+        commit_file(&record.path, "work.txt", "work\n", "plan work");
+        let branch = crate::worktrees::branch_name(name);
         crate::worktrees::fast_forward(root, &target, &branch).expect("ff");
-        let (commits, ffable) = branch_state_for(root, &target, &ff_plan);
+        let (commits, ffable) = branch_state_for(root, &target, &plan);
         assert!(ffable);
         assert!(commits.is_empty());
-        crate::worktrees::remove(root, &ff_record.path, &ff_record.worktree_branch, true)
+        crate::worktrees::remove(root, &record.path, &record.worktree_branch, true)
             .expect("remove");
     }
 

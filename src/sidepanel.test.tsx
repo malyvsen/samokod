@@ -30,13 +30,6 @@ beforeEach(() => {
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
-	api.planMdText.mockResolvedValue(null);
-	api.selectPlan.mockResolvedValue({
-		plans: [testEntry()],
-		selected: { plan: "2026-09-25.10-54-59", role: "scoping" },
-		config_defaults: testDefaults(),
-		scopingPreview: null,
-	});
 });
 
 const TODOS: TodoView[] = [
