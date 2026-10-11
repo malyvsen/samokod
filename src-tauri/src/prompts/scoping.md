@@ -36,6 +36,9 @@ A free-form description of what to do in the non-commit step.
 
 Any number of commits is acceptable, but all work must be committed. Order the commits in such a way that the repo isn't broken or inconsistent at any of them.
 
-Make sure the plan is concrete - remove unknowns upfront (unless removing an unknown is the very purpose of the plan, that is). If possible, make sure it is entirely executable by an AI agent.
-
 Call for refactoring if needed, even if it is major.
+
+Once we've created a plan I'm happy with, I will run another AI agent to execute it. Because of this, make sure the plan is:
+- Concrete - remove unknowns upfront (unless removing an unknown is the very purpose of the plan, that is)
+- Not so specific as to be fragile when code changes slightly or minor hiccups happen during implementation
+- Entirely executable by an AI agent, without manual steps
