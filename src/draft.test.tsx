@@ -81,6 +81,48 @@ describe("draft bubble in chat", () => {
 		expect(screen.getByText("hello").closest(".body")).not.toBeNull();
 	});
 
+	test("send keeps lead after pushed plans_changed", async () => {
+		const user = await openChat(api);
+		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		await user.keyboard("hello{Enter}");
+		await screen.findByText("hello");
+		emitAppEvent(api, {
+			type: "plans_changed",
+			plans: [testEntry()],
+			selected: testKey(),
+		});
+		const bubbles = document.querySelectorAll(".msg.user:not(.draft)");
+		expect(bubbles).toHaveLength(2);
+		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
+		expect(bubbles[1]?.textContent).toContain("hello");
+		expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);
+		expect(screen.getAllByText("hello")).toHaveLength(1);
+	});
+
+	test("empty replay keeps the lead", async () => {
+		await openChat(api);
+		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		emitAppEvent(api, { type: "history_begin", session: testKey() });
+		emitAppEvent(api, { type: "history_done", session: testKey() });
+		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);
+		const bubbles = document.querySelectorAll(".msg.user:not(.draft)");
+		expect(bubbles).toHaveLength(1);
+		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
+	});
+
+	test("empty preparing without begin keeps the lead", async () => {
+		await openChat(api);
+		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		emitAppEvent(api, { type: "history_preparing", session: testKey() });
+		emitAppEvent(api, { type: "history_done", session: testKey() });
+		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
+		expect(screen.getAllByText("TEMPLATE")).toHaveLength(1);
+		const bubbles = document.querySelectorAll(".msg.user:not(.draft)");
+		expect(bubbles).toHaveLength(1);
+		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
+	});
+
 	test("send without preview shows one bubble", async () => {
 		const user = await openChat(api, { scopingPreview: null });
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
