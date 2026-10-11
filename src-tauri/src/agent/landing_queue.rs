@@ -23,7 +23,6 @@ pub(crate) fn position(repo_root: &Path, plan_name: &str) -> LandingPosition {
 
 /// True when the plan waits behind the head. Guards (warm, prompts,
 /// history) share this instead of ad-hoc scans.
-#[allow(dead_code)]
 pub(crate) fn is_queued(repo_root: &Path, plan_name: &str) -> bool {
     position(repo_root, plan_name) == LandingPosition::Queued
 }

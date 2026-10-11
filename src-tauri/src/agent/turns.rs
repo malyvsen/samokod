@@ -81,6 +81,17 @@ impl AgentManager {
         // A prompt never races a replay: it waits for an in-flight load
         // rather than interleaving live chunks with history chunks.
         self.wait_for_history(&session).await?;
+        // Queued landings hold with no live session: prompting one fails
+        // fast instead of minting a second rebase. Cancel and finish paths
+        // stay allowed.
+        if session.role == SessionRole::Landing
+            && let Some((repo_root, _)) = self.reopen_snapshot()
+            && super::landing_queue::is_queued(&repo_root, &session.plan)
+        {
+            return Err(AgentError::RequestFailed {
+                raw: "landing is busy, waiting its turn".to_string(),
+            });
+        }
         let (connection, session_id) = self.ensure_live(&session).await?;
         // A warmed pending session spawns before its directory exists, so
         // its ID goes unrecorded; persisting here heals it once the first
@@ -607,7 +618,43 @@ fn update_todos(state: &Mutex<State>, app: &AppHandle, key: &SessionKey, fresh: 
 
 #[cfg(test)]
 mod tests {
+    use super::super::landing_queue;
     use super::*;
+
+    fn landing_dir(root: &std::path::Path, name: &str, entered_at: i64) {
+        let plan = plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Landing,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        std::fs::write(plan.path(root).join("plan.md"), "# T\n").expect("write");
+        let mut state = plans::load_state(&plan.path(root));
+        state.entered_at = Some(entered_at);
+        plans::store_state(&plan.path(root), &state);
+    }
+
+    #[test]
+    fn queued_landing_prompts_fail_fast_without_live_session() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        landing_dir(root, "2026-10-11.02-00-00.old", 100);
+        landing_dir(root, "2026-10-11.02-00-01.new", 200);
+        let queued = SessionKey {
+            plan: "2026-10-11.02-00-01.new".to_string(),
+            role: SessionRole::Landing,
+        };
+        let head = SessionKey {
+            plan: "2026-10-11.02-00-00.old".to_string(),
+            role: SessionRole::Landing,
+        };
+        // Same guard as `send_prompt`: queued landings never reach
+        // `ensure_live`, so no live entry is minted.
+        assert!(
+            queued.role == SessionRole::Landing && landing_queue::is_queued(root, &queued.plan)
+        );
+        assert!(!(head.role == SessionRole::Landing && landing_queue::is_queued(root, &head.plan)));
+    }
 
     #[test]
     fn prefixed_message_combines_template_and_user_text() {
