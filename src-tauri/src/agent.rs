@@ -198,17 +198,18 @@ pub(crate) fn abandon_empty_scoping(
     true
 }
 
-/// Scoping template for one session. Returns the rendered template
+/// Scoping lead preview for one session. Returns the rendered template
 /// only while the session is fresh under `is_empty_scoping`, `None` for
-/// non-fresh or non-scoping sessions, and an error when the plan is
-/// gone. Reads the locked state plus disk.
-pub(crate) fn scoping_template_for(
+/// non-fresh, non-scoping, or gone plans. List payloads stay infallible,
+/// so a gone plan yields no preview instead of an error. Reads the locked
+/// state plus disk.
+pub(crate) fn scoping_preview_for(
     state: &State,
     repo_root: &Path,
     session: &SessionKey,
-) -> Result<Option<String>, AgentError> {
+) -> Option<String> {
     if session.role != SessionRole::Scoping {
-        return Ok(None);
+        return None;
     }
     let is_pending = state.pending_scoping.contains_key(&session.plan);
     let plan_ref = plans::PlanRef {
@@ -216,15 +217,13 @@ pub(crate) fn scoping_template_for(
         phase: plans::Phase::Scoping,
     };
     if !is_pending && !plan_ref.path(repo_root).is_dir() {
-        return Err(AgentError::NoSession {
-            raw: "plan is gone".to_string(),
-        });
+        return None;
     }
     if !is_empty_scoping(state, repo_root, &session.plan) {
-        return Ok(None);
+        return None;
     }
     let display = opencode::plan_display(&plan_ref);
-    Ok(Some(opencode::scoping_template(&display)))
+    Some(opencode::scoping_template(&display))
 }
 
 /// Reserved timestamp name for a lazy scoping session: collision-proof
@@ -1536,7 +1535,7 @@ mod tests {
     }
 
     #[test]
-    fn template_returns_only_while_fresh() {
+    fn scoping_preview_follows_freshness_gate() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
@@ -1549,138 +1548,62 @@ mod tests {
             pending_scoping: HashMap::from([(name.to_string(), None)]),
             ..Default::default()
         };
-        let template = scoping_template_for(&state, root, &key)
-            .expect("template")
-            .expect("fresh session renders");
-        assert!(template.contains(".samokod/plans/scoping/2026-09-26.08-41-03"));
-        assert!(!template.contains("{{PLAN_DIR}}"));
+        let preview = scoping_preview_for(&state, root, &key).expect("fresh pending renders");
+        assert!(preview.contains(".samokod/plans/scoping/2026-09-26.08-41-03"));
+        assert!(!preview.contains("{{PLAN_DIR}}"));
 
-        let state = State::default();
         plans::materialize_scoping(root, name).expect("materialize");
         std::fs::write(
             root.join(".samokod/plans/scoping/2026-09-26.08-41-03/plan.md"),
             "# T\n",
         )
         .expect("write");
-        assert_eq!(
-            scoping_template_for(&state, root, &key).expect("gate"),
-            None
-        );
+        assert_eq!(scoping_preview_for(&State::default(), root, &key), None);
 
-        let mut state = State::default();
+        let mut prompted = State::default();
         plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("materialize");
         let other = SessionKey {
             plan: "2026-09-26.08-41-04".to_string(),
             role: SessionRole::Scoping,
         };
-        state.prompted.insert(other.plan.clone());
-        assert_eq!(
-            scoping_template_for(&state, root, &other).expect("gate"),
-            None
-        );
+        assert!(scoping_preview_for(&State::default(), root, &other).is_some());
+        prompted.prompted.insert(other.plan.clone());
+        assert_eq!(scoping_preview_for(&prompted, root, &other), None);
 
-        let mut state = State::default();
+        let mut sent_state = State::default();
         plans::materialize_scoping(root, "2026-09-26.08-41-05").expect("materialize");
         let sent = SessionKey {
             plan: "2026-09-26.08-41-05".to_string(),
             role: SessionRole::Scoping,
         };
-        state.sessions.insert(
+        sent_state.sessions.insert(
             sent.clone(),
             LiveSession::fresh(
                 ActivePlan::scoping(sent.plan.clone()),
                 crate::repo_state::RepoState::default(),
             ),
         );
-        state.sessions.get_mut(&sent).expect("live").last_prompt = Some("hi".to_string());
-        assert_eq!(
-            scoping_template_for(&state, root, &sent).expect("gate"),
-            None
-        );
-
-        let state = State::default();
-        let executing = SessionKey {
-            plan: name.to_string(),
-            role: SessionRole::Executing,
-        };
-        assert_eq!(
-            scoping_template_for(&state, root, &executing).expect("gate"),
-            None
-        );
-
-        let state = State::default();
-        let gone = SessionKey {
-            plan: "2026-09-26.08-41-99".to_string(),
-            role: SessionRole::Scoping,
-        };
-        assert!(scoping_template_for(&state, root, &gone).is_err());
-    }
-
-    #[test]
-    fn payload_preview_follows_freshness_gate() {
-        use super::plans_list::preview_for;
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        let name = "2026-09-26.08-41-03";
-        let key = SessionKey {
-            plan: name.to_string(),
-            role: SessionRole::Scoping,
-        };
-        let state = State {
-            pending_scoping: HashMap::from([(name.to_string(), None)]),
-            ..Default::default()
-        };
-        let preview = preview_for(&state, root, &key).expect("fresh pending renders");
-        assert!(preview.contains(".samokod/plans/scoping/2026-09-26.08-41-03"));
-
-        plans::materialize_scoping(root, name).expect("materialize");
-        std::fs::write(
-            root.join(".samokod/plans/scoping/2026-09-26.08-41-03/plan.md"),
-            "# T\n",
-        )
-        .expect("write");
-        assert_eq!(preview_for(&State::default(), root, &key), None);
-
-        let mut prompted = State::default();
-        plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("materialize");
-        let other = SessionKey {
-            plan: "2026-09-26.08-41-04".to_string(),
-            role: SessionRole::Scoping,
-        };
-        prompted.prompted.insert(other.plan.clone());
-        assert_eq!(preview_for(&prompted, root, &other), None);
+        sent_state
+            .sessions
+            .get_mut(&sent)
+            .expect("live")
+            .last_prompt = Some("hi".to_string());
+        assert_eq!(scoping_preview_for(&sent_state, root, &sent), None);
 
         let executing = SessionKey {
             plan: name.to_string(),
             role: SessionRole::Executing,
         };
-        assert_eq!(preview_for(&State::default(), root, &executing), None);
+        assert_eq!(
+            scoping_preview_for(&State::default(), root, &executing),
+            None
+        );
 
         let gone = SessionKey {
             plan: "2026-09-26.08-41-99".to_string(),
             role: SessionRole::Scoping,
         };
-        assert_eq!(preview_for(&State::default(), root, &gone), None);
-    }
-
-    #[test]
-    fn first_prompt_flips_payload_preview_from_some_to_none() {
-        use super::plans_list::preview_for;
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        let name = "2026-09-26.08-41-03";
-        let key = SessionKey {
-            plan: name.to_string(),
-            role: SessionRole::Scoping,
-        };
-        plans::materialize_scoping(root, name).expect("materialize");
-        let fresh = State::default();
-        assert!(preview_for(&fresh, root, &key).is_some());
-        let mut prompted = State::default();
-        prompted.prompted.insert(name.to_string());
-        assert_eq!(preview_for(&prompted, root, &key), None);
+        assert_eq!(scoping_preview_for(&State::default(), root, &gone), None);
     }
 
     #[test]

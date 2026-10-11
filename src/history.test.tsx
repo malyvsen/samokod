@@ -33,7 +33,7 @@ beforeEach(() => {
 });
 
 describe("history", () => {
-	test("unknown session shows opening copy", async () => {
+	test("empty session shows fresh copy", async () => {
 		await openChat(api);
 		expect(screen.getByText(/fresh session/)).toBeInTheDocument();
 		expect(screen.getByText("no messages yet")).toBeInTheDocument();

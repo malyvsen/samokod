@@ -5,8 +5,10 @@ import {
 	applySessionEvent,
 	type ChatState,
 	type Chats,
+	carryHistory,
 	emptyChat,
 	updateEntry,
+	withScopingPreview,
 } from "./store";
 
 const KEY_ID = sessionKeyOf(testKey());
@@ -201,6 +203,39 @@ describe("scoping preview", () => {
 			session: testKey(),
 		});
 		expect(chatOf(chats).scopingPreview).toBeNull();
+	});
+
+	test("identical preview keeps the same chat object", () => {
+		const before = withScopingPreview(withChat(), testKey(), "TEMPLATE");
+		const after = withScopingPreview(before, testKey(), "TEMPLATE");
+		expect(after[KEY_ID]).toBe(before[KEY_ID]);
+		expect(chatOf(after).scopingPreview).toBe("TEMPLATE");
+	});
+
+	test("payload preview overwrites including null clearing", () => {
+		const shown = withScopingPreview(withChat(), testKey(), "TEMPLATE");
+		expect(chatOf(shown).scopingPreview).toBe("TEMPLATE");
+		const cleared = withScopingPreview(shown, testKey(), null);
+		expect(chatOf(cleared).scopingPreview).toBeNull();
+	});
+
+	test("carried history drops the preview on rename", () => {
+		const before = withScopingPreview(withChat(), testKey(), "TEMPLATE");
+		const after = carryHistory(
+			before,
+			testKey(),
+			{
+				plans: [],
+				selected: { plan: "renamed", role: "scoping" },
+				config_defaults: { model: null, effort: null },
+				scopingPreview: null,
+			},
+			false,
+		);
+		expect(after[sessionKeyOf(testKey())]).toBeUndefined();
+		const carried =
+			after[sessionKeyOf({ plan: "renamed", role: "scoping" })] ?? emptyChat();
+		expect(carried.scopingPreview).toBeNull();
 	});
 });
 

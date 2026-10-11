@@ -86,20 +86,20 @@ export interface RepoDefaults {
 	effort: string | null;
 }
 
-export interface PlansUpdate {
+interface PlansView {
 	plans: PlanEntry[];
 	selected: SessionKey;
-	config_defaults: RepoDefaults;
 	scopingPreview: string | null;
 }
 
-export interface OpenRepoResult {
+export interface PlansUpdate extends PlansView {
+	config_defaults: RepoDefaults;
+}
+
+export interface OpenRepoResult extends PlansView {
 	repo_root: string;
 	branch: string;
-	plans: PlanEntry[];
-	selected: SessionKey;
 	config_defaults: RepoDefaults;
-	scopingPreview: string | null;
 }
 
 export interface RecentRepo {
@@ -138,6 +138,10 @@ export interface TodoView {
 interface TodoChangeView {
 	content: string;
 	status: TodoStatus;
+}
+
+export interface PlansChangedEvent extends PlansView {
+	type: "plans_changed";
 }
 
 export type AppEvent =
@@ -191,12 +195,7 @@ export type AppEvent =
 			retryable: boolean;
 	  }
 	| { type: "branch_changed"; branch: string }
-	| {
-			type: "plans_changed";
-			plans: PlanEntry[];
-			selected: SessionKey;
-			scopingPreview: string | null;
-	  };
+	| PlansChangedEvent;
 
 export type TranscriptItem =
 	| { kind: "user"; id: string; text: string }

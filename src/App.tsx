@@ -60,12 +60,15 @@ import {
 	errorItem,
 	removeEntry,
 	updateEntry,
+	withScopingPreview,
 } from "./sessions/store";
 import { useThoughtTimers } from "./sessions/thoughts";
 import type {
 	AgentStatus,
 	AppEvent,
+	OpenRepoResult,
 	PlanEntry,
+	PlansChangedEvent,
 	PlansUpdate,
 	RecentRepo,
 	RepoDefaults,
@@ -124,24 +127,30 @@ export function App() {
 	);
 
 	const applyPlans = useCallback(
-		(update: PlansUpdate) => {
+		(update: PlansUpdate | OpenRepoResult) => {
 			setPlans(update.plans);
 			setSelectedKey(update.selected);
 			setConfigDefaults(update.config_defaults);
 			applyChats((current) =>
-				updateEntry(current, update.selected, (chat) => ({
-					...chat,
-					scopingPreview: update.scopingPreview,
-				})),
+				withScopingPreview(current, update.selected, update.scopingPreview),
 			);
 		},
 		[applyChats],
 	);
 
-	const applyPushedPlans = useCallback((pushed: PlanEntry[]) => {
-		setPlans(pushed);
-		setSelectedKey((prev) => repairSelection(pushed, prev));
-	}, []);
+	const applyPushedUpdate = useCallback(
+		(pushed: PlansChangedEvent) => {
+			setPlans(pushed.plans);
+			setSelectedKey((prev) => repairSelection(pushed.plans, prev));
+			const current = selectedRef.current;
+			if (current !== null && sameSession(current, pushed.selected)) {
+				applyChats((chats) =>
+					withScopingPreview(chats, current, pushed.scopingPreview),
+				);
+			}
+		},
+		[applyChats],
+	);
 
 	const applyOwnedUpdate = useCallback(
 		(oldPlan: string, update: PlansUpdate) => {
@@ -150,8 +159,11 @@ export function App() {
 			if (selectedRef.current?.plan === oldPlan) {
 				setSelectedKey(followRename(update.plans, oldPlan, update.selected));
 			}
+			applyChats((current) =>
+				withScopingPreview(current, update.selected, update.scopingPreview),
+			);
 		},
-		[],
+		[applyChats],
 	);
 
 	const entry = selectedEntry(plans, selectedKey);
@@ -222,17 +234,7 @@ export function App() {
 	const handleEvent = useCallback(
 		(event: AppEvent) => {
 			if (event.type === "plans_changed") {
-				applyPushedPlans(event.plans);
-				const current = selectedRef.current;
-				if (current !== null && sameSession(current, event.selected)) {
-					const preview = event.scopingPreview;
-					applyChats((chats) =>
-						updateEntry(chats, current, (chat) => ({
-							...chat,
-							scopingPreview: preview,
-						})),
-					);
-				}
+				applyPushedUpdate(event);
 				return;
 			}
 			if (event.type === "branch_changed") {
@@ -259,7 +261,7 @@ export function App() {
 					);
 			}
 		},
-		[applyPushedPlans, maybeDrain, applyChats],
+		[applyPushedUpdate, maybeDrain, applyChats],
 	);
 
 	useEffect(() => {

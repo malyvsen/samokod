@@ -52,7 +52,6 @@ describe("draft bubble in chat", () => {
 	test("fresh scoping session previews its template above the draft", async () => {
 		await openChat(api);
 		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
-		expect("scopingTemplate" in api).toBe(false);
 		const box = screen.getByRole("textbox", { name: "Ask for a change…" });
 		expect(box).toBeInTheDocument();
 		const leads = document.querySelectorAll(".msg.user:not(.draft)");
@@ -80,19 +79,10 @@ describe("draft bubble in chat", () => {
 		expect(bubbles[1]?.textContent).toContain("hello");
 		expect(bubbles[0]?.querySelector(".body p")).not.toBeNull();
 		expect(screen.getByText("hello").closest(".body")).not.toBeNull();
-		expect("scopingTemplate" in api).toBe(false);
 	});
 
-	test("live send without preview shows one bubble", async () => {
-		api.openRepo.mockResolvedValue({
-			repo_root: "/repo",
-			branch: "feature",
-			plans: [testEntry()],
-			selected: testKey(),
-			config_defaults: testDefaults(),
-			scopingPreview: null,
-		});
-		const user = await openChat(api);
+	test("send without preview shows one bubble", async () => {
+		const user = await openChat(api, { scopingPreview: null });
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
 		await user.keyboard("hello{Enter}");
@@ -112,21 +102,17 @@ describe("draft bubble in chat", () => {
 			testStatus("scoping"),
 		]);
 		const plans = [first, second];
-		api.openRepo.mockResolvedValue({
-			repo_root: "/repo",
-			branch: "feature",
-			plans,
-			selected: { plan: "aaa", role: "scoping" },
-			config_defaults: testDefaults(),
-			scopingPreview: "AAA-TEMPLATE",
-		});
 		api.selectPlan.mockImplementation(async (session: SessionKey) => ({
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
 			scopingPreview: session.plan === "aaa" ? "AAA-TEMPLATE" : "BBB-TEMPLATE",
 		}));
-		const user = await openChat(api);
+		const user = await openChat(api, {
+			plans,
+			selected: { plan: "aaa", role: "scoping" },
+			scopingPreview: "AAA-TEMPLATE",
+		});
 		await screen.findByText("AAA-TEMPLATE");
 		await user.click(
 			await screen.findByRole("button", {
@@ -145,15 +131,7 @@ describe("draft bubble in chat", () => {
 	});
 
 	test("replayed template never duplicates the preview", async () => {
-		api.openRepo.mockResolvedValue({
-			repo_root: "/repo",
-			branch: "feature",
-			plans: [testEntry()],
-			selected: testKey(),
-			config_defaults: testDefaults(),
-			scopingPreview: null,
-		});
-		await openChat(api);
+		await openChat(api, { scopingPreview: null });
 		emitAppEvent(api, { type: "history_preparing", session: testKey() });
 		emitAppEvent(api, { type: "history_begin", session: testKey() });
 		emitAppEvent(api, {
@@ -387,26 +365,21 @@ describe("draft bubble in chat", () => {
 		const fresh = testEntryWith("ccc", "scoping", "Untitled", false, [
 			testStatus("scoping"),
 		]);
-		api.openRepo.mockResolvedValue({
-			repo_root: "/repo",
-			branch: "feature",
-			plans: [first],
-			selected: { plan: "aaa", role: "scoping" },
-			config_defaults: testDefaults(),
-			scopingPreview: null,
-		});
 		api.createPlan.mockResolvedValue({
 			plans: [first, fresh],
 			selected: { plan: "ccc", role: "scoping" },
 			config_defaults: testDefaults(),
 			scopingPreview: "TEMPLATE",
 		});
-		const user = await openChat(api);
+		const user = await openChat(api, {
+			plans: [first],
+			selected: { plan: "aaa", role: "scoping" },
+			scopingPreview: null,
+		});
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: "New plan" }));
 		expect(screen.getByText("TEMPLATE")).toBeInTheDocument();
-		expect("scopingTemplate" in api).toBe(false);
 	});
 
 	test("repeated plans_changed with same preview keeps one lead", async () => {
@@ -438,21 +411,17 @@ describe("draft bubble in chat", () => {
 			testStatus("scoping"),
 		]);
 		const plans = [first, second];
-		api.openRepo.mockResolvedValue({
-			repo_root: "/repo",
-			branch: "feature",
-			plans,
-			selected: { plan: "aaa", role: "scoping" },
-			config_defaults: testDefaults(),
-			scopingPreview: "AAA-TEMPLATE",
-		});
 		api.selectPlan.mockResolvedValue({
 			plans,
 			selected: { plan: "bbb", role: "scoping" },
 			config_defaults: testDefaults(),
 			scopingPreview: null,
 		});
-		const user = await openChat(api);
+		const user = await openChat(api, {
+			plans,
+			selected: { plan: "aaa", role: "scoping" },
+			scopingPreview: "AAA-TEMPLATE",
+		});
 		expect(screen.getByText("AAA-TEMPLATE")).toBeInTheDocument();
 		await user.click(
 			await screen.findByRole("button", {

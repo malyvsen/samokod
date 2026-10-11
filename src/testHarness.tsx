@@ -2,7 +2,7 @@ import { act, render, screen } from "@testing-library/react";
 import type { UserEvent } from "@testing-library/user-event";
 import { userEvent } from "@testing-library/user-event";
 import { vi } from "vitest";
-import { testDefaults, testKey } from "./fixtures";
+import { testDefaults, testEntry, testKey } from "./fixtures";
 import type { AppEvent, PlanEntry, SessionKey } from "./types";
 
 export const api = {
@@ -80,16 +80,28 @@ export function stubMatchMedia(): void {
 
 export async function openChat(
 	apiMock: typeof api,
-	overrides: { plans?: PlanEntry[]; selected?: SessionKey } = {},
+	overrides: {
+		plans?: PlanEntry[];
+		selected?: SessionKey;
+		scopingPreview?: string | null;
+	} = {},
 ): Promise<UserEvent> {
-	if (overrides.plans !== undefined) {
+	if (
+		overrides.plans !== undefined ||
+		overrides.selected !== undefined ||
+		overrides.scopingPreview !== undefined
+	) {
+		const plans = overrides.plans ?? [testEntry()];
 		apiMock.openRepo.mockResolvedValue({
 			repo_root: "/repo",
 			branch: "feature",
-			plans: overrides.plans,
-			selected: overrides.selected ?? testKey(overrides.plans[0]?.name ?? "a"),
+			plans,
+			selected: overrides.selected ?? testKey(plans[0]?.name ?? "a"),
 			config_defaults: testDefaults(),
-			scopingPreview: "TEMPLATE",
+			scopingPreview:
+				overrides.scopingPreview !== undefined
+					? overrides.scopingPreview
+					: "TEMPLATE",
 		});
 	}
 	const { App } = await import("./App");

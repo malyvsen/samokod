@@ -62,6 +62,20 @@ export function removeEntry(chats: Chats, key: SessionKey): Chats {
 	return next;
 }
 
+/// Authoritative preview sync from a plans payload. Identical values keep
+/// the same object so repeated pushes never flicker the lead.
+export function withScopingPreview(
+	chats: Chats,
+	key: SessionKey,
+	preview: string | null,
+): Chats {
+	return updateEntry(chats, key, (chat) =>
+		chat.scopingPreview === preview
+			? chat
+			: { ...chat, scopingPreview: preview },
+	);
+}
+
 export function errorItem(
 	raw: string,
 	hint: string,
@@ -311,6 +325,7 @@ export function applySessionEvent(
 }
 
 /// Move the acted-on transcript to its history row when the plan renamed.
+/// The carried preview always clears: a renamed plan is never fresh.
 /// `markSelectedRunning` opens the new selected session working; callers
 /// pass whether the acted plan is viewed so background work moves its own
 /// bucket without touching the viewed transcript.
@@ -327,7 +342,12 @@ export function carryHistory(
 	const next = { ...chats };
 	const entry = next[sessionKeyOf(key)] ?? emptyChat();
 	delete next[sessionKeyOf(key)];
-	next[sessionKeyOf(historyKey)] = { ...entry, working: false, live: null };
+	next[sessionKeyOf(historyKey)] = {
+		...entry,
+		working: false,
+		live: null,
+		scopingPreview: null,
+	};
 	if (
 		markSelectedRunning &&
 		sessionKeyOf(update.selected) !== sessionKeyOf(historyKey)

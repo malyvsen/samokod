@@ -14,7 +14,7 @@ use crate::types::{
 };
 
 use super::AgentManager;
-use super::scoping_template_for;
+use super::scoping_preview_for;
 use super::session::LiveSession;
 use super::{State, emit_event, lock_state};
 
@@ -25,15 +25,9 @@ impl AgentManager {
         let repo_root = state.repo_root.clone().unwrap_or_default();
         let branch = state.checkout_branch.clone();
         let plans = sorted_entries(&repo_root, &state.sessions, &state.pending_scoping);
-        let selected = most_recent_key(&plans).unwrap_or_else(|| SessionKey {
-            plan: plans
-                .first()
-                .map(|entry| entry.name.clone())
-                .unwrap_or_default(),
-            role: SessionRole::Scoping,
-        });
+        let selected = fallback_selected(&plans, None);
         let config_defaults = defaults_for(&repo_root);
-        let scoping_preview = preview_for(&state, &repo_root, &selected);
+        let scoping_preview = scoping_preview_for(&state, &repo_root, &selected);
         OpenRepoResult {
             repo_root: repo_root.to_string_lossy().to_string(),
             branch,
@@ -50,17 +44,9 @@ impl AgentManager {
         let state = self.state.lock().expect("state poisoned");
         let repo_root = state.repo_root.clone().unwrap_or_default();
         let plans = sorted_entries(&repo_root, &state.sessions, &state.pending_scoping);
-        let selected = state.current.clone().unwrap_or_else(|| {
-            most_recent_key(&plans).unwrap_or_else(|| SessionKey {
-                plan: plans
-                    .first()
-                    .map(|entry| entry.name.clone())
-                    .unwrap_or_default(),
-                role: SessionRole::Scoping,
-            })
-        });
+        let selected = fallback_selected(&plans, state.current.as_ref());
         let config_defaults = defaults_for(&repo_root);
-        let scoping_preview = preview_for(&state, &repo_root, &selected);
+        let scoping_preview = scoping_preview_for(&state, &repo_root, &selected);
         PlansUpdate {
             plans,
             selected,
@@ -311,15 +297,20 @@ pub(crate) fn most_recent_key(plans: &[PlanEntry]) -> Option<SessionKey> {
     })
 }
 
-/// Scoping preview for the selected session. List payloads stay infallible:
-/// a gone plan yields no preview instead of an error. Pure except disk reads
-/// inside the gate.
-pub(crate) fn preview_for(
-    state: &State,
-    repo_root: &Path,
-    selected: &SessionKey,
-) -> Option<String> {
-    scoping_template_for(state, repo_root, selected).unwrap_or(None)
+/// Current selection with fallback: the held key, else the most-recent
+/// session, else a scoping key for the first plan (empty when no plans).
+/// Pure.
+fn fallback_selected(plans: &[PlanEntry], current: Option<&SessionKey>) -> SessionKey {
+    current
+        .cloned()
+        .or_else(|| most_recent_key(plans))
+        .unwrap_or_else(|| SessionKey {
+            plan: plans
+                .first()
+                .map(|entry| entry.name.clone())
+                .unwrap_or_default(),
+            role: SessionRole::Scoping,
+        })
 }
 
 /// Rebuild the plans list from a spawned task holding only state and app.
@@ -332,7 +323,7 @@ pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
             let selected = guard.current.clone().or_else(|| most_recent_key(&plans));
             let scoping_preview = selected
                 .as_ref()
-                .and_then(|selected| preview_for(&guard, &repo_root, selected));
+                .and_then(|selected| scoping_preview_for(&guard, &repo_root, selected));
             (plans, selected, scoping_preview)
         }
         Err(error) => {
