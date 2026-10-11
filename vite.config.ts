@@ -12,10 +12,11 @@ export default defineConfig({
 		port: 1420,
 		strictPort: true,
 		host: host || false,
-		hmr: host ? { protocol: "ws", host, port: 1421 } : true,
-		watch: {
-			ignored: ["**/src-tauri/**"],
-		},
+		// Frozen for self-development: plans landing on disk must not reload
+		// the window and destroy in-progress plan state. Restart task dev
+		// manually when idle to pick up changes.
+		hmr: false,
+		watch: null,
 	},
 	test: {
 		environment: "jsdom",

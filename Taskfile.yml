@@ -20,9 +20,9 @@ tasks:
       - pnpm install --frozen-lockfile
 
   dev:
-    desc: Run the app in development mode
+    desc: Run the app in development mode (no auto-reload - restart when idle)
     cmds:
-      - pnpm tauri dev
+      - pnpm tauri dev --no-watch
 
   check:
     desc: Run all checks
