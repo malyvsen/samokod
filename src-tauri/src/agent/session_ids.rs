@@ -1,7 +1,7 @@
-// OpenCode session IDs keyed by plan plus role. Persisted IDs win; missing
-// ones recover via the CLI on demand below and persist for next time.
-// Storage lives in `plans::PlanState`, so ID writes preserve
-// `entered_at`.
+// Per-session state keyed by plan plus role: OpenCode session IDs and
+// last-seen costs. Persisted values win; missing IDs recover via the CLI
+// on demand below and persist for next time. Storage lives in
+// `plans::PlanState`, so writes preserve `entered_at`.
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -29,54 +29,59 @@ pub(crate) fn resolve(repo_root: &Path, session: &SessionKey) -> Option<String> 
     Some(recovered)
 }
 
-/// Record one role's session ID inside its plan directory, preserving the
-/// rest of the state. Best-effort: missing directories
-/// (a warmed pending session spawns before its directory exists) skip
-/// quietly, failures log and the live session continues, and an unchanged
-/// ID skips the rewrite. The next prompt heals anything skipped here.
-pub(crate) fn record(repo_root: &Path, key: &SessionKey, session_id: &str) {
-    let Some(plan_dir) = locate(repo_root, &key.plan) else {
-        return;
-    };
-    let mut state = crate::plans::load_state(&plan_dir);
-    if state.session(key.role) == Some(session_id) {
-        return;
-    }
-    state.set_session(key.role, session_id.to_string());
-    crate::plans::store_state(&plan_dir, &state);
+/// Record one session's OpenCode ID inside its plan directory. The next
+/// prompt heals anything skipped here.
+pub(crate) fn record_session(repo_root: &Path, key: &SessionKey, session_id: &str) {
+    update_state(repo_root, &key.plan, |state| {
+        if state.session(key.role) == Some(session_id) {
+            return false;
+        }
+        state.set_session(key.role, session_id.to_string());
+        true
+    });
 }
 
-/// Record one role's last-seen cost inside its plan directory, preserving
-/// the rest of the state. Best-effort like `record`: missing directories
-/// (a diskless pending scoping session) skip quietly, failures log and the
-/// live session continues, and an unchanged cost skips the rewrite.
-pub(crate) fn record_spend(repo_root: &Path, plan_name: &str, role: SessionRole, cost: f64) {
-    let Some(plan_dir) = locate(repo_root, plan_name) else {
-        return;
-    };
-    let mut state = crate::plans::load_state(&plan_dir);
-    if state.cost(role) == cost {
-        return;
-    }
-    state.set_cost(role, cost);
-    crate::plans::store_state(&plan_dir, &state);
+/// Record one session's last-seen cost inside its plan directory, so the
+/// plans list shows the real total without a live session.
+pub(crate) fn record_cost(repo_root: &Path, key: &SessionKey, cost: f64) {
+    update_state(repo_root, &key.plan, |state| {
+        if state.cost(key.role) == cost {
+            return false;
+        }
+        state.set_cost(key.role, cost);
+        true
+    });
 }
 
-/// Mark one plan as prompted for the empty-scoping gate, preserving the
-/// rest of the state. Best-effort like `record`: missing directories
-/// (a diskless pending session) skip quietly, failures log, and an
-/// unchanged flag skips the rewrite. The flag travels with renames inside
-/// the plan directory.
+/// Mark one plan as prompted for the empty-scoping gate. The flag travels
+/// with renames inside the plan directory.
 pub(crate) fn mark_prompted(repo_root: &Path, plan_name: &str) {
+    update_state(repo_root, plan_name, |state| {
+        if state.prompted {
+            return false;
+        }
+        state.prompted = true;
+        true
+    });
+}
+
+/// Best-effort state rewrite inside a plan directory, preserving every
+/// field the mutation leaves alone. Missing directories (a warmed pending
+/// session spawns before its directory exists) skip quietly, failures log
+/// and the live session continues, and a mutation reporting no change
+/// skips the rewrite.
+fn update_state(
+    repo_root: &Path,
+    plan_name: &str,
+    mutate: impl FnOnce(&mut crate::plans::PlanState) -> bool,
+) {
     let Some(plan_dir) = locate(repo_root, plan_name) else {
         return;
     };
     let mut state = crate::plans::load_state(&plan_dir);
-    if state.prompted {
-        return;
+    if mutate(&mut state) {
+        crate::plans::store_state(&plan_dir, &state);
     }
-    state.prompted = true;
-    crate::plans::store_state(&plan_dir, &state);
 }
 
 /// True when a plan name exists in any phase. Name-based: moves
@@ -333,13 +338,13 @@ mod tests {
         crate::plans::ensure_structure(dir.path()).expect("ensure");
         let name = "2026-09-30.10-00-00";
         plan_dir(dir.path(), Phase::Scoping, name);
-        record(dir.path(), &key(name, SessionRole::Scoping), "ses_scoping");
-        record(
+        record_session(dir.path(), &key(name, SessionRole::Scoping), "ses_scoping");
+        record_session(
             dir.path(),
             &key(name, SessionRole::Executing),
             "ses_executing",
         );
-        record(dir.path(), &key(name, SessionRole::Landing), "ses_landing");
+        record_session(dir.path(), &key(name, SessionRole::Landing), "ses_landing");
         let plan = PlanRef {
             name: name.to_string(),
             phase: Phase::Scoping,
@@ -356,9 +361,9 @@ mod tests {
         crate::plans::ensure_structure(dir.path()).expect("ensure");
         let name = "2026-09-30.10-00-00";
         plan_dir(dir.path(), Phase::Scoping, name);
-        record(dir.path(), &key(name, SessionRole::Scoping), "ses_old");
-        record(dir.path(), &key(name, SessionRole::Executing), "ses_exec");
-        record(dir.path(), &key(name, SessionRole::Scoping), "ses_new");
+        record_session(dir.path(), &key(name, SessionRole::Scoping), "ses_old");
+        record_session(dir.path(), &key(name, SessionRole::Executing), "ses_exec");
+        record_session(dir.path(), &key(name, SessionRole::Scoping), "ses_new");
         let plan = PlanRef {
             name: name.to_string(),
             phase: Phase::Scoping,
@@ -440,7 +445,7 @@ mod tests {
     fn missing_dir_records_nothing() {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");
-        record(
+        record_session(
             dir.path(),
             &key("2026-09-30.10-00-00", SessionRole::Scoping),
             "ses_pending",
@@ -495,7 +500,7 @@ mod tests {
         crate::plans::ensure_structure(dir.path()).expect("ensure");
         let name = "2026-09-30.10-00-00";
         plan_dir(dir.path(), Phase::Scoping, name);
-        record(dir.path(), &key(name, SessionRole::Scoping), "ses_same");
+        record_session(dir.path(), &key(name, SessionRole::Scoping), "ses_same");
         let plan = PlanRef {
             name: name.to_string(),
             phase: Phase::Scoping,
@@ -506,7 +511,7 @@ mod tests {
             .modified()
             .expect("mtime");
         std::thread::sleep(std::time::Duration::from_millis(10));
-        record(dir.path(), &key(name, SessionRole::Scoping), "ses_same");
+        record_session(dir.path(), &key(name, SessionRole::Scoping), "ses_same");
         let after = std::fs::metadata(&path)
             .expect("metadata")
             .modified()
@@ -515,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn record_preserves_entered_at() {
+    fn session_record_preserves_entered_at() {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");
         let name = "2026-09-30.10-00-00";
@@ -523,8 +528,8 @@ mod tests {
         let stamped = crate::plans::load_state(&scoping.path(dir.path()))
             .entered_at
             .expect("stamped");
-        record(dir.path(), &key(name, SessionRole::Scoping), "ses_scoping");
-        record(dir.path(), &key(name, SessionRole::Executing), "ses_exec");
+        record_session(dir.path(), &key(name, SessionRole::Scoping), "ses_scoping");
+        record_session(dir.path(), &key(name, SessionRole::Executing), "ses_exec");
         let kept = crate::plans::load_state(&scoping.path(dir.path()));
         assert_eq!(kept.entered_at, Some(stamped));
         assert_eq!(kept.session(SessionRole::Scoping), Some("ses_scoping"));
@@ -532,7 +537,7 @@ mod tests {
     }
 
     #[test]
-    fn spend_round_trip_per_role() {
+    fn cost_round_trip_per_role() {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");
         let name = "2026-09-30.10-00-00";
@@ -544,7 +549,7 @@ mod tests {
             SessionRole::Landing,
         ];
         for (index, role) in roles.iter().enumerate() {
-            record_spend(dir.path(), name, *role, 1.5 * (index as f64 + 1.0));
+            record_cost(dir.path(), &key(name, *role), 1.5 * (index as f64 + 1.0));
         }
         let plan = PlanRef {
             name: name.to_string(),
@@ -557,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn spend_preserves_sessions_and_entered_at() {
+    fn cost_preserves_sessions_and_entered_at() {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");
         let name = "2026-09-30.10-00-00";
@@ -565,10 +570,10 @@ mod tests {
         let stamped = crate::plans::load_state(&scoping.path(dir.path()))
             .entered_at
             .expect("stamped");
-        record(dir.path(), &key(name, SessionRole::Scoping), "ses_scoping");
-        record(dir.path(), &key(name, SessionRole::Executing), "ses_exec");
-        record_spend(dir.path(), name, SessionRole::Scoping, 1.24);
-        record_spend(dir.path(), name, SessionRole::Executing, 2.5);
+        record_session(dir.path(), &key(name, SessionRole::Scoping), "ses_scoping");
+        record_session(dir.path(), &key(name, SessionRole::Executing), "ses_exec");
+        record_cost(dir.path(), &key(name, SessionRole::Scoping), 1.24);
+        record_cost(dir.path(), &key(name, SessionRole::Executing), 2.5);
         let kept = crate::plans::load_state(&scoping.path(dir.path()));
         assert_eq!(kept.entered_at, Some(stamped));
         assert_eq!(kept.session(SessionRole::Scoping), Some("ses_scoping"));
@@ -579,13 +584,12 @@ mod tests {
     }
 
     #[test]
-    fn missing_dir_spends_nothing() {
+    fn missing_dir_records_no_cost() {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");
-        record_spend(
+        record_cost(
             dir.path(),
-            "2026-09-30.10-00-00",
-            SessionRole::Scoping,
+            &key("2026-09-30.10-00-00", SessionRole::Scoping),
             1.24,
         );
         let plan = PlanRef {
@@ -596,12 +600,12 @@ mod tests {
     }
 
     #[test]
-    fn same_spend_skips_rewrite() {
+    fn same_cost_skips_rewrite() {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");
         let name = "2026-09-30.10-00-00";
         plan_dir(dir.path(), Phase::Scoping, name);
-        record_spend(dir.path(), name, SessionRole::Scoping, 1.24);
+        record_cost(dir.path(), &key(name, SessionRole::Scoping), 1.24);
         let plan = PlanRef {
             name: name.to_string(),
             phase: Phase::Scoping,
@@ -612,7 +616,7 @@ mod tests {
             .modified()
             .expect("mtime");
         std::thread::sleep(std::time::Duration::from_millis(10));
-        record_spend(dir.path(), name, SessionRole::Scoping, 1.24);
+        record_cost(dir.path(), &key(name, SessionRole::Scoping), 1.24);
         let after = std::fs::metadata(&path)
             .expect("metadata")
             .modified()

@@ -103,8 +103,9 @@ impl PlanRef {
 /// `.samokod/.gitignore`.
 pub const STATE_FILE: &str = "state.json";
 
-/// One role's session record: the OpenCode session ID plus its last-seen
-/// cost. Travels with the plan directory through renames for free.
+/// One role's session: the OpenCode session ID plus its last-seen cost.
+/// The cost stays alongside the ID so relaunched apps and finished phases
+/// show the real total without a live session.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionRecord {
     #[serde(default)]
@@ -116,7 +117,7 @@ pub struct SessionRecord {
 /// Per-plan state: one session record per role the plan has used,
 /// plus the last phase-entry time in epoch millis. `entered_at` stamps the
 /// last move into this phase; session spawns preserve it
-/// while moves preserve the IDs.
+/// while moves preserve the records.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanState {
     #[serde(default)]
@@ -170,44 +171,44 @@ impl Default for PlanState {
 }
 
 impl PlanState {
+    /// One role's record. Pure.
+    fn record(&self, role: SessionRole) -> &SessionRecord {
+        match role {
+            SessionRole::Scoping => &self.scoping,
+            SessionRole::Executing => &self.executing,
+            SessionRole::Evergreening => &self.evergreening,
+            SessionRole::Landing => &self.landing,
+        }
+    }
+
+    /// One role's record for writing. Pure.
+    fn record_mut(&mut self, role: SessionRole) -> &mut SessionRecord {
+        match role {
+            SessionRole::Scoping => &mut self.scoping,
+            SessionRole::Executing => &mut self.executing,
+            SessionRole::Evergreening => &mut self.evergreening,
+            SessionRole::Landing => &mut self.landing,
+        }
+    }
+
     /// Session ID for one role. Pure.
     pub(crate) fn session(&self, role: SessionRole) -> Option<&str> {
-        match role {
-            SessionRole::Scoping => self.scoping.session.as_deref(),
-            SessionRole::Executing => self.executing.session.as_deref(),
-            SessionRole::Evergreening => self.evergreening.session.as_deref(),
-            SessionRole::Landing => self.landing.session.as_deref(),
-        }
+        self.record(role).session.as_deref()
     }
 
     /// Record one role's session ID. Pure.
     pub(crate) fn set_session(&mut self, role: SessionRole, id: String) {
-        match role {
-            SessionRole::Scoping => self.scoping.session = Some(id),
-            SessionRole::Executing => self.executing.session = Some(id),
-            SessionRole::Evergreening => self.evergreening.session = Some(id),
-            SessionRole::Landing => self.landing.session = Some(id),
-        }
+        self.record_mut(role).session = Some(id);
     }
 
     /// Last-seen cost for one role. Pure.
     pub(crate) fn cost(&self, role: SessionRole) -> f64 {
-        match role {
-            SessionRole::Scoping => self.scoping.cost,
-            SessionRole::Executing => self.executing.cost,
-            SessionRole::Evergreening => self.evergreening.cost,
-            SessionRole::Landing => self.landing.cost,
-        }
+        self.record(role).cost
     }
 
     /// Record one role's cost. Pure.
     pub(crate) fn set_cost(&mut self, role: SessionRole, cost: f64) {
-        match role {
-            SessionRole::Scoping => self.scoping.cost = cost,
-            SessionRole::Executing => self.executing.cost = cost,
-            SessionRole::Evergreening => self.evergreening.cost = cost,
-            SessionRole::Landing => self.landing.cost = cost,
-        }
+        self.record_mut(role).cost = cost;
     }
 }
 

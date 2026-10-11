@@ -296,8 +296,11 @@ fn entry_title(
 }
 
 /// One status row per session a plan owns, from `roles_for`: scoping
-/// always, executing once approved, landing on the conflict path, finished
-/// plans keeping their rows as history from the stored session IDs.
+/// always, executing once approved, evergreening on the cleanup path,
+/// landing on the conflict path, finished plans keeping their rows as
+/// history from the stored session IDs. Spend falls back to the stored
+/// cost once the live session is gone, so relaunched apps still show the
+/// real total.
 pub(crate) fn session_statuses(
     plan: &plans::PlanRef,
     sessions: &HashMap<SessionKey, LiveSession>,
@@ -318,20 +321,26 @@ pub(crate) fn session_statuses(
                 failed: live.map(|live| live.failed).unwrap_or(false),
                 live: live.map(|live| live.is_live()).unwrap_or(false),
                 progress: live.and_then(progress_for),
-                spend: match live {
-                    Some(live) => SpendStatusView {
-                        cost: live.cost,
-                        ctx_pct: live.ctx_pct,
-                    },
-                    None => SpendStatusView {
-                        cost: stored.cost(role),
-                        ctx_pct: 0.0,
-                    },
-                },
+                spend: spend_for(live, stored.cost(role)),
                 todos: live.map(|live| live.todos.clone()).unwrap_or_default(),
             }
         })
         .collect()
+}
+
+/// Spend for one session row: the live totals while the session runs, else
+/// the stored cost with no live context. Pure.
+fn spend_for(live: Option<&LiveSession>, stored_cost: f64) -> SpendStatusView {
+    match live {
+        Some(live) => SpendStatusView {
+            cost: live.cost,
+            ctx_pct: live.ctx_pct,
+        },
+        None => SpendStatusView {
+            cost: stored_cost,
+            ctx_pct: 0.0,
+        },
+    }
 }
 
 /// Todo progress for one live session: `None` when it holds no todos.

@@ -313,7 +313,7 @@ impl AgentManager {
             state.repo_root = Some(repo_root.to_path_buf());
             state.checkout_branch = branch.to_string();
         }
-        super::session_ids::record(repo_root, &key, &session_id);
+        super::session_ids::record_session(repo_root, &key, &session_id);
         log::info!(
             "spawned session {} {:?} in {:?}",
             key.plan,

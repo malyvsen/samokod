@@ -96,7 +96,7 @@ impl AgentManager {
         // its ID goes unrecorded; persisting here heals it once the first
         // prompt materializes the directory, along with any missing file.
         if let Some((repo_root, _)) = self.reopen_snapshot() {
-            super::session_ids::record(&repo_root, &session, &session_id);
+            super::session_ids::record_session(&repo_root, &session, &session_id);
         }
         // A fresh prompt clears the failed flag; the dot goes green while
         // the turn runs.
@@ -400,6 +400,8 @@ pub(crate) fn handle_notification(
         acp::SessionUpdate::UsageUpdate(update) => {
             let cost = update.cost.as_ref().map(|cost| cost.amount).unwrap_or(0.0);
             let ctx_pct = context_pct(update.used, update.size);
+            // Snapshot the repo root under the lock, then persist after it
+            // is released so file IO never runs under the mutex.
             let repo_root = lock_state(state).and_then(|mut guard| {
                 let root = guard.repo_root.clone();
                 if let Some(live) = guard.sessions.get_mut(key) {
@@ -418,7 +420,7 @@ pub(crate) fn handle_notification(
             );
             push_sorted(state, app);
             if let Some(repo_root) = repo_root {
-                super::session_ids::record_spend(&repo_root, &key.plan, key.role, cost);
+                super::session_ids::record_cost(&repo_root, key, cost);
             }
         }
         acp::SessionUpdate::ConfigOptionUpdate(update) => {
