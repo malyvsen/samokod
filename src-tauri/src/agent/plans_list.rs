@@ -318,12 +318,16 @@ pub(crate) fn session_statuses(
                 failed: live.map(|live| live.failed).unwrap_or(false),
                 live: live.map(|live| live.is_live()).unwrap_or(false),
                 progress: live.and_then(progress_for),
-                spend: live
-                    .map(|live| SpendStatusView {
+                spend: match live {
+                    Some(live) => SpendStatusView {
                         cost: live.cost,
                         ctx_pct: live.ctx_pct,
-                    })
-                    .unwrap_or_default(),
+                    },
+                    None => SpendStatusView {
+                        cost: stored.cost(role),
+                        ctx_pct: 0.0,
+                    },
+                },
                 todos: live.map(|live| live.todos.clone()).unwrap_or_default(),
             }
         })
@@ -762,5 +766,60 @@ mod tests {
                 "{phase:?}"
             );
         }
+    }
+
+    #[test]
+    fn inactive_session_falls_back_to_stored_cost() {
+        let plan = plans::PlanRef {
+            name: "2026-09-26.08-41-03".to_string(),
+            phase: plans::Phase::Scoping,
+        };
+        let mut stored = plans::PlanState::default();
+        stored.set_session(SessionRole::Scoping, "ses_scoping".to_string());
+        stored.set_cost(SessionRole::Scoping, 1.24);
+        let statuses = session_statuses(&plan, &HashMap::new(), &stored);
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].role, SessionRole::Scoping);
+        assert_eq!(statuses[0].spend.cost, 1.24);
+        assert_eq!(statuses[0].spend.ctx_pct, 0.0);
+    }
+
+    #[test]
+    fn live_session_prefers_live_spend_over_stored() {
+        let plan = plans::PlanRef {
+            name: "2026-09-26.08-41-03".to_string(),
+            phase: plans::Phase::Scoping,
+        };
+        let mut stored = plans::PlanState::default();
+        stored.set_session(SessionRole::Scoping, "ses_scoping".to_string());
+        stored.set_cost(SessionRole::Scoping, 1.24);
+        let key = SessionKey {
+            plan: plan.name.clone(),
+            role: SessionRole::Scoping,
+        };
+        let mut live = LiveSession::fresh(
+            super::super::session::ActivePlan::scoping(plan.name.clone()),
+            crate::repo_state::RepoState::default(),
+        );
+        live.cost = 2.5;
+        live.ctx_pct = 42.0;
+        let sessions = HashMap::from([(key, live)]);
+        let statuses = session_statuses(&plan, &sessions, &stored);
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].spend.cost, 2.5);
+        assert_eq!(statuses[0].spend.ctx_pct, 42.0);
+    }
+
+    #[test]
+    fn never_spent_plan_renders_zero_spend() {
+        let plan = plans::PlanRef {
+            name: "2026-09-26.08-41-03".to_string(),
+            phase: plans::Phase::Scoping,
+        };
+        let stored = plans::PlanState::default();
+        let statuses = session_statuses(&plan, &HashMap::new(), &stored);
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].spend.cost, 0.0);
+        assert_eq!(statuses[0].spend.ctx_pct, 0.0);
     }
 }
