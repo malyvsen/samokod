@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
 import type { PlanEntry, SessionKey } from "../../types";
+import { useDropdown } from "../dropdown";
 
 export function PlanMenu({
 	plan,
@@ -16,25 +16,7 @@ export function PlanMenu({
 	onSetMode: (plan: string, manual: boolean) => void;
 	onSetEvergreen: (plan: string, evergreen: boolean) => void;
 }) {
-	const [open, setOpen] = useState(false);
-	const rootRef = useRef<HTMLSpanElement>(null);
-
-	useEffect(() => {
-		if (!open) return;
-		function onPointerDown(event: PointerEvent) {
-			if (rootRef.current?.contains(event.target as Node)) return;
-			setOpen(false);
-		}
-		function onKeyDown(event: KeyboardEvent) {
-			if (event.key === "Escape") setOpen(false);
-		}
-		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-		};
-	}, [open]);
+	const { open, setOpen, rootRef } = useDropdown();
 
 	const scopingWorking =
 		plan.sessions.find((status) => status.role === "scoping")?.working ?? false;

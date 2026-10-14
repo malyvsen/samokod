@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
 import type {
 	ConfigOptionValueView,
 	ConfigOptionView,
 	RepoDefaults,
 } from "../types";
+import { useDropdown } from "./dropdown";
 
 export function pendingOptions(defaults: RepoDefaults): {
 	model: ConfigOptionView;
@@ -96,25 +96,7 @@ export function OptionDropdown({
 	disabled: boolean;
 	onChange: (configId: string, value: string) => void;
 }) {
-	const [open, setOpen] = useState(false);
-	const rootRef = useRef<HTMLSpanElement>(null);
-
-	useEffect(() => {
-		if (!open) return;
-		function onPointerDown(event: PointerEvent) {
-			if (rootRef.current?.contains(event.target as Node)) return;
-			setOpen(false);
-		}
-		function onKeyDown(event: KeyboardEvent) {
-			if (event.key === "Escape") setOpen(false);
-		}
-		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-		};
-	}, [open]);
+	const { open, setOpen, rootRef } = useDropdown();
 	const selected: ConfigOptionValueView | undefined = option.options.find(
 		(value) => value.value === option.currentValue,
 	);

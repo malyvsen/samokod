@@ -194,39 +194,33 @@ describe("settings selectors", () => {
 		]);
 	});
 
-	test("escape closes the model menu", async () => {
-		const user = userEvent.setup();
-		render(selectors(standard, false, vi.fn()));
-		await user.click(screen.getByLabelText("Model"));
-		expect(screen.getByText("Muse Spark 1.3")).toBeInTheDocument();
-		await user.keyboard("{Escape}");
-		expect(screen.queryByText("Muse Spark 1.3")).not.toBeInTheDocument();
-	});
+	test.each([
+		{ trigger: "Model", option: "Muse Spark 1.3" },
+		{ trigger: "Thought", option: "low" },
+	] as const)(
+		"escape closes the $trigger menu",
+		async ({ trigger, option }) => {
+			const user = userEvent.setup();
+			render(selectors(standard, false, vi.fn()));
+			await user.click(screen.getByLabelText(trigger));
+			expect(screen.getByText(option)).toBeInTheDocument();
+			await user.keyboard("{Escape}");
+			expect(screen.queryByText(option)).not.toBeInTheDocument();
+		},
+	);
 
-	test("outside clicks close the model menu", async () => {
-		const user = userEvent.setup();
-		render(selectors(standard, false, vi.fn()));
-		await user.click(screen.getByLabelText("Model"));
-		expect(screen.getByText("Muse Spark 1.3")).toBeInTheDocument();
-		await user.click(screen.getByLabelText("Thought"));
-		expect(screen.queryByText("Muse Spark 1.3")).not.toBeInTheDocument();
-	});
-
-	test("escape closes the effort menu", async () => {
-		const user = userEvent.setup();
-		render(selectors(standard, false, vi.fn()));
-		await user.click(screen.getByLabelText("Thought"));
-		expect(screen.getByText("low")).toBeInTheDocument();
-		await user.keyboard("{Escape}");
-		expect(screen.queryByText("low")).not.toBeInTheDocument();
-	});
-
-	test("outside clicks close the effort menu", async () => {
-		const user = userEvent.setup();
-		render(selectors(standard, false, vi.fn()));
-		await user.click(screen.getByLabelText("Thought"));
-		expect(screen.getByText("low")).toBeInTheDocument();
-		await user.click(screen.getByLabelText("Model"));
-		expect(screen.queryByText("low")).not.toBeInTheDocument();
-	});
+	test.each([
+		{ trigger: "Model", option: "Muse Spark 1.3", outside: "Thought" },
+		{ trigger: "Thought", option: "low", outside: "Model" },
+	] as const)(
+		"outside clicks close the $trigger menu",
+		async ({ trigger, option, outside }) => {
+			const user = userEvent.setup();
+			render(selectors(standard, false, vi.fn()));
+			await user.click(screen.getByLabelText(trigger));
+			expect(screen.getByText(option)).toBeInTheDocument();
+			await user.click(screen.getByLabelText(outside));
+			expect(screen.queryByText(option)).not.toBeInTheDocument();
+		},
+	);
 });
