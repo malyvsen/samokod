@@ -2,7 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
 	executePlan,
+	focusWindow,
+	listOpenRepos,
 	loadHistory,
+	newWindow,
 	onAppEvent,
 	saveAttachment,
 	selectPlan,
@@ -127,6 +130,26 @@ describe("session commands", () => {
 			session: testKey(),
 			dataBase64: "aGVsbG8=",
 		});
+	});
+
+	test("list_open_repos calls the backend list", async () => {
+		vi.mocked(invoke).mockResolvedValue([]);
+		await listOpenRepos();
+		expect(invoke).toHaveBeenCalledWith("list_open_repos");
+	});
+
+	test("focus_window targets the label", async () => {
+		vi.mocked(invoke).mockResolvedValue(undefined);
+		await focusWindow("window-1");
+		expect(invoke).toHaveBeenCalledWith("focus_window", {
+			label: "window-1",
+		});
+	});
+
+	test("new_window opens a window", async () => {
+		vi.mocked(invoke).mockResolvedValue("window-2");
+		await expect(newWindow()).resolves.toBe("window-2");
+		expect(invoke).toHaveBeenCalledWith("new_window");
 	});
 });
 

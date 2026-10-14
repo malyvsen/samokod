@@ -26,6 +26,10 @@ export const api = {
 	loadHistory: vi.fn(),
 	planMdText: vi.fn(async () => null as string | null),
 	onAppEvent: vi.fn(() => () => {}),
+	listOpenRepos: vi.fn(async () => [] as { path: string; window: string }[]),
+	focusWindow: vi.fn(async () => {}),
+	newWindow: vi.fn(async () => "window-1"),
+	onOpenReposChanged: vi.fn(() => () => {}),
 };
 
 export const dialog = {

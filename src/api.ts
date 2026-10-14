@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
 	AppEvent,
 	ConfigOptionView,
+	OpenRepoEntry,
 	OpenRepoResult,
 	PlansUpdate,
 	Prefs,
@@ -103,6 +104,28 @@ export function warmSession(session: SessionKey): Promise<void> {
 
 export function loadHistory(session: SessionKey): Promise<void> {
 	return invoke("load_history", { session });
+}
+
+export function listOpenRepos(): Promise<OpenRepoEntry[]> {
+	return invoke<OpenRepoEntry[]>("list_open_repos");
+}
+
+export function focusWindow(label: string): Promise<void> {
+	return invoke("focus_window", { label });
+}
+
+export function newWindow(): Promise<string> {
+	return invoke<string>("new_window");
+}
+
+export function onOpenReposChanged(
+	handler: (repos: OpenRepoEntry[]) => void,
+): () => void {
+	return onAppEvent((event) => {
+		if (event.type === "open_repos_changed") {
+			handler(event.repos);
+		}
+	});
 }
 
 export function onAppEvent(handler: (event: AppEvent) => void): () => void {

@@ -6,9 +6,12 @@ import {
 	cancelTurn,
 	createPlan,
 	executePlan,
+	focusWindow,
 	getPrefs,
+	listOpenRepos,
 	loadHistory,
 	onAppEvent,
+	onOpenReposChanged,
 	openRepo,
 	refreshBranch,
 	retryLast,
@@ -67,6 +70,7 @@ import { useThoughtTimers } from "./sessions/thoughts";
 import type {
 	AgentStatus,
 	AppEvent,
+	OpenRepoEntry,
 	PlanEntry,
 	PlansUpdate,
 	RecentRepo,
@@ -85,6 +89,7 @@ export function App() {
 	const [branch, setBranch] = useState("HEAD");
 	const [recent, setRecent] = useState<RecentRepo[]>([]);
 	const [pickerError, setPickerError] = useState<string | null>(null);
+	const [openRepos, setOpenRepos] = useState<OpenRepoEntry[]>([]);
 	const [plans, setPlans] = useState<PlanEntry[]>([]);
 	const [selectedKey, setSelectedKey] = useState<SessionKey | null>(null);
 	const [chats, setChats] = useState<Chats>({});
@@ -228,6 +233,10 @@ export function App() {
 				setBranch(event.branch);
 				return;
 			}
+			if (event.type === "open_repos_changed") {
+				setOpenRepos(event.repos);
+				return;
+			}
 			if (event.type === "turn_done" || event.type === "history_done") {
 				const selected = selectedRef.current;
 				const selectedId = selected === null ? "null" : sessionKeyOf(selected);
@@ -267,6 +276,26 @@ export function App() {
 	}, []);
 
 	useEffect(() => onAppEvent(handleEvent), [handleEvent]);
+
+	useEffect(() => {
+		if (view.kind !== "picker") return;
+		let cancelled = false;
+		listOpenRepos()
+			.then((repos) => {
+				if (cancelled) return;
+				setOpenRepos(repos);
+			})
+			.catch((error: unknown) => {
+				console.warn("failed to list open repos", error);
+			});
+		const unsub = onOpenReposChanged((repos) => {
+			setOpenRepos(repos);
+		});
+		return () => {
+			cancelled = true;
+			unsub();
+		};
+	}, [view.kind]);
 
 	useEffect(() => {
 		if (view.kind !== "chat") return;
@@ -375,8 +404,10 @@ export function App() {
 
 	async function handleOpenPath(path: string) {
 		setPickerError(null);
+		let attempted = path;
 		try {
 			const info = await validateRepo(path);
+			attempted = info.root;
 			if (info.root === repoRoot) {
 				setView({ kind: "chat" });
 				return;
@@ -389,6 +420,35 @@ export function App() {
 			setView({ kind: "chat" });
 			setPickerError(null);
 			setRecent((await getPrefs()).recent);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (message.startsWith("already open")) {
+				try {
+					const repos = await listOpenRepos();
+					setOpenRepos(repos);
+					const owner = repos.find((repo) => repo.path === attempted)?.window;
+					if (owner !== undefined) {
+						await focusWindow(owner);
+					}
+				} catch {
+					// Fall through to the notice below.
+				}
+				setPickerError(
+					`${attempted} is already open - switched to that window`,
+				);
+				return;
+			}
+			setPickerError(message);
+		}
+	}
+
+	async function handleFocusRepo(path: string) {
+		try {
+			const repos = await listOpenRepos();
+			setOpenRepos(repos);
+			const owner = repos.find((repo) => repo.path === path)?.window;
+			if (owner === undefined) return;
+			await focusWindow(owner);
 		} catch (error) {
 			setPickerError(error instanceof Error ? error.message : String(error));
 		}
@@ -718,7 +778,9 @@ export function App() {
 					subtitle="open a git repository to start planning"
 					recent={recent}
 					error={pickerError}
+					openPaths={openRepos.map((repo) => repo.path)}
 					onOpen={handleOpenPath}
+					onFocusRepo={handleFocusRepo}
 					onBrowse={handleBrowse}
 					onDismissError={() => setPickerError(null)}
 				/>

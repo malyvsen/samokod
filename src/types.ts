@@ -113,6 +113,11 @@ export interface RepoInfo {
 	branch: string;
 }
 
+export interface OpenRepoEntry {
+	path: string;
+	window: string;
+}
+
 export interface Prefs {
 	recent: RecentRepo[];
 }
@@ -193,7 +198,8 @@ export type AppEvent =
 			retryable: boolean;
 	  }
 	| { type: "branch_changed"; branch: string }
-	| (PlansView & { type: "plans_changed" });
+	| (PlansView & { type: "plans_changed" })
+	| { type: "open_repos_changed"; repos: OpenRepoEntry[] };
 
 export type TranscriptItem =
 	| { kind: "user"; id: string; text: string }

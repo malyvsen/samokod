@@ -140,6 +140,7 @@ export function applySessionEvent(
 	switch (event.type) {
 		case "plans_changed":
 		case "branch_changed":
+		case "open_repos_changed":
 			return chats;
 		case "agent_text": {
 			const key = event.session;

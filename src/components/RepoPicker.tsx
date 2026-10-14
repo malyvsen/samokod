@@ -5,7 +5,9 @@ export function RepoPicker({
 	subtitle,
 	recent,
 	error,
+	openPaths,
 	onOpen,
+	onFocusRepo,
 	onBrowse,
 	onDismissError,
 }: {
@@ -13,7 +15,9 @@ export function RepoPicker({
 	subtitle: string;
 	recent: RecentRepo[];
 	error: string | null;
+	openPaths: string[];
 	onOpen: (path: string) => void;
+	onFocusRepo: (path: string) => void;
 	onBrowse: () => void;
 	onDismissError: () => void;
 }) {
@@ -21,18 +25,35 @@ export function RepoPicker({
 		<div className="picker">
 			<h2>{title}</h2>
 			<p className="sub">{subtitle}</p>
-			{recent.map((repo) => (
-				<div className="rrow" key={repo.path}>
-					<span>{repo.path}</span>
-					<button
-						className="tbtn"
-						type="button"
-						onClick={() => onOpen(repo.path)}
+			{recent.map((repo) => {
+				const openElsewhere = openPaths.includes(repo.path);
+				return (
+					<div
+						className={openElsewhere ? "rrow open-else" : "rrow"}
+						key={repo.path}
 					>
-						open
-					</button>
-				</div>
-			))}
+						<span>{repo.path}</span>
+						{openElsewhere && <span className="opentag">OPEN ELSEWHERE</span>}
+						{openElsewhere ? (
+							<button
+								className="tbtn switchbtn"
+								type="button"
+								onClick={() => onFocusRepo(repo.path)}
+							>
+								switch
+							</button>
+						) : (
+							<button
+								className="tbtn"
+								type="button"
+								onClick={() => onOpen(repo.path)}
+							>
+								open
+							</button>
+						)}
+					</div>
+				);
+			})}
 			{error !== null && (
 				<div className="perr" role="alert">
 					✕ {error}{" "}
