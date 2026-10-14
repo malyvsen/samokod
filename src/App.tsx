@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	answerPermission,
 	cancelPlan,
@@ -11,7 +11,6 @@ import {
 	listOpenRepos,
 	loadHistory,
 	onAppEvent,
-	onOpenReposChanged,
 	openRepo,
 	refreshBranch,
 	retryLast,
@@ -277,6 +276,8 @@ export function App() {
 
 	useEffect(() => onAppEvent(handleEvent), [handleEvent]);
 
+	// Picker marks come from the initial list plus the global
+	// `open_repos_changed` handler above; no second subscription here.
 	useEffect(() => {
 		if (view.kind !== "picker") return;
 		let cancelled = false;
@@ -288,12 +289,8 @@ export function App() {
 			.catch((error: unknown) => {
 				console.warn("failed to list open repos", error);
 			});
-		const unsub = onOpenReposChanged((repos) => {
-			setOpenRepos(repos);
-		});
 		return () => {
 			cancelled = true;
-			unsub();
 		};
 	}, [view.kind]);
 
@@ -408,10 +405,6 @@ export function App() {
 		try {
 			const info = await validateRepo(path);
 			attempted = info.root;
-			if (info.root === repoRoot) {
-				setView({ kind: "chat" });
-				return;
-			}
 			const opened = await openRepo(info.root);
 			setRepoRoot(opened.repo_root);
 			setBranch(opened.branch);
@@ -421,27 +414,15 @@ export function App() {
 			setPickerError(null);
 			setRecent((await getPrefs()).recent);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			if (message.startsWith("already open")) {
-				try {
-					const repos = await listOpenRepos();
-					setOpenRepos(repos);
-					const owner = repos.find((repo) => repo.path === attempted)?.window;
-					if (owner !== undefined) {
-						await focusWindow(owner);
-					}
-				} catch {
-					// Fall through to the notice below.
-				}
+			if (isAlreadyOpenError(error)) {
 				setPickerError(
 					`${attempted} is already open - switched to that window`,
 				);
 				return;
 			}
-			setPickerError(message);
+			setPickerError(error instanceof Error ? error.message : String(error));
 		}
 	}
-
 	async function handleFocusRepo(path: string) {
 		try {
 			const repos = await listOpenRepos();
@@ -754,6 +735,10 @@ export function App() {
 	}
 
 	const repoLabel = repoRoot === null ? "no repo" : shortPath(repoRoot);
+	const openPaths = useMemo(
+		() => new Set(openRepos.map((repo) => repo.path)),
+		[openRepos],
+	);
 
 	return (
 		<div className="app" data-state={status} ref={appRef}>
@@ -778,7 +763,7 @@ export function App() {
 					subtitle="open a git repository to start planning"
 					recent={recent}
 					error={pickerError}
-					openPaths={openRepos.map((repo) => repo.path)}
+					openPaths={openPaths}
 					onOpen={handleOpenPath}
 					onFocusRepo={handleFocusRepo}
 					onBrowse={handleBrowse}
@@ -892,4 +877,11 @@ function shortPath(path: string): string {
 		return `~/${path.slice(home.length + 1)}`;
 	}
 	return path;
+}
+
+// The backend's single-owner rejection. The backend focuses the owning
+// window itself; the picker only shows a notice and stays put.
+function isAlreadyOpenError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return message.startsWith("already open");
 }

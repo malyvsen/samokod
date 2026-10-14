@@ -18,7 +18,7 @@ vi.mock("@tauri-apps/plugin-dialog", async () => {
 function pickerProps(overrides: {
 	recent?: { path: string }[];
 	error?: string | null;
-	openPaths?: string[];
+	openPaths?: Set<string>;
 	onFocusRepo?: (path: string) => void;
 }) {
 	return {
@@ -29,7 +29,7 @@ function pickerProps(overrides: {
 			{ path: "~/code/dotfiles" },
 		],
 		error: overrides.error ?? null,
-		openPaths: overrides.openPaths ?? [],
+		openPaths: overrides.openPaths ?? new Set<string>(),
 		onOpen: vi.fn(),
 		onFocusRepo: overrides.onFocusRepo ?? vi.fn(),
 		onBrowse: vi.fn(),
@@ -59,7 +59,7 @@ describe("repo picker", () => {
 		render(
 			<RepoPicker
 				{...pickerProps({
-					openPaths: ["~/code/samokod"],
+					openPaths: new Set(["~/code/samokod"]),
 					onFocusRepo,
 				})}
 			/>,
@@ -75,7 +75,7 @@ describe("repo picker", () => {
 		render(
 			<RepoPicker
 				{...pickerProps({
-					openPaths: ["~/code/samokod"],
+					openPaths: new Set(["~/code/samokod"]),
 					onFocusRepo,
 				})}
 			/>,
@@ -105,11 +105,13 @@ describe("picker already-open conflict", () => {
 		dialog.open.mockResolvedValue("/repo-taken");
 	});
 
-	test("browse conflict focuses the owner and stays on the picker", async () => {
+	test("browse conflict shows a notice and stays on the picker", async () => {
 		const user = userEvent.setup();
 		render(<App />);
 		await user.click(await screen.findByRole("button", { name: "browse…" }));
-		expect(api.focusWindow).toHaveBeenCalledWith("window-1");
+		// The backend focuses the owning window itself; the picker only
+		// explains why nothing opened here.
+		expect(api.focusWindow).not.toHaveBeenCalled();
 		expect(await screen.findByRole("alert")).toHaveTextContent(
 			"/repo-taken is already open - switched to that window",
 		);

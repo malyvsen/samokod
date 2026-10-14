@@ -29,7 +29,6 @@ export const api = {
 	listOpenRepos: vi.fn(async () => [] as { path: string; window: string }[]),
 	focusWindow: vi.fn(async () => {}),
 	newWindow: vi.fn(async () => "window-1"),
-	onOpenReposChanged: vi.fn(() => () => {}),
 };
 
 export const dialog = {

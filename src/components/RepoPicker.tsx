@@ -15,7 +15,7 @@ export function RepoPicker({
 	subtitle: string;
 	recent: RecentRepo[];
 	error: string | null;
-	openPaths: string[];
+	openPaths: Set<string>;
 	onOpen: (path: string) => void;
 	onFocusRepo: (path: string) => void;
 	onBrowse: () => void;
@@ -26,7 +26,7 @@ export function RepoPicker({
 			<h2>{title}</h2>
 			<p className="sub">{subtitle}</p>
 			{recent.map((repo) => {
-				const openElsewhere = openPaths.includes(repo.path);
+				const openElsewhere = openPaths.has(repo.path);
 				return (
 					<div
 						className={openElsewhere ? "rrow open-else" : "rrow"}

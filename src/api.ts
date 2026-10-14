@@ -118,16 +118,6 @@ export function newWindow(): Promise<string> {
 	return invoke<string>("new_window");
 }
 
-export function onOpenReposChanged(
-	handler: (repos: OpenRepoEntry[]) => void,
-): () => void {
-	return onAppEvent((event) => {
-		if (event.type === "open_repos_changed") {
-			handler(event.repos);
-		}
-	});
-}
-
 export function onAppEvent(handler: (event: AppEvent) => void): () => void {
 	let cancelled = false;
 	let unlisten: (() => void) | undefined;
