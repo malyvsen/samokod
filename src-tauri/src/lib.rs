@@ -26,24 +26,159 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State, Window};
 use tauri_plugin_log::{Target, TargetKind};
 
+use tauri_specta::{Builder, collect_commands};
+
 use crate::agent::AgentManager;
 use crate::menu::build_menu;
 use crate::prefs::{load_prefs, record_open, save_prefs};
 use crate::repo::{RepoInfo, validate_repo};
-use crate::types::{ConfigOptionView, OpenRepoResult, PlansUpdate, Prefs, SessionKey};
+use crate::types::{AppEvent, ConfigOptionView, OpenRepoResult, PlansUpdate, Prefs, SessionKey};
 use crate::windows::{create_window, focus_window as focus_window_by_label, window_label};
 
+fn specta_builder() -> Builder<tauri::Wry> {
+    Builder::new()
+        // Progress counts and ETA seconds fit safely in a JS number.
+        .dangerously_cast_bigints_to_number()
+        .commands(collect_commands![
+            get_prefs,
+            validate_repo_path,
+            open_repo,
+            refresh_branch,
+            create_plan,
+            execute_plan,
+            finish_landing,
+            begin_landing,
+            cancel_plan,
+            select_plan,
+            set_plan_mode,
+            set_plan_evergreen,
+            send_prompt,
+            plan_md_text,
+            retry_last,
+            cancel_turn,
+            answer_permission,
+            set_global_config_option,
+            save_attachment,
+            warm_session,
+            load_history,
+            new_window,
+            focus_window,
+            list_open_repos
+        ])
+        .typ::<AppEvent>()
+}
+
+#[cfg(test)]
+fn bindings_path() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/bindings.ts")
+}
+
+#[cfg(test)]
+fn export_bindings() -> Result<(), String> {
+    use specta_typescript::Typescript;
+    specta_builder()
+        .export(Typescript::default(), bindings_path())
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod bindings_tests {
+    use super::*;
+    use crate::types::{ConfigOptionView, PlansUpdate, RepoDefaults, SessionKey, SessionRole};
+
+    #[test]
+    fn export_bindings_file() {
+        super::export_bindings().expect("export bindings.ts");
+    }
+
+    #[test]
+    fn wire_casing_round_trip() {
+        let update = PlansUpdate {
+            plans: Vec::new(),
+            selected: SessionKey {
+                plan: "2026-09-25.10-54-59".to_string(),
+                role: SessionRole::Scoping,
+            },
+            config_defaults: RepoDefaults {
+                model: None,
+                effort: None,
+            },
+            scoping_preview: Some("TEMPLATE".to_string()),
+        };
+        let value = serde_json::to_value(&update).expect("serializes");
+        let object = value.as_object().expect("object");
+        assert!(
+            object.contains_key("scoping_preview"),
+            "snake preview: {object:?}"
+        );
+        assert!(
+            !object.contains_key("scopingPreview"),
+            "no camel preview: {object:?}"
+        );
+        assert!(
+            object.contains_key("config_defaults"),
+            "snake defaults: {object:?}"
+        );
+        let preview = object.get("scoping_preview").and_then(|v| v.as_str());
+        assert_eq!(preview, Some("TEMPLATE"));
+
+        let option = ConfigOptionView {
+            id: "model".to_string(),
+            name: "LLM".to_string(),
+            current_value: "openai/gpt-5".to_string(),
+            options: Vec::new(),
+            category: None,
+        };
+        let value = serde_json::to_value(&option).expect("serializes");
+        let object = value.as_object().expect("object");
+        assert!(
+            object.contains_key("currentValue"),
+            "camel value: {object:?}"
+        );
+        assert!(
+            !object.contains_key("current_value"),
+            "no snake value: {object:?}"
+        );
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let temp = dir.path().join("bindings.ts");
+        {
+            use specta_typescript::Typescript;
+            specta_builder()
+                .export(Typescript::default(), &temp)
+                .expect("export to temp");
+        }
+        let text = std::fs::read_to_string(&temp).expect("read temp");
+        assert!(
+            text.contains("scoping_preview"),
+            "export keeps snake preview"
+        );
+        assert!(text.contains("currentValue"), "export keeps camel value");
+        assert!(
+            text.contains("has_plan_md"),
+            "export keeps snake plan fields"
+        );
+        assert!(
+            text.contains("config_defaults"),
+            "export keeps snake defaults"
+        );
+    }
+}
+
 #[tauri::command]
+#[specta::specta]
 fn get_prefs(app: AppHandle) -> Result<Prefs, String> {
     Ok(load_prefs(&prefs_dir(&app)?))
 }
 
 #[tauri::command]
+#[specta::specta]
 fn validate_repo_path(path: String) -> Result<RepoInfo, String> {
     validate_repo(&PathBuf::from(path))
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn open_repo(
     app: AppHandle,
     window: Window,
@@ -66,6 +201,7 @@ async fn open_repo(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn refresh_branch(window: Window, state: State<'_, AgentManager>) -> Result<String, String> {
     state
         .refresh_branch(&window_label(&window))
@@ -74,6 +210,7 @@ async fn refresh_branch(window: Window, state: State<'_, AgentManager>) -> Resul
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn create_plan(
     window: Window,
     state: State<'_, AgentManager>,
@@ -86,6 +223,7 @@ async fn create_plan(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn execute_plan(
     window: Window,
     state: State<'_, AgentManager>,
@@ -98,6 +236,7 @@ async fn execute_plan(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn finish_landing(
     window: Window,
     state: State<'_, AgentManager>,
@@ -110,6 +249,7 @@ async fn finish_landing(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn begin_landing(
     window: Window,
     state: State<'_, AgentManager>,
@@ -122,6 +262,7 @@ async fn begin_landing(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn cancel_plan(
     window: Window,
     state: State<'_, AgentManager>,
@@ -134,6 +275,7 @@ async fn cancel_plan(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn select_plan(
     window: Window,
     state: State<'_, AgentManager>,
@@ -147,6 +289,7 @@ async fn select_plan(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn set_plan_mode(
     window: Window,
     state: State<'_, AgentManager>,
@@ -160,6 +303,7 @@ async fn set_plan_mode(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn set_plan_evergreen(
     window: Window,
     state: State<'_, AgentManager>,
@@ -173,6 +317,7 @@ async fn set_plan_evergreen(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn send_prompt(
     window: Window,
     state: State<'_, AgentManager>,
@@ -186,6 +331,7 @@ async fn send_prompt(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn retry_last(
     window: Window,
     state: State<'_, AgentManager>,
@@ -198,6 +344,7 @@ async fn retry_last(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn cancel_turn(
     window: Window,
     state: State<'_, AgentManager>,
@@ -210,6 +357,7 @@ async fn cancel_turn(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn answer_permission(
     window: Window,
     state: State<'_, AgentManager>,
@@ -223,6 +371,7 @@ async fn answer_permission(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn set_global_config_option(
     window: Window,
     state: State<'_, AgentManager>,
@@ -236,6 +385,7 @@ async fn set_global_config_option(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn plan_md_text(
     window: Window,
     state: State<'_, AgentManager>,
@@ -247,6 +397,7 @@ async fn plan_md_text(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn save_attachment(
     window: Window,
     state: State<'_, AgentManager>,
@@ -259,6 +410,7 @@ fn save_attachment(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn warm_session(
     window: Window,
     state: State<'_, AgentManager>,
@@ -271,6 +423,7 @@ async fn warm_session(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn load_history(
     window: Window,
     state: State<'_, AgentManager>,
@@ -283,16 +436,19 @@ async fn load_history(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn new_window(app: AppHandle) -> Result<String, String> {
     create_window(&app)
 }
 
 #[tauri::command]
+#[specta::specta]
 fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
     focus_window_by_label(&app, &label)
 }
 
 #[tauri::command]
+#[specta::specta]
 fn list_open_repos(state: State<'_, AgentManager>) -> Vec<crate::types::OpenRepoEntry> {
     state.list_open_repos()
 }
@@ -321,6 +477,7 @@ fn prefs_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let builder = specta_builder();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -356,32 +513,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![
-            get_prefs,
-            validate_repo_path,
-            open_repo,
-            refresh_branch,
-            create_plan,
-            execute_plan,
-            finish_landing,
-            begin_landing,
-            cancel_plan,
-            select_plan,
-            set_plan_mode,
-            set_plan_evergreen,
-            send_prompt,
-            plan_md_text,
-            retry_last,
-            cancel_turn,
-            answer_permission,
-            set_global_config_option,
-            save_attachment,
-            warm_session,
-            load_history,
-            new_window,
-            focus_window,
-            list_open_repos
-        ])
+        .invoke_handler(builder.invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

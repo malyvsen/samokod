@@ -7,7 +7,7 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["**", "!**/*.svg", "!!.samokod/worktrees"]
+		"includes": ["**", "!**/*.svg", "!!src/bindings.ts", "!!.samokod/worktrees"]
 	},
 	"formatter": {
 		"enabled": true,

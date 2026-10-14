@@ -26,7 +26,23 @@ tasks:
 
   check:
     desc: Run all checks
-    deps: [biome, knip, rust:check, typescript:check]
+    deps: [biome, knip, bindings, rust:check, typescript:check]
+
+  generate-bindings:
+    desc: Regenerate TypeScript bindings from Rust wire types
+    dir: src-tauri
+    cmds:
+      - cargo test --locked -p samokod --lib bindings_tests::export_bindings_file
+    sources:
+      - src-tauri/src/**/*.rs
+    generates:
+      - src/bindings.ts
+
+  bindings:
+    desc: Fail when generated bindings are stale
+    deps: [generate-bindings]
+    cmds:
+      - git diff --exit-code -- src/bindings.ts
 
   fix:
     desc: Apply safe formatting and lint fixes

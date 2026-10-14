@@ -2,9 +2,10 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 /// Branch info for a validated repository.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct RepoInfo {
     pub root: String,
     pub branch: String,

@@ -2,6 +2,6 @@
 	"$schema": "https://unpkg.com/knip@latest/schema.json",
 	"includeEntryExports": true,
 	"entry": ["scripts/**/*.mjs"],
-	"ignore": [".samokod/worktrees/**"],
+	"ignore": [".samokod/worktrees/**", "src/bindings.ts"],
 	"ignoreBinaries": ["ditto"]
 }

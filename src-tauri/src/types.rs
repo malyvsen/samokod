@@ -1,6 +1,7 @@
 // Shared backend views: failures, events, and session payloads crossing the
 // command edge as JSON. The command edge renders errors as strings.
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 use crate::plans::PlanError;
 
@@ -38,7 +39,7 @@ impl From<crate::worktrees::WorktreeError> for AgentError {
 
 /// Lifecycle status for one tool line. Ongoing rows append ` …` in text;
 /// finished rows render the bare `{label}: {body}` line.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolStatus {
     #[default]
@@ -49,7 +50,7 @@ pub enum ToolStatus {
 }
 
 /// Fallback label when the wire tool name is absent.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolKindLabel {
     Read,
@@ -94,7 +95,7 @@ impl ToolStatus {
 }
 
 /// Status for one todo row.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum TodoStatus {
     Pending,
@@ -103,7 +104,7 @@ pub enum TodoStatus {
 }
 
 /// One `▸` tool status line shaped as `{label}: {body}`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct ToolLineView {
     pub id: String,
     pub text: String,
@@ -112,14 +113,14 @@ pub struct ToolLineView {
 
 /// One one-shot permission option (`allow` or `reject`). `always` variants
 /// never reach the frontend.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct PermissionOptionView {
     pub id: String,
     pub kind: String,
 }
 
 /// Inline permission card payload.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct PermissionView {
     pub tool_call_id: String,
     pub title: String,
@@ -132,7 +133,7 @@ pub struct PermissionView {
 /// Role of one session inside a plan. A plan owns one scoping session,
 /// plus one executing session once approved, plus one evergreening session
 /// on the cleanup path, plus one landing session on the conflict path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionRole {
     Scoping,
@@ -142,7 +143,7 @@ pub enum SessionRole {
 }
 
 /// Key of one live session: plan directory name plus role.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct SessionKey {
     pub plan: String,
     pub role: SessionRole,
@@ -152,7 +153,7 @@ pub struct SessionKey {
 ///
 /// failed red, approval amber, working green, idle active blue, the rest
 /// gray.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 pub struct SessionStatusView {
     pub role: SessionRole,
     pub working: bool,
@@ -169,7 +170,7 @@ pub struct SessionStatusView {
 
 /// Spend totals for one session, mirrored from the latest `UsageUpdate`.
 /// `ctx_pct` matches the `SpendTick` event field name.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Type)]
 pub struct SpendStatusView {
     #[serde(default)]
     pub cost: f64,
@@ -180,7 +181,7 @@ pub struct SpendStatusView {
 /// Done/total progress with an optional ETA for the plans list.
 /// `eta_secs` is `None` when no ETA text shows (empty, estimating, or
 /// done). Shared by per-session todo progress and landing commit progress.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct ProgressView {
     pub done: usize,
     pub total: usize,
@@ -189,7 +190,7 @@ pub struct ProgressView {
 }
 
 /// One plan row for the plans list.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 pub struct PlanEntry {
     pub name: String,
     pub phase: crate::plans::Phase,
@@ -218,7 +219,7 @@ pub struct PlanEntry {
 }
 
 /// Stored model/effort defaults for the instant disabled picker paint.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct RepoDefaults {
     #[serde(default)]
     pub model: Option<String>,
@@ -228,7 +229,7 @@ pub struct RepoDefaults {
 
 /// Plans list pushed after every prompt, transition, or title change,
 /// and returned by plan commands.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 pub struct PlansUpdate {
     pub plans: Vec<PlanEntry>,
     pub selected: SessionKey,
@@ -238,7 +239,7 @@ pub struct PlansUpdate {
 
 /// Repository payload returned after opening a repo. No agents spawn here;
 /// every session starts lazily on its first prompt.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 pub struct OpenRepoResult {
     pub repo_root: String,
     pub branch: String,
@@ -252,7 +253,7 @@ pub struct OpenRepoResult {
 /// capabilities stay tight. Session events and `branch_changed` emit to
 /// their owning window only; `open_repos_changed` broadcasts to every
 /// window. Every session-specific variant carries its session key.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AppEvent {
     AgentText {
@@ -357,28 +358,28 @@ pub enum AppEvent {
 }
 
 /// One todo row mirrored from the agent's list.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct TodoView {
     pub content: String,
     pub status: TodoStatus,
 }
 
 /// Changed rows since the previous list: added rows plus status changes.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct TodoChangeView {
     pub content: String,
     pub status: TodoStatus,
 }
 
 /// One value inside a session config option (ACP `ConfigOptionValue`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct ConfigOptionValueView {
     pub value: String,
     pub name: String,
 }
 
 /// Session config option (ACP `ConfigOption`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigOptionView {
     pub id: String,
@@ -391,20 +392,20 @@ pub struct ConfigOptionView {
 }
 
 /// Recent repo row for the picker: path only.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct RecentRepo {
     pub path: String,
 }
 
 /// One repo owned by one window: canonical path plus owner label.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct OpenRepoEntry {
     pub path: String,
     pub window: String,
 }
 
 /// Local state persisted under the OS app-data directory.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct Prefs {
     #[serde(default)]
     pub recent: Vec<RecentRepo>,
