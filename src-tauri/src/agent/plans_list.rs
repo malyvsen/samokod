@@ -78,19 +78,13 @@ impl AgentManager {
     }
 
     /// Record one user prompt for the empty-scoping gate, in memory and
-    /// on disk.
+    /// on disk. No-ops when the window has since closed.
     pub(crate) fn mark_prompted(&self, window: &str, plan: &str) {
-        let repo_root = match lock_backend(&self.state) {
-            Some(mut backend) => {
-                let state = backend.ensure_window(window);
-                state.prompted.insert(plan.to_string());
-                let root = state.repo_root.clone();
-                backend.recompute_awake();
-                root
-            }
-            None => None,
-        };
-        if let Some(root) = repo_root {
+        let repo_root = self.with_window_mut(window, |state| {
+            state.prompted.insert(plan.to_string());
+            state.repo_root.clone()
+        });
+        if let Some(Some(root)) = repo_root {
             super::session_ids::mark_prompted(&root, plan);
         }
         self.push_plans(window);
@@ -107,7 +101,8 @@ impl AgentManager {
         }
     }
 
-    /// Pin the selection to one session key.
+    /// Pin the selection to one session key. No-ops when the window has
+    /// since closed.
     pub(crate) fn select_key(&self, window: &str, key: SessionKey) {
         if self
             .with_window_mut(window, |win| {
@@ -115,7 +110,7 @@ impl AgentManager {
             })
             .is_none()
         {
-            log::warn!("failed to select session: state poisoned");
+            log::warn!("failed to select session for {window}: window closed or state poisoned");
         }
     }
 

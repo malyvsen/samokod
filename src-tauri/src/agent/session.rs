@@ -760,30 +760,6 @@ impl AgentManager {
         })
     }
 
-    /// Drop every live session entry. Repo opens start from scratch.
-    pub(crate) fn clear_sessions(&self, window: &str) {
-        match lock_backend(&self.state) {
-            Some(mut backend) => {
-                if let Some(win) = backend.windows.get_mut(window) {
-                    win.sessions.clear();
-                    win.current = None;
-                    win.pending_scoping.clear();
-                    win.worktrees.clear();
-                    win.clear_start_claims();
-                    win.branch_watch = None;
-                } else {
-                    backend
-                        .windows
-                        .insert(window.to_string(), Default::default());
-                }
-                backend.recompute_awake();
-            }
-            None => {
-                log::warn!("failed to clear sessions: state poisoned");
-            }
-        }
-    }
-
     /// Current repository root, when a session is open.
     pub fn current_repo(&self, window: &str) -> Option<PathBuf> {
         self.with_window(window, |win| win.repo_root.clone())?
@@ -895,8 +871,18 @@ impl AgentManager {
                             .await
                             .map_err(|error| acp::internal_error(error.to_string()))?;
                         {
-                            let mut backend = slot.lock().expect("state poisoned");
-                            let win = backend.ensure_window(&window);
+                            let Some(mut backend) = lock_backend(&slot) else {
+                                return Err(acp::internal_error(
+                                    "agent state lock poisoned".to_string(),
+                                ));
+                            };
+                            // A window closed mid-spawn owns nothing: skip the
+                            // insert instead of resurrecting it.
+                            let Some(win) = backend.windows.get_mut(&window) else {
+                                return Err(acp::internal_error(format!(
+                                    "window {window} closed during agent startup"
+                                )));
+                            };
                             let supports_close = init_response
                                 .agent_capabilities
                                 .session_capabilities
@@ -971,9 +957,10 @@ impl AgentManager {
     }
 
     pub(crate) fn reopen_snapshot(&self, window: &str) -> Option<(PathBuf, String)> {
-        let backend = lock_backend(&self.state)?;
-        let win = backend.windows.get(window)?;
-        Some((win.repo_root.clone()?, win.checkout_branch.clone()))
+        self.with_window(window, |win| {
+            Some((win.repo_root.clone()?, win.checkout_branch.clone()))
+        })
+        .flatten()
     }
 
     pub(crate) fn connection_snapshot_for(
@@ -981,15 +968,8 @@ impl AgentManager {
         window: &str,
         key: &SessionKey,
     ) -> Option<ConnectionTo<Agent>> {
-        lock_backend(&self.state).and_then(|backend| {
-            backend
-                .windows
-                .get(window)?
-                .sessions
-                .get(key)?
-                .connection
-                .clone()
-        })
+        self.with_window(window, |win| win.sessions.get(key)?.connection.clone())
+            .flatten()
     }
 
     pub(crate) fn session_snapshot_for(
@@ -997,14 +977,16 @@ impl AgentManager {
         window: &str,
         key: &SessionKey,
     ) -> Option<(ConnectionTo<Agent>, String, bool, SessionKey)> {
-        let backend = lock_backend(&self.state)?;
-        let session = backend.windows.get(window)?.sessions.get(key)?;
-        Some((
-            session.connection.clone()?,
-            session.session_id.clone()?,
-            session.supports_close,
-            key.clone(),
-        ))
+        self.with_window(window, |win| {
+            let session = win.sessions.get(key)?;
+            Some((
+                session.connection.clone()?,
+                session.session_id.clone()?,
+                session.supports_close,
+                key.clone(),
+            ))
+        })
+        .flatten()
     }
 
     /// Live connection plus session id, `None` while the transport is down.

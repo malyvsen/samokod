@@ -6,6 +6,7 @@ mod awake;
 mod branch;
 mod error_hint;
 mod git;
+mod menu;
 mod opencode;
 mod permissions;
 mod plans;
@@ -16,20 +17,21 @@ mod spend;
 mod todos;
 mod types;
 mod updates;
+mod windows;
 mod working_title;
 mod worktrees;
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager, State, WebviewWindowBuilder, Window};
+use tauri::{AppHandle, Manager, State, Window};
 use tauri_plugin_log::{Target, TargetKind};
 
-use crate::agent::{allocate_window_label, window_label};
-
 use crate::agent::AgentManager;
+use crate::menu::build_menu;
 use crate::prefs::{load_prefs, record_open, save_prefs};
 use crate::repo::{RepoInfo, validate_repo};
 use crate::types::{ConfigOptionView, OpenRepoResult, PlansUpdate, Prefs, SessionKey};
+use crate::windows::{create_window, focus_window as focus_window_by_label, window_label};
 
 #[tauri::command]
 fn get_prefs(app: AppHandle) -> Result<Prefs, String> {
@@ -287,139 +289,12 @@ async fn new_window(app: AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
-    let Some(window) = app.get_webview_window(&label) else {
-        return Err(format!("no such window: {label}"));
-    };
-    window
-        .unminimize()
-        .and_then(|()| window.set_focus())
-        .map_err(|error| {
-            log::warn!("failed to focus window {label}: {error}");
-            format!("failed to focus window {label}: {error}")
-        })
+    focus_window_by_label(&app, &label)
 }
 
 #[tauri::command]
 fn list_open_repos(state: State<'_, AgentManager>) -> Vec<crate::types::OpenRepoEntry> {
     state.list_open_repos()
-}
-
-/// Shared window factory: label `window-N`, same title, size, and min size
-/// as the `main` entry in `tauri.conf.json`, loading the same frontend.
-/// New windows land on the picker with empty backend state.
-fn create_window(app: &AppHandle) -> Result<String, String> {
-    let existing: Vec<String> = app.webview_windows().keys().cloned().collect();
-    let label = allocate_window_label(&existing);
-    let mut config = app
-        .config()
-        .app
-        .windows
-        .first()
-        .cloned()
-        .ok_or_else(|| "no window config".to_string())?;
-    config.label = label.clone();
-    WebviewWindowBuilder::from_config(app, &config)
-        .map_err(|error| {
-            log::warn!("failed to build window {label}: {error}");
-            format!("failed to build window {label}: {error}")
-        })?
-        .build()
-        .map_err(|error| {
-            log::warn!("failed to open window {label}: {error}");
-            format!("failed to open window {label}: {error}")
-        })?;
-    Ok(label)
-}
-
-/// Minimal app menu: App, File, Edit basics per Tauri menu defaults,
-/// plus File > New Window wired to the shared window factory. New Window
-/// binds Shift+Cmd+N on macOS; Cmd+N stays unbound for future new-plan use.
-fn build_menu(app: &AppHandle) -> Result<tauri::menu::Menu<tauri::Wry>, String> {
-    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-    let pkg = app.package_info();
-    #[cfg(target_os = "macos")]
-    let accelerator: Option<&str> = Some("Shift+Cmd+N");
-    #[cfg(not(target_os = "macos"))]
-    let accelerator: Option<&str> = None;
-    let new_window = MenuItem::with_id(app, "new-window", "New Window", true, accelerator)
-        .map_err(|error| {
-            log::warn!("failed to build New Window item: {error}");
-            format!("failed to build menu: {error}")
-        })?;
-    let mut file_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![&new_window];
-    let close = PredefinedMenuItem::close_window(app, None).map_err(|error| {
-        log::warn!("failed to build Close Window item: {error}");
-        format!("failed to build menu: {error}")
-    })?;
-    file_items.push(&close);
-    #[cfg(not(target_os = "macos"))]
-    {
-        let quit = PredefinedMenuItem::quit(app, None).map_err(|error| {
-            log::warn!("failed to build Quit item: {error}");
-            format!("failed to build menu: {error}")
-        })?;
-        file_items.push(&quit);
-    }
-    let file = Submenu::with_items(app, "File", true, &file_items).map_err(|error| {
-        log::warn!("failed to build File menu: {error}");
-        format!("failed to build menu: {error}")
-    })?;
-    let edit = Submenu::with_items(
-        app,
-        "Edit",
-        true,
-        &[
-            &PredefinedMenuItem::undo(app, None)
-                .map_err(|error| format!("failed to build menu: {error}"))?,
-            &PredefinedMenuItem::redo(app, None)
-                .map_err(|error| format!("failed to build menu: {error}"))?,
-            &PredefinedMenuItem::separator(app)
-                .map_err(|error| format!("failed to build menu: {error}"))?,
-            &PredefinedMenuItem::cut(app, None)
-                .map_err(|error| format!("failed to build menu: {error}"))?,
-            &PredefinedMenuItem::copy(app, None)
-                .map_err(|error| format!("failed to build menu: {error}"))?,
-            &PredefinedMenuItem::paste(app, None)
-                .map_err(|error| format!("failed to build menu: {error}"))?,
-            &PredefinedMenuItem::select_all(app, None)
-                .map_err(|error| format!("failed to build menu: {error}"))?,
-        ],
-    )
-    .map_err(|error| {
-        log::warn!("failed to build Edit menu: {error}");
-        format!("failed to build menu: {error}")
-    })?;
-    #[cfg(target_os = "macos")]
-    {
-        let app_menu = Submenu::with_items(
-            app,
-            pkg.name.clone(),
-            true,
-            &[
-                &PredefinedMenuItem::about(app, None, None)
-                    .map_err(|error| format!("failed to build menu: {error}"))?,
-                &PredefinedMenuItem::separator(app)
-                    .map_err(|error| format!("failed to build menu: {error}"))?,
-                &PredefinedMenuItem::quit(app, None)
-                    .map_err(|error| format!("failed to build menu: {error}"))?,
-            ],
-        )
-        .map_err(|error| {
-            log::warn!("failed to build App menu: {error}");
-            format!("failed to build menu: {error}")
-        })?;
-        Menu::with_items(app, &[&app_menu, &file, &edit]).map_err(|error| {
-            log::warn!("failed to build menu: {error}");
-            format!("failed to build menu: {error}")
-        })
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Menu::with_items(app, &[&file, &edit]).map_err(|error| {
-            log::warn!("failed to build menu: {error}");
-            format!("failed to build menu: {error}")
-        })
-    }
 }
 
 fn log_level() -> log::LevelFilter {

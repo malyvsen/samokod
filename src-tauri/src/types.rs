@@ -249,8 +249,9 @@ pub struct OpenRepoResult {
 }
 
 /// Frontend event envelope. One Tauri event name carries every variant so
-/// capabilities stay tight. Every session-specific variant carries its
-/// session key; `branch_changed` stays global.
+/// capabilities stay tight. Session events and `branch_changed` emit to
+/// their owning window only; `open_repos_changed` broadcasts to every
+/// window. Every session-specific variant carries its session key.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AppEvent {

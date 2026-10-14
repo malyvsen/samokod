@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use crate::awake;
 use crate::opencode;
@@ -66,8 +66,8 @@ impl BackendState {
     /// Mutable per-window entry, created on first use. Keeps one short
     /// critical section per access; callers never hold the guard across
     /// await, spawn, or agent I/O.
-    pub(crate) fn ensure_window(&mut self, label: &str) -> &mut WindowState {
-        self.windows.entry(label.to_string()).or_default()
+    pub(crate) fn ensure_window(&mut self, window: &str) -> &mut WindowState {
+        self.windows.entry(window.to_string()).or_default()
     }
 
     /// Recompute the global sleep guard as working-in-any-window. Runs
@@ -108,15 +108,17 @@ impl BackendState {
 
     /// Drop one window's state, killing its live sessions by dropping
     /// their connections. Returns true when the window existed.
-    pub(crate) fn remove_window(&mut self, label: &str) -> bool {
-        let existed = self.windows.remove(label).is_some();
+    pub(crate) fn remove_window(&mut self, window: &str) -> bool {
+        let existed = self.windows.remove(window).is_some();
         if existed {
             self.recompute_awake();
         }
         existed
     }
 
-    /// Owner of a canonical repo path excluding the caller. Pure.
+    /// Owner of a canonical repo path excluding the caller. Reads the
+    /// filesystem: every stored root is canonicalized for comparison so
+    /// symlinks and trailing slashes cannot bypass the single-owner gate.
     pub(crate) fn owner_of(&self, caller: &str, canonical: &str) -> Option<String> {
         for (label, window) in &self.windows {
             if label == caller {
@@ -133,23 +135,19 @@ impl BackendState {
     }
 }
 
-/// Allocate a fresh `window-N` label not in `existing`. Pure.
-pub(crate) fn allocate_window_label(existing: &[String]) -> String {
-    let mut taken = std::collections::HashSet::new();
-    for label in existing {
-        taken.insert(label.as_str());
-    }
-    let mut index = 1;
-    loop {
-        let candidate = format!("window-{index}");
-        if !taken.contains(candidate.as_str()) {
-            return candidate;
-        }
-        index += 1;
-    }
-}
-
 impl WindowState {
+    /// Reset one window to empty, ready to claim a new repo. Drops live
+    /// sessions by dropping their connections, the branch watcher, and all
+    /// pending claims; the caller sets the new repo root next.
+    fn reset(&mut self) {
+        self.sessions.clear();
+        self.current = None;
+        self.pending_scoping.clear();
+        self.worktrees.clear();
+        self.clear_start_claims();
+        self.branch_watch = None;
+    }
+
     /// Working flag only; the global sleep guard recomputes from all
     /// windows via `BackendState::recompute_awake`.
     fn set_working(&mut self, key: &SessionKey, working: bool) {
@@ -361,28 +359,32 @@ impl AgentManager {
         }
     }
 
-    /// Per-window read: short critical section, `None` when the window
-    /// has since closed.
+    /// Per-window read for one-liner snapshots. Short critical section,
+    /// `None` when the window has since closed or the lock is poisoned.
+    /// Multi-step transactions lock the backend directly instead.
     pub(crate) fn with_window<R>(
         &self,
-        label: &str,
+        window: &str,
         f: impl FnOnce(&WindowState) -> R,
     ) -> Option<R> {
         let backend = lock_backend(&self.state)?;
-        let window = backend.windows.get(label)?;
-        Some(f(window))
+        let state = backend.windows.get(window)?;
+        Some(f(state))
     }
 
-    /// Per-window mutation: creates the entry on first use, recomputes
-    /// the global sleep guard, and never holds across await or I/O.
+    /// Per-window mutation for one-liner updates. Never creates the entry:
+    /// only `open_repo` creates windows, so `None` means the window closed
+    /// (or the lock is poisoned) and the caller must not proceed.
+    /// Recomputes the global sleep guard; never holds across await or I/O.
+    /// Multi-step transactions lock the backend directly instead.
     pub(crate) fn with_window_mut<R>(
         &self,
-        label: &str,
+        window: &str,
         f: impl FnOnce(&mut WindowState) -> R,
     ) -> Option<R> {
         let mut backend = lock_backend(&self.state)?;
-        let window = backend.ensure_window(label);
-        let result = f(window);
+        let state = backend.windows.get_mut(window)?;
+        let result = f(state);
         backend.recompute_awake();
         Some(result)
     }
@@ -400,39 +402,23 @@ impl AgentManager {
     ) -> Result<OpenRepoResult, AgentError> {
         plans::ensure_structure(&repo_root)?;
         crate::worktrees::prune(&repo_root)?;
-        // Same-repo-once gate: claim the canonical path under the same
-        // lock that guards window state. Another live owner keeps the
-        // repo; the caller stays on the picker while the owner focuses.
         let canonical = crate::repo::canonical_repo_path(&repo_root.to_string_lossy());
-        if let Some(owner) =
-            lock_backend(&self.state).and_then(|backend| backend.owner_of(window, &canonical))
-        {
-            if let Some(owner_window) = self.app.get_webview_window(&owner) {
-                let _ = owner_window.unminimize();
-                let _ = owner_window.set_focus();
-            }
-            return Err(AgentError::AlreadyOpen {
-                path: canonical,
-                window: owner,
-            });
-        }
-        self.clear_sessions(window);
         {
             let mut backend = lock_backend(&self.state).expect("state poisoned");
-            // Re-check under the claiming lock so concurrent opens cannot
-            // both pass the fast path above.
+            // Same-repo-once gate: the canonical path is claimed under the
+            // same lock that guards window state, so concurrent opens cannot
+            // both pass. Another live owner keeps the repo; the caller stays
+            // on the picker while the owner focuses.
             if let Some(owner) = backend.owner_of(window, &canonical) {
                 drop(backend);
-                if let Some(owner_window) = self.app.get_webview_window(&owner) {
-                    let _ = owner_window.unminimize();
-                    let _ = owner_window.set_focus();
-                }
+                let _ = crate::windows::focus_window(&self.app, &owner);
                 return Err(AgentError::AlreadyOpen {
                     path: canonical,
                     window: owner,
                 });
             }
             let state = backend.ensure_window(window);
+            state.reset();
             state.repo_root = Some(repo_root.clone());
             state.checkout_branch =
                 crate::branch::current_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string());
@@ -1131,11 +1117,6 @@ fn emit_open_repos(app: &AppHandle, repos: Vec<crate::types::OpenRepoEntry>) {
     }
 }
 
-/// Window label for a Tauri window. Pure.
-pub(crate) fn window_label(window: &tauri::Window) -> String {
-    window.label().to_string()
-}
-
 /// Lock backend state. A poisoned mutex means a prior panic elsewhere; log
 /// it instead of silently dropping the update.
 fn lock_backend(state: &Mutex<BackendState>) -> Option<std::sync::MutexGuard<'_, BackendState>> {
@@ -1448,13 +1429,7 @@ mod tests {
         // Clearing B must not clear A.
         {
             let mut backend = state.lock().expect("state poisoned");
-            if let Some(win) = backend.windows.get_mut("b") {
-                win.sessions.clear();
-                win.current = None;
-                win.pending_scoping.clear();
-                win.worktrees.clear();
-                win.clear_start_claims();
-            }
+            backend.windows.get_mut("b").expect("b").reset();
             backend.recompute_awake();
         }
         {
@@ -1512,23 +1487,6 @@ mod tests {
             let guard = state.lock().expect("state poisoned");
             assert!(guard.awake.is_none());
         }
-    }
-
-    #[test]
-    fn window_labels_allocate_first_free_slot() {
-        assert_eq!(allocate_window_label(&[]), "window-1");
-        assert_eq!(
-            allocate_window_label(&["main".to_string(), "window-1".to_string()]),
-            "window-2"
-        );
-        assert_eq!(
-            allocate_window_label(&[
-                "main".to_string(),
-                "window-1".to_string(),
-                "window-3".to_string()
-            ]),
-            "window-2"
-        );
     }
 
     #[test]
