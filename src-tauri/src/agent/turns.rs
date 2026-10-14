@@ -189,6 +189,7 @@ impl AgentManager {
                     log::info!("TurnDone session {}::{:?}", key.plan, key.role);
                     emit_event(
                         &app,
+                        &window_owned,
                         AppEvent::TurnDone {
                             session: key.clone(),
                         },
@@ -222,6 +223,7 @@ impl AgentManager {
                     log::info!("TurnFailed session {}::{:?}", key.plan, key.role);
                     emit_event(
                         &app,
+                        &window_owned,
                         AppEvent::TurnFailed {
                             session: key.clone(),
                             raw,
@@ -342,6 +344,7 @@ pub(crate) fn handle_notification(
     if let Some(chunk) = crate::updates::agent_text_of(&notification.update) {
         emit_event(
             app,
+            window,
             AppEvent::AgentText {
                 session: key.clone(),
                 chunk,
@@ -351,6 +354,7 @@ pub(crate) fn handle_notification(
     if let Some(chunk) = crate::updates::thought_text_of(&notification.update) {
         emit_event(
             app,
+            window,
             AppEvent::AgentThought {
                 session: key.clone(),
                 chunk,
@@ -375,6 +379,7 @@ pub(crate) fn handle_notification(
         for bubble in replay_bubbles(key, &chunk) {
             emit_event(
                 app,
+                window,
                 AppEvent::UserText {
                     session: key.clone(),
                     chunk: bubble,
@@ -409,6 +414,7 @@ pub(crate) fn handle_notification(
                 let line = crate::updates::format_tool_line(&merged);
                 emit_event(
                     app,
+                    window,
                     AppEvent::ToolLine {
                         session: key.clone(),
                         line,
@@ -448,6 +454,7 @@ pub(crate) fn handle_notification(
                 let line = crate::updates::format_tool_line(&merged);
                 emit_event(
                     app,
+                    window,
                     AppEvent::ToolLine {
                         session: key.clone(),
                         line,
@@ -471,6 +478,7 @@ pub(crate) fn handle_notification(
             });
             emit_event(
                 app,
+                window,
                 AppEvent::SpendTick {
                     session: key.clone(),
                     cost,
@@ -486,6 +494,7 @@ pub(crate) fn handle_notification(
             let options = config_views(&update.config_options);
             emit_event(
                 app,
+                window,
                 AppEvent::ConfigOptions {
                     session: key.clone(),
                     options,
@@ -695,6 +704,7 @@ fn update_todos(
     drop(backend);
     emit_event(
         app,
+        window,
         AppEvent::TodosChanged {
             session: key.clone(),
             todos: fresh,

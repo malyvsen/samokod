@@ -86,6 +86,51 @@ impl BackendState {
             self.awake = None;
         }
     }
+
+    /// Repos owned across windows, sorted by path. Pure.
+    pub(crate) fn open_repos(&self) -> Vec<crate::types::OpenRepoEntry> {
+        let mut repos: Vec<crate::types::OpenRepoEntry> = self
+            .windows
+            .iter()
+            .filter_map(|(window, state)| {
+                state
+                    .repo_root
+                    .as_ref()
+                    .map(|root| crate::types::OpenRepoEntry {
+                        path: root.to_string_lossy().to_string(),
+                        window: window.clone(),
+                    })
+            })
+            .collect();
+        repos.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.window.cmp(&b.window)));
+        repos
+    }
+
+    /// Drop one window's state, killing its live sessions by dropping
+    /// their connections. Returns true when the window existed.
+    pub(crate) fn remove_window(&mut self, label: &str) -> bool {
+        let existed = self.windows.remove(label).is_some();
+        if existed {
+            self.recompute_awake();
+        }
+        existed
+    }
+}
+
+/// Allocate a fresh `window-N` label not in `existing`. Pure.
+pub(crate) fn allocate_window_label(existing: &[String]) -> String {
+    let mut taken = std::collections::HashSet::new();
+    for label in existing {
+        taken.insert(label.as_str());
+    }
+    let mut index = 1;
+    loop {
+        let candidate = format!("window-{index}");
+        if !taken.contains(candidate.as_str()) {
+            return candidate;
+        }
+        index += 1;
+    }
 }
 
 impl WindowState {
@@ -383,7 +428,9 @@ impl AgentManager {
         }
         self.watch_branch(window, &repo_root);
         self.pump(window).await;
-        Ok(self.open_result(window))
+        let result = self.open_result(window);
+        self.push_open_repos();
+        Ok(result)
     }
 
     /// Reserve a fresh scoping session without touching disk. Reuses the
@@ -475,7 +522,7 @@ impl AgentManager {
             }
         };
         if moved {
-            emit_event(&self.app, AppEvent::BranchChanged { branch });
+            emit_event(&self.app, window, AppEvent::BranchChanged { branch });
             self.push_plans(window);
         }
         moved
@@ -514,7 +561,7 @@ impl AgentManager {
                 }
             };
             if moved {
-                emit_event(&app, AppEvent::BranchChanged { branch });
+                emit_event(&app, &label, AppEvent::BranchChanged { branch });
                 plans_list::push_sorted(&push_state, &push_app, &label);
                 pump_manager.spawn_pump(&pump_label);
             }
@@ -903,14 +950,44 @@ impl AgentManager {
     /// Announce an eager executing/landing first prompt as a live YOU
     /// bubble, matching what history replay shows. Shared so the two
     /// call sites cannot drift apart; retries never call here.
-    fn announce_first_prompt(&self, key: &SessionKey, text: &str) {
+    fn announce_first_prompt(&self, window: &str, key: &SessionKey, text: &str) {
         emit_event(
             &self.app,
+            window,
             AppEvent::UserText {
                 session: key.clone(),
                 chunk: text.to_string(),
             },
         );
+    }
+
+    /// Repos owned across windows, sorted by path.
+    pub fn list_open_repos(&self) -> Vec<crate::types::OpenRepoEntry> {
+        lock_backend(&self.state)
+            .map(|backend| backend.open_repos())
+            .unwrap_or_default()
+    }
+
+    /// Drop one window's state, killing its live sessions. Broadcasts the
+    /// refreshed owned-repos list when the window existed.
+    pub fn remove_window(&self, window: &str) {
+        let (existed, repos) = match lock_backend(&self.state) {
+            Some(mut backend) => {
+                let existed = backend.remove_window(window);
+                let repos = backend.open_repos();
+                (existed, repos)
+            }
+            None => (false, Vec::new()),
+        };
+        if existed {
+            emit_open_repos(&self.app, repos);
+        }
+    }
+
+    /// Broadcast the current owned-repos list to every window.
+    fn push_open_repos(&self) {
+        let repos = self.list_open_repos();
+        emit_open_repos(&self.app, repos);
     }
 }
 
@@ -993,11 +1070,19 @@ fn ensure_idle(
     }
 }
 
-/// Emit one app event. Emissions are fire-and-forget, but a failure desyncs
-/// the UI from the agent, so it is always logged.
-fn emit_event(app: &AppHandle, event: AppEvent) {
-    if let Err(error) = app.emit("samokod://event", event) {
-        log::warn!("failed to emit app event: {error}");
+/// Emit one app event to its owning window. Emissions are fire-and-forget,
+/// but a failure desyncs the UI from the agent, so it is always logged.
+fn emit_event(app: &AppHandle, window: &str, event: AppEvent) {
+    if let Err(error) = app.emit_to(window, "samokod://event", event) {
+        log::warn!("failed to emit app event to {window}: {error}");
+    }
+}
+
+/// Broadcast the owned-repos list to every window so pickers refresh
+/// their already-open marks. Fire-and-forget with a warn-log.
+fn emit_open_repos(app: &AppHandle, repos: Vec<crate::types::OpenRepoEntry>) {
+    if let Err(error) = app.emit("samokod://event", AppEvent::OpenReposChanged { repos }) {
+        log::warn!("failed to emit open repos: {error}");
     }
 }
 
@@ -1382,6 +1467,81 @@ mod tests {
             let guard = state.lock().expect("state poisoned");
             assert!(guard.awake.is_none());
         }
+    }
+
+    #[test]
+    fn window_labels_allocate_first_free_slot() {
+        assert_eq!(allocate_window_label(&[]), "window-1");
+        assert_eq!(
+            allocate_window_label(&["main".to_string(), "window-1".to_string()]),
+            "window-2"
+        );
+        assert_eq!(
+            allocate_window_label(&[
+                "main".to_string(),
+                "window-1".to_string(),
+                "window-3".to_string()
+            ]),
+            "window-2"
+        );
+    }
+
+    #[test]
+    fn close_cleanup_drops_window_and_releases_awake() {
+        let backend = Mutex::new(BackendState::default());
+        let key = SessionKey {
+            plan: "a".to_string(),
+            role: SessionRole::Scoping,
+        };
+        {
+            let mut guard = backend.lock().expect("state poisoned");
+            guard.ensure_window("window-1").sessions.insert(
+                key.clone(),
+                LiveSession::fresh(
+                    ActivePlan::scoping("a".to_string()),
+                    crate::repo_state::RepoState::default(),
+                ),
+            );
+            guard.ensure_window("window-1").repo_root = Some(PathBuf::from("/repo"));
+        }
+        set_working(&backend, "window-1", &key, true);
+        assert!(backend.lock().expect("state poisoned").awake.is_some());
+        {
+            let mut guard = backend.lock().expect("state poisoned");
+            assert!(guard.remove_window("window-1"));
+            assert!(!guard.windows.contains_key("window-1"));
+        }
+        {
+            let guard = backend.lock().expect("state poisoned");
+            assert!(guard.awake.is_none());
+            assert!(guard.open_repos().is_empty());
+        }
+        {
+            let mut guard = backend.lock().expect("state poisoned");
+            assert!(!guard.remove_window("window-9"));
+        }
+    }
+
+    #[test]
+    fn open_repos_lists_sorted_owners() {
+        let mut backend = BackendState::default();
+        backend.ensure_window("window-2").repo_root = Some(PathBuf::from("/repo-b"));
+        backend.ensure_window("window-1").repo_root = Some(PathBuf::from("/repo-a"));
+        backend.ensure_window("empty");
+        let repos = backend.open_repos();
+        assert_eq!(
+            repos,
+            vec![
+                crate::types::OpenRepoEntry {
+                    path: "/repo-a".to_string(),
+                    window: "window-1".to_string(),
+                },
+                crate::types::OpenRepoEntry {
+                    path: "/repo-b".to_string(),
+                    window: "window-2".to_string(),
+                },
+            ]
+        );
     }
 
     fn write_plan_dir(root: &Path, phase: plans::Phase, name: &str, title: Option<&str>) {

@@ -70,7 +70,11 @@ impl AgentManager {
                 return;
             }
         };
-        emit_event(&self.app, AppEvent::PlansChanged { plans, selected });
+        emit_event(
+            &self.app,
+            window,
+            AppEvent::PlansChanged { plans, selected },
+        );
     }
 
     /// Record one user prompt for the empty-scoping gate, in memory and
@@ -468,7 +472,7 @@ pub(crate) fn push_sorted(state: &Mutex<BackendState>, app: &AppHandle, window: 
         }
     };
     if let Some(selected) = selected {
-        emit_event(app, AppEvent::PlansChanged { plans, selected });
+        emit_event(app, window, AppEvent::PlansChanged { plans, selected });
     }
 }
 

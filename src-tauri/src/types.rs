@@ -346,6 +346,11 @@ pub enum AppEvent {
         plans: Vec<PlanEntry>,
         selected: SessionKey,
     },
+    /// Repos owned across windows. Broadcast to every window so pickers
+    /// refresh their already-open marks.
+    OpenReposChanged {
+        repos: Vec<OpenRepoEntry>,
+    },
 }
 
 /// One todo row mirrored from the agent's list.
@@ -386,6 +391,13 @@ pub struct ConfigOptionView {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RecentRepo {
     pub path: String,
+}
+
+/// One repo owned by one window: canonical path plus owner label.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OpenRepoEntry {
+    pub path: String,
+    pub window: String,
 }
 
 /// Local state persisted under the OS app-data directory.

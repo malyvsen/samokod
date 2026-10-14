@@ -113,7 +113,7 @@ pub(crate) async fn handle_permission_request(
         })
         .unwrap_or(false)
     {
-        emit_replayed_approval(app, key, &request, options, responder);
+        emit_replayed_approval(app, window, key, &request, options, responder);
         return;
     }
     let permission = permission_view(&request, options);
@@ -138,6 +138,7 @@ pub(crate) async fn handle_permission_request(
     push_sorted(state, app, window);
     emit_event(
         app,
+        window,
         AppEvent::PermissionAsked {
             session: key.clone(),
             permission,
@@ -184,6 +185,7 @@ pub(crate) async fn handle_permission_request(
     push_sorted(state, app, window);
     emit_event(
         app,
+        window,
         AppEvent::PermissionResolved {
             session: key.clone(),
             tool_call_id,
@@ -231,6 +233,7 @@ fn answer_cancelled(
 /// replay.
 fn emit_replayed_approval(
     app: &AppHandle,
+    window: &str,
     key: &SessionKey,
     request: &acp::RequestPermissionRequest,
     options: Vec<PermissionOptionView>,
@@ -240,6 +243,7 @@ fn emit_replayed_approval(
     let tool_call_id = permission.tool_call_id.clone();
     emit_event(
         app,
+        window,
         AppEvent::PermissionAsked {
             session: key.clone(),
             permission,
@@ -248,6 +252,7 @@ fn emit_replayed_approval(
     answer_cancelled(responder, "for replayed approval");
     emit_event(
         app,
+        window,
         AppEvent::PermissionResolved {
             session: key.clone(),
             tool_call_id,

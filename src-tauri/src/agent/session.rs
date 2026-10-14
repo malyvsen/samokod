@@ -325,12 +325,14 @@ impl AgentManager {
         );
         emit_event(
             &self.app,
+            window,
             AppEvent::SessionReset {
                 session: key.clone(),
             },
         );
         emit_event(
             &self.app,
+            window,
             AppEvent::ConfigOptions {
                 session: key.clone(),
                 options,
@@ -532,7 +534,7 @@ impl AgentManager {
                     snapshot_present
                 );
                 let raw = "agent is still starting, try again".to_string();
-                self.emit_history_failed(&session, raw.clone());
+                self.emit_history_failed(window, &session, raw.clone());
                 return Err(AgentError::RequestFailed { raw });
             }
         }
@@ -548,12 +550,14 @@ impl AgentManager {
             })?;
         emit_event(
             &self.app,
+            window,
             AppEvent::HistoryPreparing {
                 session: session.clone(),
             },
         );
         emit_event(
             &self.app,
+            window,
             AppEvent::SessionReset {
                 session: session.clone(),
             },
@@ -580,7 +584,7 @@ impl AgentManager {
             Err(error) => {
                 let raw = error.to_string();
                 history_guard.fail();
-                self.emit_history_failed(&session, raw.clone());
+                self.emit_history_failed(window, &session, raw.clone());
                 return Err(error);
             }
         };
@@ -592,6 +596,7 @@ impl AgentManager {
         }
         emit_event(
             &self.app,
+            window,
             AppEvent::HistoryBegin {
                 session: session.clone(),
             },
@@ -614,19 +619,20 @@ impl AgentManager {
                 history_guard.finish();
                 emit_event(
                     &self.app,
+                    window,
                     AppEvent::ConfigOptions {
                         session: session.clone(),
                         options: views,
                     },
                 );
-                emit_event(&self.app, AppEvent::HistoryDone { session });
+                emit_event(&self.app, window, AppEvent::HistoryDone { session });
                 self.push_plans(window);
                 Ok(())
             }
             Err(error) => {
                 let raw = error.to_string();
                 history_guard.fail();
-                self.emit_history_failed(&session, raw.clone());
+                self.emit_history_failed(window, &session, raw.clone());
                 Err(AgentError::RequestFailed { raw })
             }
         }
@@ -657,20 +663,20 @@ impl AgentManager {
             let raw = "no saved session found for this plan - it predates session recording or its session was pruned"
                 .to_string();
             history_guard.fail();
-            self.emit_history_failed(&session, raw.clone());
+            self.emit_history_failed(window, &session, raw.clone());
             return Err(AgentError::RequestFailed { raw });
         }
         if let Some((repo_root, _)) = self.reopen_snapshot(window)
             && super::landing_queue::is_held(&repo_root, &session)
         {
             history_guard.finish();
-            emit_event(&self.app, AppEvent::HistoryDone { session });
+            emit_event(&self.app, window, AppEvent::HistoryDone { session });
             return Ok(());
         }
         let Some(warm_guard) = WarmGuard::claim(&self.state, window, &session) else {
             let raw = "agent is still starting, try again".to_string();
             history_guard.fail();
-            self.emit_history_failed(&session, raw.clone());
+            self.emit_history_failed(window, &session, raw.clone());
             return Err(AgentError::RequestFailed { raw });
         };
         let result = self.ensure_live_claimed(window, &session).await;
@@ -678,13 +684,13 @@ impl AgentManager {
         match result {
             Ok(_) => {
                 history_guard.finish();
-                emit_event(&self.app, AppEvent::HistoryDone { session });
+                emit_event(&self.app, window, AppEvent::HistoryDone { session });
                 Ok(())
             }
             Err(error) => {
                 let raw = error.to_string();
                 history_guard.fail();
-                self.emit_history_failed(&session, raw.clone());
+                self.emit_history_failed(window, &session, raw.clone());
                 Err(error)
             }
         }
@@ -693,10 +699,11 @@ impl AgentManager {
     /// Emit one history failure bar with the classified hint. The guard
     /// already settled the single-flight; the partial replay stays in the
     /// transcript and a retry clears it on `HistoryPreparing`.
-    fn emit_history_failed(&self, session: &SessionKey, raw: String) {
+    fn emit_history_failed(&self, window: &str, session: &SessionKey, raw: String) {
         let hint = classify_error(&raw);
         emit_event(
             &self.app,
+            window,
             AppEvent::HistoryFailed {
                 session: session.clone(),
                 raw,
@@ -932,6 +939,7 @@ impl AgentManager {
                     push_sorted(&slot, &exit_app, &exit_window);
                     emit_event(
                         &exit_app,
+                        &exit_window,
                         AppEvent::AgentExited {
                             session: exit_key,
                             raw: raw.clone(),

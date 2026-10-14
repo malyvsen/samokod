@@ -2,7 +2,7 @@
 	"$schema": "../gen/schemas/samokod-schema.json",
 	"identifier": "default",
 	"description": "enables the default permissions",
-	"windows": ["main"],
+	"windows": ["main", "window-*"],
 	"permissions": [
 		"core:default",
 		"core:event:default",

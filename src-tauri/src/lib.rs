@@ -21,10 +21,10 @@ mod worktrees;
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager, State, Window};
+use tauri::{AppHandle, Manager, State, WebviewWindowBuilder, Window};
 use tauri_plugin_log::{Target, TargetKind};
 
-use crate::agent::window_label;
+use crate::agent::{allocate_window_label, window_label};
 
 use crate::agent::AgentManager;
 use crate::prefs::{load_prefs, record_open, save_prefs};
@@ -280,6 +280,57 @@ async fn load_history(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn new_window(app: AppHandle) -> Result<String, String> {
+    create_window(&app)
+}
+
+#[tauri::command]
+fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(&label) else {
+        return Err(format!("no such window: {label}"));
+    };
+    window
+        .unminimize()
+        .and_then(|()| window.set_focus())
+        .map_err(|error| {
+            log::warn!("failed to focus window {label}: {error}");
+            format!("failed to focus window {label}: {error}")
+        })
+}
+
+#[tauri::command]
+fn list_open_repos(state: State<'_, AgentManager>) -> Vec<crate::types::OpenRepoEntry> {
+    state.list_open_repos()
+}
+
+/// Shared window factory: label `window-N`, same title, size, and min size
+/// as the `main` entry in `tauri.conf.json`, loading the same frontend.
+/// New windows land on the picker with empty backend state.
+fn create_window(app: &AppHandle) -> Result<String, String> {
+    let existing: Vec<String> = app.webview_windows().keys().cloned().collect();
+    let label = allocate_window_label(&existing);
+    let mut config = app
+        .config()
+        .app
+        .windows
+        .first()
+        .cloned()
+        .ok_or_else(|| "no window config".to_string())?;
+    config.label = label.clone();
+    WebviewWindowBuilder::from_config(app, &config)
+        .map_err(|error| {
+            log::warn!("failed to build window {label}: {error}");
+            format!("failed to build window {label}: {error}")
+        })?
+        .build()
+        .map_err(|error| {
+            log::warn!("failed to open window {label}: {error}");
+            format!("failed to open window {label}: {error}")
+        })?;
+    Ok(label)
+}
+
 fn log_level() -> log::LevelFilter {
     match std::env::var("SAMOKOD_LOG")
         .unwrap_or_default()
@@ -306,6 +357,11 @@ fn prefs_dir(app: &AppHandle) -> Result<PathBuf, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Err(error) = create_window(app) {
+                log::warn!("second instance failed to open window: {error}");
+            }
+        }))
         .setup(|app| {
             app.manage(AgentManager::new(app.handle().clone()));
             app.handle().plugin(
@@ -315,6 +371,15 @@ pub fn run() {
                     .build(),
             )?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let app = window.app_handle().clone();
+                let label = window.label().to_string();
+                if let Some(manager) = app.try_state::<AgentManager>() {
+                    manager.remove_window(&label);
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             get_prefs,
@@ -337,7 +402,10 @@ pub fn run() {
             set_global_config_option,
             save_attachment,
             warm_session,
-            load_history
+            load_history,
+            new_window,
+            focus_window,
+            list_open_repos
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

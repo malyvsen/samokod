@@ -541,7 +541,7 @@ impl AgentManager {
                     text.clone(),
                 )
                 .await?;
-                self.announce_first_prompt(&session, &text);
+                self.announce_first_prompt(window, &session, &text);
                 Ok(self.plans_update(window))
             }
         }
@@ -571,7 +571,7 @@ impl AgentManager {
         self.mark_prompted(window, &plan_name);
         self.start_turn(window, connection, session_id, key.clone(), text.clone())
             .await?;
-        self.announce_first_prompt(&key, &text);
+        self.announce_first_prompt(window, &key, &text);
         Ok(self.plans_update(window))
     }
 }
