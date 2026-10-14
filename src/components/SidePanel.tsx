@@ -1,5 +1,5 @@
+import type { TodoView } from "../bindings";
 import { doneCount, todoMark, todoRowClass } from "../todos";
-import type { TodoView } from "../types";
 
 export function SidePanel({ todos }: { todos: TodoView[] }) {
 	const done = doneCount(todos);

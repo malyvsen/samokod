@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { onAppEvent, planMdText } from "../api";
-import { type SessionKey, sameSession } from "../types";
+import type { SessionKey } from "../bindings";
+import { sameSession } from "../types";
 
 export function usePlanMd(
 	selectedKey: SessionKey | null,

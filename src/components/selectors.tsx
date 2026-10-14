@@ -2,16 +2,18 @@ import type {
 	ConfigOptionValueView,
 	ConfigOptionView,
 	RepoDefaults,
-} from "../types";
+} from "../bindings";
 import { useDropdown } from "./dropdown";
 
 export function pendingOptions(defaults: RepoDefaults): {
 	model: ConfigOptionView;
 	effort: ConfigOptionView;
 } {
+	const modelValue = defaults.model ?? null;
+	const effortValue = defaults.effort ?? null;
 	return {
 		model:
-			defaults.model === null
+			modelValue === null
 				? {
 						id: "model",
 						name: "Model",
@@ -22,12 +24,12 @@ export function pendingOptions(defaults: RepoDefaults): {
 				: {
 						id: "model",
 						name: "Model",
-						currentValue: defaults.model,
-						options: [{ value: defaults.model, name: defaults.model }],
+						currentValue: modelValue,
+						options: [{ value: modelValue, name: modelValue }],
 						category: "model",
 					},
 		effort:
-			defaults.effort === null
+			effortValue === null
 				? {
 						id: "effort",
 						name: "Effort",
@@ -38,8 +40,8 @@ export function pendingOptions(defaults: RepoDefaults): {
 				: {
 						id: "effort",
 						name: "Effort",
-						currentValue: defaults.effort,
-						options: [{ value: defaults.effort, name: defaults.effort }],
+						currentValue: effortValue,
+						options: [{ value: effortValue, name: effortValue }],
 						category: "thought_level",
 					},
 	};

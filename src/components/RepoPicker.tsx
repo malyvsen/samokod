@@ -1,4 +1,4 @@
-import type { RecentRepo } from "../types";
+import type { RecentRepo } from "../bindings";
 
 export function RepoPicker({
 	title,

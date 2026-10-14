@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
+import type { TodoStatus, TodoView } from "./bindings";
 import { doneCount, todoMark, todoRowClass } from "./todos";
-import type { TodoStatus, TodoView } from "./types";
 
 function todo(status: TodoStatus): TodoView {
 	return { content: status, status };

@@ -1,6 +1,7 @@
 import { useCallback, useReducer, useRef } from "react";
 import { assertNever } from "../assert";
-import type { AgentStatus, SessionKey } from "../types";
+import type { SessionKey } from "../bindings";
+import type { AgentStatus } from "../types";
 import { sessionKeyOf } from "../types";
 
 export interface QueuedMessage {

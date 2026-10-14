@@ -1,5 +1,5 @@
 import { Fragment } from "react";
-import type { PlanEntry, PlanPhase, SessionKey } from "../types";
+import type { Phase, PlanEntry, SessionKey } from "../bindings";
 import { PlanMenu } from "./plans/PlanMenu";
 import {
 	type AttentionKind,
@@ -240,8 +240,8 @@ function positionFor(
 	return "middle";
 }
 
-function groupByPhase(plans: PlanEntry[]): Map<PlanPhase, PlanEntry[]> {
-	const groups = new Map<PlanPhase, PlanEntry[]>();
+function groupByPhase(plans: PlanEntry[]): Map<Phase, PlanEntry[]> {
+	const groups = new Map<Phase, PlanEntry[]>();
 	for (const plan of plans) {
 		const list = groups.get(plan.phase);
 		if (list === undefined) {

@@ -1,4 +1,4 @@
-import type { TodoStatus, TodoView } from "./types";
+import type { TodoStatus, TodoView } from "./bindings";
 
 export function todoMark(status: TodoStatus): string {
 	if (status === "completed") return "x";

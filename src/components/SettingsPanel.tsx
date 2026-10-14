@@ -1,5 +1,5 @@
+import type { RepoDefaults } from "../bindings";
 import type { Chats } from "../sessions/store";
-import type { RepoDefaults } from "../types";
 import {
 	EffortPlaceholder,
 	OptionDropdown,

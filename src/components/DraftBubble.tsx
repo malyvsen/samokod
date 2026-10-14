@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import type { SessionKey } from "../types";
+import type { SessionKey } from "../bindings";
 import { attachmentHandlers } from "./attachments";
 import {
 	applyInitialText,

@@ -1,12 +1,12 @@
 import type {
+	Phase,
 	PlanEntry,
-	PlanPhase,
 	ProgressView,
 	SessionKey,
 	SessionRole,
-} from "../../types";
+} from "../../bindings";
 
-export const PHASES: PlanPhase[] = [
+export const PHASES: Phase[] = [
 	"scoping",
 	"executing",
 	"evergreening",
@@ -85,10 +85,11 @@ export function todoProgress(plan: PlanEntry): HeaderProgress | null {
 }
 
 function landingProgress(plan: PlanEntry): HeaderProgress {
-	if (plan.landing_progress === null) {
+	const progress = plan.landing_progress ?? null;
+	if (progress === null) {
 		return { done: 0, total: 0, etaSecs: null };
 	}
-	return toHeaderProgress(plan.landing_progress);
+	return toHeaderProgress(progress);
 }
 
 export function headerProgress(plan: PlanEntry): HeaderProgress | null {

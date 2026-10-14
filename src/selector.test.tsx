@@ -1,9 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
+import type { ConfigOptionView } from "./bindings";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { emptyChat } from "./sessions/store";
-import type { ConfigOptionView } from "./types";
 
 const standard: ConfigOptionView[] = [
 	{

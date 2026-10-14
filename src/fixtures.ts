@@ -1,12 +1,12 @@
 import type {
+	Phase,
 	PlanEntry,
-	PlanPhase,
 	ProgressView,
 	RepoDefaults,
 	SessionKey,
 	SessionRole,
 	SessionStatusView,
-} from "./types";
+} from "./bindings";
 
 export function testDefaults(
 	overrides: Partial<RepoDefaults> = {},
@@ -40,7 +40,7 @@ export function testStatus(
 
 export function testEntry(
 	name = "2026-09-25.10-54-59",
-	phase: PlanPhase = "scoping",
+	phase: Phase = "scoping",
 	title = "Parallel sessions",
 	has_plan_md = false,
 	manual = false,
@@ -82,7 +82,7 @@ export function testEntry(
 
 export function testEntryWith(
 	name: string,
-	phase: PlanPhase,
+	phase: Phase,
 	title: string,
 	has_plan_md: boolean,
 	statuses: SessionStatusView[],

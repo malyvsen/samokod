@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { loadHistory, warmSession } from "../api";
-import { type SessionKey, sessionKeyOf } from "../types";
+import type { SessionKey } from "../bindings";
+import { sessionKeyOf } from "../types";
 import type { Chats } from "./store";
 
 // Single owner for session start: empty or unknown keys load history once

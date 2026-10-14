@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
+import type { Phase, PlanEntry, SessionStatusView } from "../../bindings";
 import { testEntryWith, testStatus } from "../../fixtures";
-import type { PlanEntry, PlanPhase, SessionStatusView } from "../../types";
 import {
 	attentionFor,
 	attentionTitle,
@@ -17,7 +17,7 @@ import {
 
 function plan(
 	name: string,
-	phase: PlanPhase,
+	phase: Phase,
 	statuses: SessionStatusView[],
 ): PlanEntry {
 	return testEntryWith(name, phase, name, true, statuses);

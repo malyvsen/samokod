@@ -5,8 +5,8 @@ import type {
 	PlansUpdate,
 	SessionKey,
 	TodoView,
-	TranscriptItem,
-} from "../types";
+} from "../bindings";
+import type { TranscriptItem } from "../types";
 import { sessionKeyOf } from "../types";
 import { freezeBurst, type LiveStatus, liveForThought } from "./thoughts";
 

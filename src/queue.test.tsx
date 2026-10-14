@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { SessionKey } from "./bindings";
 import { QueuedBubbleList } from "./components/QueuedBubble";
 import {
 	testDefaults,
@@ -9,7 +10,6 @@ import {
 	testStatus,
 } from "./fixtures";
 import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
-import type { SessionKey } from "./types";
 
 vi.mock("./api", async () => {
 	const { api } = await import("./testHarness");
@@ -32,7 +32,7 @@ beforeEach(() => {
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
-		scopingPreview: null,
+		scoping_preview: null,
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
@@ -178,7 +178,7 @@ describe("message queue", () => {
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
-			scopingPreview: null,
+			scoping_preview: null,
 		}));
 		api.sendPrompt.mockReturnValue(new Promise(() => {}));
 		const user = await openChat(api, {
@@ -219,7 +219,7 @@ describe("message queue", () => {
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
-			scopingPreview: null,
+			scoping_preview: null,
 		}));
 		api.sendPrompt.mockReturnValue(new Promise(() => {}));
 		const user = await openChat(api, {

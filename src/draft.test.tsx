@@ -1,5 +1,6 @@
 import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { SessionKey } from "./bindings";
 import {
 	testDefaults,
 	testEntry,
@@ -8,7 +9,6 @@ import {
 	testStatus,
 } from "./fixtures";
 import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
-import type { SessionKey } from "./types";
 
 vi.mock("./api", async () => {
 	const { api } = await import("./testHarness");
@@ -33,7 +33,7 @@ beforeEach(() => {
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
-		scopingPreview: "TEMPLATE",
+		scoping_preview: "TEMPLATE",
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
@@ -131,7 +131,7 @@ describe("draft bubble in chat", () => {
 	});
 
 	test("send without preview shows one bubble", async () => {
-		const user = await openChat(api, { scopingPreview: null });
+		const user = await openChat(api, { scoping_preview: null });
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
 		await user.keyboard("hello{Enter}");
@@ -155,12 +155,12 @@ describe("draft bubble in chat", () => {
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
-			scopingPreview: session.plan === "aaa" ? "AAA-TEMPLATE" : "BBB-TEMPLATE",
+			scoping_preview: session.plan === "aaa" ? "AAA-TEMPLATE" : "BBB-TEMPLATE",
 		}));
 		const user = await openChat(api, {
 			plans,
 			selected: { plan: "aaa", role: "scoping" },
-			scopingPreview: "AAA-TEMPLATE",
+			scoping_preview: "AAA-TEMPLATE",
 		});
 		await screen.findByText("AAA-TEMPLATE");
 		await user.click(
@@ -180,7 +180,7 @@ describe("draft bubble in chat", () => {
 	});
 
 	test("replayed template never duplicates the preview", async () => {
-		await openChat(api, { scopingPreview: null });
+		await openChat(api, { scoping_preview: null });
 		emitAppEvent(api, { type: "history_preparing", session: testKey() });
 		emitAppEvent(api, { type: "history_begin", session: testKey() });
 		emitAppEvent(api, {
@@ -231,7 +231,7 @@ describe("draft bubble in chat", () => {
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
-			scopingPreview: null,
+			scoping_preview: null,
 		}));
 		const user = await openChat(api, {
 			plans,
@@ -266,7 +266,7 @@ describe("draft bubble in chat", () => {
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
-			scopingPreview: null,
+			scoping_preview: null,
 		}));
 		const user = await openChat(api, {
 			plans,
@@ -307,7 +307,7 @@ describe("draft bubble in chat", () => {
 			plans: after,
 			selected: session,
 			config_defaults: testDefaults(),
-			scopingPreview: null,
+			scoping_preview: null,
 		}));
 		const user = await openChat(api, {
 			plans: before,
@@ -334,7 +334,7 @@ describe("draft bubble in chat", () => {
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
-			scopingPreview: null,
+			scoping_preview: null,
 		}));
 		const user = await openChat(api, {
 			plans,
@@ -383,13 +383,13 @@ describe("draft bubble in chat", () => {
 			plans: [kept, fresh],
 			selected: { plan: "ccc", role: "scoping" },
 			config_defaults: testDefaults(),
-			scopingPreview: "TEMPLATE",
+			scoping_preview: "TEMPLATE",
 		}));
 		api.selectPlan.mockImplementation(async (session: SessionKey) => ({
 			plans: [kept, fresh],
 			selected: session,
 			config_defaults: testDefaults(),
-			scopingPreview: null,
+			scoping_preview: null,
 		}));
 		const user = await openChat(api, {
 			plans: [first],
@@ -418,12 +418,12 @@ describe("draft bubble in chat", () => {
 			plans: [first, fresh],
 			selected: { plan: "ccc", role: "scoping" },
 			config_defaults: testDefaults(),
-			scopingPreview: "TEMPLATE",
+			scoping_preview: "TEMPLATE",
 		});
 		const user = await openChat(api, {
 			plans: [first],
 			selected: { plan: "aaa", role: "scoping" },
-			scopingPreview: null,
+			scoping_preview: null,
 		});
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
@@ -461,12 +461,12 @@ describe("draft bubble in chat", () => {
 			plans,
 			selected: { plan: "bbb", role: "scoping" },
 			config_defaults: testDefaults(),
-			scopingPreview: null,
+			scoping_preview: null,
 		});
 		const user = await openChat(api, {
 			plans,
 			selected: { plan: "aaa", role: "scoping" },
-			scopingPreview: "AAA-TEMPLATE",
+			scoping_preview: "AAA-TEMPLATE",
 		});
 		expect(screen.getByText("AAA-TEMPLATE")).toBeInTheDocument();
 		await user.click(

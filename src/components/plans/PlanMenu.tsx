@@ -1,4 +1,4 @@
-import type { PlanEntry, SessionKey } from "../../types";
+import type { PlanEntry, SessionKey } from "../../bindings";
 import { useDropdown } from "../dropdown";
 
 export function PlanMenu({

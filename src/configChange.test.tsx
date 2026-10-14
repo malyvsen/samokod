@@ -1,8 +1,8 @@
 import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { ConfigOptionView } from "./bindings";
 import { testDefaults, testEntry } from "./fixtures";
 import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
-import type { ConfigOptionView } from "./types";
 
 vi.mock("./api", async () => {
 	const { api } = await import("./testHarness");
@@ -83,7 +83,7 @@ async function openChatWith(options: ConfigOptionView[]) {
 		plans: [testEntry(executingPlan, "executing", "Shiny", true)],
 		selected: executingKey,
 		config_defaults: testDefaults(),
-		scopingPreview: null,
+		scoping_preview: null,
 	});
 	const user = await openChat(api);
 	emitAppEvent(api, {

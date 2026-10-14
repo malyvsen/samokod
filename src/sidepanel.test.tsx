@@ -1,9 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { TodoView } from "./bindings";
 import { CommitsPanel, SidePanel } from "./components/SidePanel";
 import { testDefaults, testEntry, testEntryWith, testStatus } from "./fixtures";
 import { api, openChat, stubMatchMedia } from "./testHarness";
-import type { TodoView } from "./types";
 
 vi.mock("./api", async () => {
 	const { api } = await import("./testHarness");
@@ -26,7 +26,7 @@ beforeEach(() => {
 		plans: [testEntry()],
 		selected: { plan: "2026-09-25.10-54-59", role: "scoping" },
 		config_defaults: testDefaults(),
-		scopingPreview: null,
+		scoping_preview: null,
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
@@ -110,12 +110,12 @@ describe("landing sidebar", () => {
 			plans,
 			selected: { plan: executing.name, role: "executing" },
 			config_defaults: testDefaults(),
-			scopingPreview: null,
+			scoping_preview: null,
 		});
 		const user = await openChat(api, {
 			plans,
 			selected: { plan: landing.name, role: "landing" },
-			scopingPreview: null,
+			scoping_preview: null,
 		});
 		await screen.findByText("COMMITS");
 		expect(screen.getByText("abc plan work")).toBeInTheDocument();

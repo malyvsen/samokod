@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
+import type { AppEvent } from "../bindings";
 import { testKey } from "../fixtures";
-import { type AppEvent, sessionKeyOf } from "../types";
+import { sessionKeyOf } from "../types";
 import {
 	applySessionEvent,
 	type ChatState,
@@ -219,7 +220,7 @@ describe("scoping preview", () => {
 				plans: [],
 				selected: { plan: "renamed", role: "scoping" },
 				config_defaults: { model: null, effort: null },
-				scopingPreview: null,
+				scoping_preview: null,
 			},
 			false,
 		);

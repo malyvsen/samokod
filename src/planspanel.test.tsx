@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs";
 import { render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
+import type { PlanEntry } from "./bindings";
 import { PlansPanel } from "./components/PlansPanel";
 import { testEntryWith, testStatus } from "./fixtures";
-import type { PlanEntry } from "./types";
 
 const SECTIONS = [
 	"SCOPING",

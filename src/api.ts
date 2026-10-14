@@ -9,7 +9,7 @@ import type {
 	Prefs,
 	RepoInfo,
 	SessionKey,
-} from "./types";
+} from "./bindings";
 
 export function getPrefs(): Promise<Prefs> {
 	return invoke<Prefs>("get_prefs");

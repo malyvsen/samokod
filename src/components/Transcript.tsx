@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
 import { assertNever } from "../assert";
+import type {
+	PermissionOptionView,
+	PermissionView,
+	ToolLineView,
+	ToolStatus,
+} from "../bindings";
 import type { SessionStart } from "../sessions/store";
 import {
 	type LiveStatus,
@@ -7,13 +13,7 @@ import {
 	thinkingSeconds,
 } from "../sessions/thoughts";
 import { todoMark, todoRowClass } from "../todos";
-import type {
-	PermissionOptionView,
-	PermissionView,
-	ToolLineView,
-	ToolStatus,
-	TranscriptItem,
-} from "../types";
+import type { TranscriptItem } from "../types";
 import {
 	CollapseControl,
 	type CollapsibleKind,

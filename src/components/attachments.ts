@@ -1,6 +1,6 @@
 import type { ClipboardEvent, DragEvent } from "react";
 import { saveAttachment } from "../api";
-import type { SessionKey } from "../types";
+import type { SessionKey } from "../bindings";
 import { extractText, insertTextAtCaret } from "./editableText";
 
 // Mirrors the backend `MAX_BYTES`: the client pre-validates so oversize

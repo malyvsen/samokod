@@ -22,6 +22,15 @@ import {
 	validateRepo,
 } from "./api";
 import { reducedMotion, useAuroraMotion } from "./auroraMotion";
+import type {
+	AppEvent,
+	OpenRepoEntry,
+	PlanEntry,
+	PlansUpdate,
+	RecentRepo,
+	RepoDefaults,
+	SessionKey,
+} from "./bindings";
 import { DraftBubble } from "./components/DraftBubble";
 import { PlanMdPane } from "./components/PlanMdPane";
 import { PlansPanel } from "./components/PlansPanel";
@@ -66,17 +75,7 @@ import {
 	withScopingPreview,
 } from "./sessions/store";
 import { useThoughtTimers } from "./sessions/thoughts";
-import type {
-	AgentStatus,
-	AppEvent,
-	OpenRepoEntry,
-	PlanEntry,
-	PlansUpdate,
-	RecentRepo,
-	RepoDefaults,
-	SessionKey,
-	TranscriptItem,
-} from "./types";
+import type { AgentStatus, TranscriptItem } from "./types";
 import { sameSession, sessionKeyOf } from "./types";
 import "./App.css";
 
@@ -135,7 +134,7 @@ export function App() {
 			setSelectedKey(update.selected);
 			setConfigDefaults(update.config_defaults);
 			applyChats((current) =>
-				withScopingPreview(current, update.selected, update.scopingPreview),
+				withScopingPreview(current, update.selected, update.scoping_preview),
 			);
 		},
 		[applyChats],
@@ -149,7 +148,7 @@ export function App() {
 				setSelectedKey(followRename(update.plans, oldPlan, update.selected));
 			}
 			applyChats((current) =>
-				withScopingPreview(current, update.selected, update.scopingPreview),
+				withScopingPreview(current, update.selected, update.scoping_preview),
 			);
 		},
 		[applyChats],
@@ -264,7 +263,7 @@ export function App() {
 		getPrefs()
 			.then((prefs) => {
 				if (cancelled) return;
-				setRecent(prefs.recent);
+				setRecent(prefs.recent ?? []);
 			})
 			.catch((error: unknown) => {
 				console.warn("failed to load prefs", error);
@@ -412,7 +411,7 @@ export function App() {
 			applyPlans(opened);
 			setView({ kind: "chat" });
 			setPickerError(null);
-			setRecent((await getPrefs()).recent);
+			setRecent((await getPrefs()).recent ?? []);
 		} catch (error) {
 			if (isAlreadyOpenError(error)) {
 				setPickerError(

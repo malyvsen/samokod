@@ -2,8 +2,8 @@ import { act, render, screen } from "@testing-library/react";
 import type { UserEvent } from "@testing-library/user-event";
 import { userEvent } from "@testing-library/user-event";
 import { vi } from "vitest";
+import type { AppEvent, PlanEntry, SessionKey } from "./bindings";
 import { testDefaults, testEntry, testKey } from "./fixtures";
-import type { AppEvent, PlanEntry, SessionKey } from "./types";
 
 export const api = {
 	getPrefs: vi.fn(),
@@ -86,13 +86,13 @@ export async function openChat(
 	overrides: {
 		plans?: PlanEntry[];
 		selected?: SessionKey;
-		scopingPreview?: string | null;
+		scoping_preview?: string | null;
 	} = {},
 ): Promise<UserEvent> {
 	if (
 		overrides.plans !== undefined ||
 		overrides.selected !== undefined ||
-		overrides.scopingPreview !== undefined
+		overrides.scoping_preview !== undefined
 	) {
 		const plans = overrides.plans ?? [testEntry()];
 		apiMock.openRepo.mockResolvedValue({
@@ -101,9 +101,9 @@ export async function openChat(
 			plans,
 			selected: overrides.selected ?? testKey(plans[0]?.name ?? "a"),
 			config_defaults: testDefaults(),
-			scopingPreview:
-				overrides.scopingPreview !== undefined
-					? overrides.scopingPreview
+			scoping_preview:
+				overrides.scoping_preview !== undefined
+					? overrides.scoping_preview
 					: "TEMPLATE",
 		});
 	}

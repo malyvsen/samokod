@@ -1,7 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { SessionKey } from "../bindings";
 import { testKey } from "../fixtures";
-import type { SessionKey, TranscriptItem } from "../types";
+import type { TranscriptItem } from "../types";
 import { type ChatState, emptyChat } from "./store";
 import {
 	BURST_SILENCE_MS,

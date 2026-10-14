@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import type { SessionKey, TranscriptItem } from "../types";
+import type { SessionKey } from "../bindings";
+import type { TranscriptItem } from "../types";
 import type { ChatState } from "./store";
 
 export type LiveStatus =

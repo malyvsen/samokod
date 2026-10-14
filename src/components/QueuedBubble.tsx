@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef } from "react";
+import type { SessionKey } from "../bindings";
 import type { QueuedMessage, QueueMoveDirection } from "../sessions/queue";
-import type { SessionKey } from "../types";
 import { attachmentHandlers } from "./attachments";
 import { CollapseControl, isLongMessage, useCollapsed } from "./collapsible";
 import {

@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
-import { type SessionKey, sessionKeyOf } from "../types";
+import type { SessionKey } from "../bindings";
+import { sessionKeyOf } from "../types";
 import type { Chats } from "./store";
 
 export function hasSentUserMessage(chats: Chats, key: SessionKey): boolean {
