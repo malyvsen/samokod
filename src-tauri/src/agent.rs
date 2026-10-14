@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::awake;
 use crate::opencode;
@@ -114,6 +114,22 @@ impl BackendState {
             self.recompute_awake();
         }
         existed
+    }
+
+    /// Owner of a canonical repo path excluding the caller. Pure.
+    pub(crate) fn owner_of(&self, caller: &str, canonical: &str) -> Option<String> {
+        for (label, window) in &self.windows {
+            if label == caller {
+                continue;
+            }
+            let Some(root) = window.repo_root.as_ref() else {
+                continue;
+            };
+            if crate::repo::canonical_repo_path(&root.to_string_lossy()) == canonical {
+                return Some(label.clone());
+            }
+        }
+        None
     }
 }
 
@@ -384,9 +400,38 @@ impl AgentManager {
     ) -> Result<OpenRepoResult, AgentError> {
         plans::ensure_structure(&repo_root)?;
         crate::worktrees::prune(&repo_root)?;
+        // Same-repo-once gate: claim the canonical path under the same
+        // lock that guards window state. Another live owner keeps the
+        // repo; the caller stays on the picker while the owner focuses.
+        let canonical = crate::repo::canonical_repo_path(&repo_root.to_string_lossy());
+        if let Some(owner) =
+            lock_backend(&self.state).and_then(|backend| backend.owner_of(window, &canonical))
+        {
+            if let Some(owner_window) = self.app.get_webview_window(&owner) {
+                let _ = owner_window.unminimize();
+                let _ = owner_window.set_focus();
+            }
+            return Err(AgentError::AlreadyOpen {
+                path: canonical,
+                window: owner,
+            });
+        }
         self.clear_sessions(window);
         {
             let mut backend = lock_backend(&self.state).expect("state poisoned");
+            // Re-check under the claiming lock so concurrent opens cannot
+            // both pass the fast path above.
+            if let Some(owner) = backend.owner_of(window, &canonical) {
+                drop(backend);
+                if let Some(owner_window) = self.app.get_webview_window(&owner) {
+                    let _ = owner_window.unminimize();
+                    let _ = owner_window.set_focus();
+                }
+                return Err(AgentError::AlreadyOpen {
+                    path: canonical,
+                    window: owner,
+                });
+            }
             let state = backend.ensure_window(window);
             state.repo_root = Some(repo_root.clone());
             state.checkout_branch =
@@ -1541,6 +1586,47 @@ mod tests {
                     window: "window-2".to_string(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn double_open_finds_live_owner() {
+        let mut backend = BackendState::default();
+        backend.ensure_window("window-1").repo_root = Some(PathBuf::from("/repo"));
+        assert_eq!(
+            backend.owner_of("window-2", "/repo"),
+            Some("window-1".to_string())
+        );
+        // Same window never owns against itself.
+        assert_eq!(backend.owner_of("window-1", "/repo"), None);
+        // Empty windows own nothing.
+        assert_eq!(
+            backend.owner_of("window-3", "/repo"),
+            Some("window-1".to_string())
+        );
+    }
+
+    #[test]
+    fn reopen_after_close_releases_owner() {
+        let mut backend = BackendState::default();
+        backend.ensure_window("window-1").repo_root = Some(PathBuf::from("/repo"));
+        assert!(backend.remove_window("window-1"));
+        assert_eq!(backend.owner_of("window-2", "/repo"), None);
+        backend.ensure_window("window-2").repo_root = Some(PathBuf::from("/repo"));
+        assert_eq!(
+            backend.owner_of("window-1", "/repo"),
+            Some("window-2".to_string())
+        );
+    }
+
+    #[test]
+    fn owner_check_normalizes_trailing_slashes() {
+        let mut backend = BackendState::default();
+        backend.ensure_window("window-1").repo_root = Some(PathBuf::from("/repo"));
+        let canonical = crate::repo::canonical_repo_path("/repo/");
+        assert_eq!(
+            backend.owner_of("window-2", &canonical),
+            Some("window-1".to_string())
         );
     }
 

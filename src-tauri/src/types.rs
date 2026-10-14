@@ -6,6 +6,8 @@ use crate::plans::PlanError;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum AgentError {
+    #[error("already open: {path}")]
+    AlreadyOpen { path: String, window: String },
     #[error("opencode binary not found. Install it with: npm install -g opencode-ai")]
     MissingBinary,
     #[error("agent exited: {raw}")]
