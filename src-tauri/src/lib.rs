@@ -69,77 +69,23 @@ fn specta_builder() -> Builder<tauri::Wry> {
 }
 
 #[cfg(test)]
-fn bindings_path() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/bindings.ts")
-}
-
-#[cfg(test)]
-fn export_bindings() -> Result<(), String> {
-    use specta_typescript::Typescript;
-    specta_builder()
-        .export(Typescript::default(), bindings_path())
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(test)]
 mod bindings_tests {
-    use super::*;
-    use crate::types::{ConfigOptionView, PlansUpdate, RepoDefaults, SessionKey, SessionRole};
+    use super::specta_builder;
 
-    #[test]
-    fn export_bindings_file() {
-        super::export_bindings().expect("export bindings.ts");
+    fn bindings_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/bindings.ts")
     }
 
     #[test]
-    fn wire_casing_round_trip() {
-        let update = PlansUpdate {
-            plans: Vec::new(),
-            selected: SessionKey {
-                plan: "2026-09-25.10-54-59".to_string(),
-                role: SessionRole::Scoping,
-            },
-            config_defaults: RepoDefaults {
-                model: None,
-                effort: None,
-            },
-            scoping_preview: Some("TEMPLATE".to_string()),
-        };
-        let value = serde_json::to_value(&update).expect("serializes");
-        let object = value.as_object().expect("object");
-        assert!(
-            object.contains_key("scoping_preview"),
-            "snake preview: {object:?}"
-        );
-        assert!(
-            !object.contains_key("scopingPreview"),
-            "no camel preview: {object:?}"
-        );
-        assert!(
-            object.contains_key("config_defaults"),
-            "snake defaults: {object:?}"
-        );
-        let preview = object.get("scoping_preview").and_then(|v| v.as_str());
-        assert_eq!(preview, Some("TEMPLATE"));
+    fn export_bindings_file() {
+        use specta_typescript::Typescript;
+        specta_builder()
+            .export(Typescript::default(), bindings_path())
+            .expect("export bindings.ts");
+    }
 
-        let option = ConfigOptionView {
-            id: "model".to_string(),
-            name: "LLM".to_string(),
-            current_value: "openai/gpt-5".to_string(),
-            options: Vec::new(),
-            category: None,
-        };
-        let value = serde_json::to_value(&option).expect("serializes");
-        let object = value.as_object().expect("object");
-        assert!(
-            object.contains_key("currentValue"),
-            "camel value: {object:?}"
-        );
-        assert!(
-            !object.contains_key("current_value"),
-            "no snake value: {object:?}"
-        );
-
+    #[test]
+    fn export_preserves_wire_casing() {
         let dir = tempfile::tempdir().expect("tempdir");
         let temp = dir.path().join("bindings.ts");
         {

@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import type { SessionKey } from "./bindings";
+import type { OpenRepoResult, PlansUpdate, SessionKey } from "./bindings";
 import {
 	testDefaults,
 	testEntry,
@@ -27,14 +27,15 @@ beforeEach(() => {
 		recent: [{ path: "/repo" }],
 	});
 	api.validateRepo.mockResolvedValue({ root: "/repo", branch: "feature" });
-	api.openRepo.mockResolvedValue({
+	const opened: OpenRepoResult = {
 		repo_root: "/repo",
 		branch: "feature",
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
 		scoping_preview: "TEMPLATE",
-	});
+	};
+	api.openRepo.mockResolvedValue(opened);
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
 	api.sendPrompt.mockResolvedValue(undefined);
@@ -151,12 +152,15 @@ describe("draft bubble in chat", () => {
 			testStatus("scoping"),
 		]);
 		const plans = [first, second];
-		api.selectPlan.mockImplementation(async (session: SessionKey) => ({
-			plans,
-			selected: session,
-			config_defaults: testDefaults(),
-			scoping_preview: session.plan === "aaa" ? "AAA-TEMPLATE" : "BBB-TEMPLATE",
-		}));
+		api.selectPlan.mockImplementation(
+			async (session: SessionKey): Promise<PlansUpdate> => ({
+				plans,
+				selected: session,
+				config_defaults: testDefaults(),
+				scoping_preview:
+					session.plan === "aaa" ? "AAA-TEMPLATE" : "BBB-TEMPLATE",
+			}),
+		);
 		const user = await openChat(api, {
 			plans,
 			selected: { plan: "aaa", role: "scoping" },
@@ -414,12 +418,13 @@ describe("draft bubble in chat", () => {
 		const fresh = testEntryWith("ccc", "scoping", "Untitled", false, [
 			testStatus("scoping"),
 		]);
-		api.createPlan.mockResolvedValue({
+		const created: PlansUpdate = {
 			plans: [first, fresh],
 			selected: { plan: "ccc", role: "scoping" },
 			config_defaults: testDefaults(),
 			scoping_preview: "TEMPLATE",
-		});
+		};
+		api.createPlan.mockResolvedValue(created);
 		const user = await openChat(api, {
 			plans: [first],
 			selected: { plan: "aaa", role: "scoping" },

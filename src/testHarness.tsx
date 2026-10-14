@@ -2,7 +2,12 @@ import { act, render, screen } from "@testing-library/react";
 import type { UserEvent } from "@testing-library/user-event";
 import { userEvent } from "@testing-library/user-event";
 import { vi } from "vitest";
-import type { AppEvent, PlanEntry, SessionKey } from "./bindings";
+import type {
+	AppEvent,
+	OpenRepoEntry,
+	PlanEntry,
+	SessionKey,
+} from "./bindings";
 import { testDefaults, testEntry, testKey } from "./fixtures";
 
 export const api = {
@@ -26,7 +31,7 @@ export const api = {
 	loadHistory: vi.fn(),
 	planMdText: vi.fn(async () => null as string | null),
 	onAppEvent: vi.fn(() => () => {}),
-	listOpenRepos: vi.fn(async () => [] as { path: string; window: string }[]),
+	listOpenRepos: vi.fn(async () => [] as OpenRepoEntry[]),
 	focusWindow: vi.fn(async () => {}),
 	newWindow: vi.fn(async () => "window-1"),
 };

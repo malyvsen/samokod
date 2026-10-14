@@ -9,7 +9,7 @@ import {
 	carryHistory,
 	emptyChat,
 	updateEntry,
-	withScopingPreview,
+	withScopingLead,
 } from "./store";
 
 const KEY_ID = sessionKeyOf(testKey());
@@ -164,15 +164,15 @@ describe("history events", () => {
 	});
 });
 
-describe("scoping preview", () => {
-	test("empty chat starts with no preview", () => {
-		expect(emptyChat().scopingPreview).toBeNull();
+describe("scoping lead", () => {
+	test("empty chat starts with no lead", () => {
+		expect(emptyChat().scopingLead).toBeNull();
 	});
 
-	test("history_begin preserves scopingPreview while keeping the transcript", () => {
+	test("history_begin preserves lead while keeping the transcript", () => {
 		let chats = updateEntry(withChat(), testKey(), (chat) => ({
 			...chat,
-			scopingPreview: "TEMPLATE",
+			scopingLead: "TEMPLATE",
 			transcript: [{ kind: "user", id: "u1", text: "hello" }],
 		}));
 		chats = applySessionEvent(chats, {
@@ -180,15 +180,15 @@ describe("scoping preview", () => {
 			session: testKey(),
 		});
 		const chat = chatOf(chats);
-		expect(chat.scopingPreview).toBe("TEMPLATE");
+		expect(chat.scopingLead).toBe("TEMPLATE");
 		expect(chat.transcript).toHaveLength(1);
 		expect(chat.transcript[0]).toMatchObject({ kind: "user", text: "hello" });
 	});
 
-	test("fresh-plan preparing then done preserves preview without begin", () => {
+	test("fresh-plan preparing then done preserves lead without begin", () => {
 		let chats = updateEntry(withChat(), testKey(), (chat) => ({
 			...chat,
-			scopingPreview: "TEMPLATE",
+			scopingLead: "TEMPLATE",
 		}));
 		chats = applySessionEvent(chats, {
 			type: "history_preparing",
@@ -198,21 +198,21 @@ describe("scoping preview", () => {
 			type: "history_done",
 			session: testKey(),
 		});
-		expect(chatOf(chats).scopingPreview).toBe("TEMPLATE");
+		expect(chatOf(chats).scopingLead).toBe("TEMPLATE");
 	});
 
-	test("response preview seeds once and sticks", () => {
-		const seeded = withScopingPreview({}, testKey(), null);
-		expect(chatOf(seeded).scopingPreview).toBeNull();
-		const shown = withScopingPreview(withChat(), testKey(), "TEMPLATE");
-		expect(chatOf(shown).scopingPreview).toBe("TEMPLATE");
-		expect(withScopingPreview(shown, testKey(), "TEMPLATE")).toBe(shown);
-		expect(withScopingPreview(shown, testKey(), null)).toBe(shown);
-		expect(withScopingPreview(shown, testKey(), "NEXT")).toBe(shown);
+	test("response lead seeds once and sticks", () => {
+		const seeded = withScopingLead({}, testKey(), null);
+		expect(chatOf(seeded).scopingLead).toBeNull();
+		const shown = withScopingLead(withChat(), testKey(), "TEMPLATE");
+		expect(chatOf(shown).scopingLead).toBe("TEMPLATE");
+		expect(withScopingLead(shown, testKey(), "TEMPLATE")).toBe(shown);
+		expect(withScopingLead(shown, testKey(), null)).toBe(shown);
+		expect(withScopingLead(shown, testKey(), "NEXT")).toBe(shown);
 	});
 
-	test("carried history drops the preview on rename", () => {
-		const before = withScopingPreview(withChat(), testKey(), "TEMPLATE");
+	test("carried history drops the lead on rename", () => {
+		const before = withScopingLead(withChat(), testKey(), "TEMPLATE");
 		const after = carryHistory(
 			before,
 			testKey(),
@@ -227,7 +227,7 @@ describe("scoping preview", () => {
 		expect(after[sessionKeyOf(testKey())]).toBeUndefined();
 		const carried =
 			after[sessionKeyOf({ plan: "renamed", role: "scoping" })] ?? emptyChat();
-		expect(carried.scopingPreview).toBeNull();
+		expect(carried.scopingLead).toBeNull();
 	});
 });
 

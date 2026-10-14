@@ -1,4 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
 	AppEvent,
@@ -10,112 +9,126 @@ import type {
 	RepoInfo,
 	SessionKey,
 } from "./bindings";
+import { commands } from "./bindings";
+
+type CommandResult<T> =
+	| { status: "ok"; data: T }
+	| { status: "error"; error: string };
+
+async function unwrap<T>(result: Promise<CommandResult<T>>): Promise<T> {
+	const settled = await result;
+	if (settled.status === "ok") return settled.data;
+	throw settled.error;
+}
 
 export function getPrefs(): Promise<Prefs> {
-	return invoke<Prefs>("get_prefs");
+	return unwrap(commands.getPrefs());
 }
 
 export function validateRepo(path: string): Promise<RepoInfo> {
-	return invoke("validate_repo_path", { path });
+	return unwrap(commands.validateRepoPath(path));
 }
 
 export function openRepo(path: string): Promise<OpenRepoResult> {
-	return invoke<OpenRepoResult>("open_repo", { path });
+	return unwrap(commands.openRepo(path));
 }
 
 export function refreshBranch(): Promise<string> {
-	return invoke<string>("refresh_branch");
+	return unwrap(commands.refreshBranch());
 }
 
 export function createPlan(draft: string | null): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("create_plan", { draft });
+	return unwrap(commands.createPlan(draft));
 }
 
 export function executePlan(session: SessionKey): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("execute_plan", { session });
+	return unwrap(commands.executePlan(session));
 }
 
 export function cancelPlan(session: SessionKey): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("cancel_plan", { session });
+	return unwrap(commands.cancelPlan(session));
 }
 
 export function selectPlan(
 	session: SessionKey,
 	draft: string | null,
 ): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("select_plan", { session, draft });
+	return unwrap(commands.selectPlan(session, draft));
 }
 
 export function setPlanMode(
 	plan: string,
 	manual: boolean,
 ): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("set_plan_mode", { plan, manual });
+	return unwrap(commands.setPlanMode(plan, manual));
 }
 
 export function setPlanEvergreen(
 	plan: string,
 	evergreen: boolean,
 ): Promise<PlansUpdate> {
-	return invoke<PlansUpdate>("set_plan_evergreen", { plan, evergreen });
+	return unwrap(commands.setPlanEvergreen(plan, evergreen));
 }
 
-export function sendPrompt(session: SessionKey, text: string): Promise<void> {
-	return invoke("send_prompt", { session, text });
+export async function sendPrompt(
+	session: SessionKey,
+	text: string,
+): Promise<void> {
+	await unwrap(commands.sendPrompt(session, text));
 }
 
 export function saveAttachment(
 	session: SessionKey,
 	dataBase64: string,
 ): Promise<string> {
-	return invoke<string>("save_attachment", { session, dataBase64 });
+	return unwrap(commands.saveAttachment(session, dataBase64));
 }
 
 export function planMdText(session: SessionKey): Promise<string | null> {
-	return invoke<string | null>("plan_md_text", { session });
+	return unwrap(commands.planMdText(session));
 }
 
 export function retryLast(session: SessionKey): Promise<boolean> {
-	return invoke<boolean>("retry_last", { session });
+	return unwrap(commands.retryLast(session));
 }
 
-export function cancelTurn(session: SessionKey): Promise<void> {
-	return invoke("cancel_turn", { session });
+export async function cancelTurn(session: SessionKey): Promise<void> {
+	await unwrap(commands.cancelTurn(session));
 }
 
-export function answerPermission(
+export async function answerPermission(
 	session: SessionKey,
 	toolCallId: string,
 	optionId: string | null,
 ): Promise<void> {
-	return invoke("answer_permission", { session, toolCallId, optionId });
+	await unwrap(commands.answerPermission(session, toolCallId, optionId));
 }
 
 export function setGlobalConfigOption(
 	configId: string,
 	value: string,
 ): Promise<ConfigOptionView[]> {
-	return invoke("set_global_config_option", { configId, value });
+	return unwrap(commands.setGlobalConfigOption(configId, value));
 }
 
-export function warmSession(session: SessionKey): Promise<void> {
-	return invoke("warm_session", { session });
+export async function warmSession(session: SessionKey): Promise<void> {
+	await unwrap(commands.warmSession(session));
 }
 
-export function loadHistory(session: SessionKey): Promise<void> {
-	return invoke("load_history", { session });
+export async function loadHistory(session: SessionKey): Promise<void> {
+	await unwrap(commands.loadHistory(session));
 }
 
 export function listOpenRepos(): Promise<OpenRepoEntry[]> {
-	return invoke<OpenRepoEntry[]>("list_open_repos");
+	return commands.listOpenRepos();
 }
 
-export function focusWindow(label: string): Promise<void> {
-	return invoke("focus_window", { label });
+export async function focusWindow(label: string): Promise<void> {
+	await unwrap(commands.focusWindow(label));
 }
 
 export function newWindow(): Promise<string> {
-	return invoke<string>("new_window");
+	return unwrap(commands.newWindow());
 }
 
 export function onAppEvent(handler: (event: AppEvent) => void): () => void {

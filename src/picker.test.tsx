@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
+import type { RecentRepo } from "./bindings";
 import { RepoPicker } from "./components/RepoPicker";
 import { api, dialog, stubMatchMedia } from "./testHarness";
 
@@ -16,7 +17,7 @@ vi.mock("@tauri-apps/plugin-dialog", async () => {
 });
 
 function pickerProps(overrides: {
-	recent?: { path: string }[];
+	recent?: RecentRepo[];
 	error?: string | null;
 	openPaths?: Set<string>;
 	onFocusRepo?: (path: string) => void;

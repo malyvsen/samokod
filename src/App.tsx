@@ -72,7 +72,7 @@ import {
 	errorItem,
 	removeEntry,
 	updateEntry,
-	withScopingPreview,
+	withScopingLead,
 } from "./sessions/store";
 import { useThoughtTimers } from "./sessions/thoughts";
 import type { AgentStatus, TranscriptItem } from "./types";
@@ -134,7 +134,7 @@ export function App() {
 			setSelectedKey(update.selected);
 			setConfigDefaults(update.config_defaults);
 			applyChats((current) =>
-				withScopingPreview(current, update.selected, update.scoping_preview),
+				withScopingLead(current, update.selected, update.scoping_preview),
 			);
 		},
 		[applyChats],
@@ -148,7 +148,7 @@ export function App() {
 				setSelectedKey(followRename(update.plans, oldPlan, update.selected));
 			}
 			applyChats((current) =>
-				withScopingPreview(current, update.selected, update.scoping_preview),
+				withScopingLead(current, update.selected, update.scoping_preview),
 			);
 		},
 		[applyChats],
@@ -809,7 +809,7 @@ export function App() {
 							<div className="transcript" ref={scrollRef} onScroll={onScroll}>
 								<Transcript
 									items={transcript}
-									lead={chat?.scopingPreview ?? null}
+									lead={chat?.scopingLead ?? null}
 									start={chat?.start ?? null}
 									repoLabel={repoLabel}
 									onRetry={readOnly ? null : handleRetry}
