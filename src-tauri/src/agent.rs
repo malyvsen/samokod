@@ -25,13 +25,12 @@ mod warm;
 pub(crate) use session::LiveSession;
 
 #[derive(Default)]
-pub(crate) struct State {
+pub(crate) struct WindowState {
     sessions: HashMap<SessionKey, LiveSession>,
     current: Option<SessionKey>,
     repo_root: Option<PathBuf>,
     checkout_branch: String,
     branch_watch: Option<notify::RecommendedWatcher>,
-    awake: Option<awake::Guard>,
     /// Plans with a sent user prompt. Memory mirror of the `prompted`
     /// flag in each plan's `state.json`: the memory copy keeps the hot
     /// gate read lock-only, the disk copy survives restarts and travels
@@ -57,19 +56,44 @@ pub(crate) struct State {
     worktrees: HashMap<String, crate::worktrees::WorktreeRecord>,
 }
 
-impl State {
-    /// Working and the sleep lock move together. The guard is held while
-    /// any session works.
-    fn set_working(&mut self, key: &SessionKey, working: bool) {
-        if let Some(session) = self.sessions.get_mut(key) {
-            session.working = working;
-        }
-        if self.sessions.values().any(|session| session.working) {
+#[derive(Default)]
+pub(crate) struct BackendState {
+    windows: HashMap<String, WindowState>,
+    awake: Option<awake::Guard>,
+}
+
+impl BackendState {
+    /// Mutable per-window entry, created on first use. Keeps one short
+    /// critical section per access; callers never hold the guard across
+    /// await, spawn, or agent I/O.
+    pub(crate) fn ensure_window(&mut self, label: &str) -> &mut WindowState {
+        self.windows.entry(label.to_string()).or_default()
+    }
+
+    /// Recompute the global sleep guard as working-in-any-window. Runs
+    /// after every working-flag mutation.
+    fn recompute_awake(&mut self) {
+        let any_working = self
+            .windows
+            .values()
+            .flat_map(|window| window.sessions.values())
+            .any(|session| session.working);
+        if any_working {
             if self.awake.is_none() {
                 self.awake = awake::acquire();
             }
         } else {
             self.awake = None;
+        }
+    }
+}
+
+impl WindowState {
+    /// Working flag only; the global sleep guard recomputes from all
+    /// windows via `BackendState::recompute_awake`.
+    fn set_working(&mut self, key: &SessionKey, working: bool) {
+        if let Some(session) = self.sessions.get_mut(key) {
+            session.working = working;
         }
     }
 
@@ -85,9 +109,9 @@ impl State {
 
 /// Empty scoping session: no `plan.md`, no prompted flag (memory or
 /// disk), and no live last prompt, whether or not the directory exists.
-/// Takes `&State` (called under an existing lock or a snapshot; never
+/// Takes `&WindowState` (called under an existing lock or a snapshot; never
 /// locks itself).
-pub(crate) fn is_empty_scoping(state: &State, repo_root: &Path, name: &str) -> bool {
+pub(crate) fn is_empty_scoping(state: &WindowState, repo_root: &Path, name: &str) -> bool {
     let plan = plans::PlanRef {
         name: name.to_string(),
         phase: plans::Phase::Scoping,
@@ -122,7 +146,7 @@ pub(crate) fn is_empty_scoping(state: &State, repo_root: &Path, name: &str) -> b
 /// logged per the preserve-evidence rule), plus the `LiveSession` and
 /// `prompted` entry. Removes the single pending-map entry on match.
 /// Caller owns the lock.
-pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str, trigger: &str) {
+pub(crate) fn vanish_scoping(state: &mut WindowState, repo_root: &Path, name: &str, trigger: &str) {
     log::info!("vanishing empty scoping {name} on {trigger}");
     let plan = plans::PlanRef {
         name: name.to_string(),
@@ -153,7 +177,7 @@ pub(crate) fn vanish_scoping(state: &mut State, repo_root: &Path, name: &str, tr
 /// as `Untitled`). Returns true when kept; false means the caller should
 /// vanish it. Caller owns the lock; the pending entry stays diskless.
 pub(crate) fn keep_or_vanish_empty(
-    state: &mut State,
+    state: &mut WindowState,
     repo_root: &Path,
     prev: &SessionKey,
     draft: Option<String>,
@@ -180,7 +204,7 @@ pub(crate) fn keep_or_vanish_empty(
 /// with the trigger logged. Returns true when vanished. Caller owns the
 /// lock.
 pub(crate) fn abandon_empty_scoping(
-    state: &mut State,
+    state: &mut WindowState,
     repo_root: &Path,
     prev: &SessionKey,
     draft: Option<String>,
@@ -205,7 +229,7 @@ pub(crate) fn abandon_empty_scoping(
 /// so a gone plan yields no preview instead of an error. Reads the locked
 /// state plus disk.
 pub(crate) fn scoping_preview_for(
-    state: &State,
+    state: &WindowState,
     repo_root: &Path,
     session: &SessionKey,
 ) -> Option<String> {
@@ -264,16 +288,42 @@ pub(crate) fn plan_md_text_for(
 
 #[derive(Clone)]
 pub struct AgentManager {
-    state: Arc<Mutex<State>>,
+    state: Arc<Mutex<BackendState>>,
     app: AppHandle,
 }
 
 impl AgentManager {
     pub fn new(app: AppHandle) -> Self {
         Self {
-            state: Arc::new(Mutex::new(State::default())),
+            state: Arc::new(Mutex::new(BackendState::default())),
             app,
         }
+    }
+
+    /// Per-window read: short critical section, `None` when the window
+    /// has since closed.
+    pub(crate) fn with_window<R>(
+        &self,
+        label: &str,
+        f: impl FnOnce(&WindowState) -> R,
+    ) -> Option<R> {
+        let backend = lock_backend(&self.state)?;
+        let window = backend.windows.get(label)?;
+        Some(f(window))
+    }
+
+    /// Per-window mutation: creates the entry on first use, recomputes
+    /// the global sleep guard, and never holds across await or I/O.
+    pub(crate) fn with_window_mut<R>(
+        &self,
+        label: &str,
+        f: impl FnOnce(&mut WindowState) -> R,
+    ) -> Option<R> {
+        let mut backend = lock_backend(&self.state)?;
+        let window = backend.ensure_window(label);
+        let result = f(window);
+        backend.recompute_awake();
+        Some(result)
     }
 
     /// Open a repository: ensure the plan structure, prune stale worktree
@@ -282,12 +332,17 @@ impl AgentManager {
     /// first prompt, with transcripts and TODOs kept run-local; automatic
     /// plans that are already ready advance at once via the pump. With zero
     /// scoping dirs, reserves a pending session without touching disk.
-    pub async fn open_repo(&self, repo_root: PathBuf) -> Result<OpenRepoResult, AgentError> {
+    pub async fn open_repo(
+        &self,
+        window: &str,
+        repo_root: PathBuf,
+    ) -> Result<OpenRepoResult, AgentError> {
         plans::ensure_structure(&repo_root)?;
         crate::worktrees::prune(&repo_root)?;
-        self.clear_sessions();
+        self.clear_sessions(window);
         {
-            let mut state = self.state.lock().expect("state poisoned");
+            let mut backend = lock_backend(&self.state).expect("state poisoned");
+            let state = backend.ensure_window(window);
             state.repo_root = Some(repo_root.clone());
             state.checkout_branch =
                 crate::branch::current_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string());
@@ -324,10 +379,11 @@ impl AgentManager {
                     role: SessionRole::Scoping,
                 });
             }
+            backend.recompute_awake();
         }
-        self.watch_branch(&repo_root);
-        self.pump().await;
-        Ok(self.open_result())
+        self.watch_branch(window, &repo_root);
+        self.pump(window).await;
+        Ok(self.open_result(window))
     }
 
     /// Reserve a fresh scoping session without touching disk. Reuses the
@@ -336,26 +392,34 @@ impl AgentManager {
     /// inferred title and reserves a new one. The start flow owns liveness:
     /// empty keys load history, non-empty keys warm, so this path spawns
     /// neither. `draft` is the unsent text of `state.current` at call time.
-    pub async fn create_plan(&self, draft: Option<String>) -> Result<PlansUpdate, AgentError> {
-        let repo_root = self.current_repo().ok_or_else(|| AgentError::NoSession {
-            raw: "open a repository first".to_string(),
-        })?;
+    pub async fn create_plan(
+        &self,
+        window: &str,
+        draft: Option<String>,
+    ) -> Result<PlansUpdate, AgentError> {
+        let repo_root = self
+            .current_repo(window)
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
         {
-            let state = self.state.lock().expect("state poisoned");
+            let backend = lock_backend(&self.state).expect("state poisoned");
+            let state = backend.windows.get(window).expect("window poisoned");
             if let Some(current) = state.current.clone()
                 && current.role == SessionRole::Scoping
                 && state.pending_scoping.contains_key(&current.plan)
-                && is_empty_scoping(&state, &repo_root, &current.plan)
+                && is_empty_scoping(state, &repo_root, &current.plan)
                 && draft.as_deref().map(str::trim).unwrap_or("").is_empty()
             {
-                drop(state);
-                return Ok(self.plans_update());
+                drop(backend);
+                return Ok(self.plans_update(window));
             }
         }
-        match self.state.lock() {
-            Ok(mut state) => {
+        match lock_backend(&self.state) {
+            Some(mut backend) => {
+                let state = backend.ensure_window(window);
                 if let Some(prev) = state.current.clone() {
-                    abandon_empty_scoping(&mut state, &repo_root, &prev, draft, "create");
+                    abandon_empty_scoping(state, &repo_root, &prev, draft, "create");
                 }
                 let name = reserve_scoping_name(&repo_root, &state.pending_scoping);
                 state.pending_scoping.insert(name.clone(), None);
@@ -363,27 +427,28 @@ impl AgentManager {
                     plan: name,
                     role: SessionRole::Scoping,
                 });
+                backend.recompute_awake();
             }
-            Err(error) => {
-                log::warn!("failed to select new plan: {error}");
+            None => {
+                log::warn!("failed to select new plan: state poisoned");
             }
         }
-        Ok(self.plans_update())
+        Ok(self.plans_update(window))
     }
 
     /// Re-check the branch for the open repo. Failures keep the last value.
     /// A moved target re-resolves `ffable` and may unblock finishes or
     /// re-run a landing rebase, so a move pumps at once.
-    pub async fn refresh_branch(&self) -> Result<String, AgentError> {
-        let repo_root = lock_state(&self.state)
-            .and_then(|state| state.repo_root.clone())
+    pub async fn refresh_branch(&self, window: &str) -> Result<String, AgentError> {
+        let repo_root = lock_backend(&self.state)
+            .and_then(|backend| backend.windows.get(window)?.repo_root.clone())
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
         let branch =
             crate::branch::current_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string());
-        if self.set_branch(branch.clone()) {
-            self.pump().await;
+        if self.set_branch(window, branch.clone()) {
+            self.pump(window).await;
         }
         Ok(branch)
     }
@@ -391,9 +456,12 @@ impl AgentManager {
     /// Set the held branch and emit it, then refresh the plans list so
     /// `ffable` recomputes against the new live target.
     /// Returns true when it moved.
-    fn set_branch(&self, branch: String) -> bool {
-        let moved = match self.state.lock() {
-            Ok(mut state) => {
+    fn set_branch(&self, window: &str, branch: String) -> bool {
+        let moved = match lock_backend(&self.state) {
+            Some(mut backend) => {
+                let Some(state) = backend.windows.get_mut(window) else {
+                    return false;
+                };
                 if state.checkout_branch == branch {
                     false
                 } else {
@@ -401,14 +469,14 @@ impl AgentManager {
                     true
                 }
             }
-            Err(error) => {
-                log::warn!("failed to record branch change: {error}");
+            None => {
+                log::warn!("failed to record branch change: state poisoned");
                 false
             }
         };
         if moved {
             emit_event(&self.app, AppEvent::BranchChanged { branch });
-            self.push_plans();
+            self.push_plans(window);
         }
         moved
     }
@@ -418,16 +486,21 @@ impl AgentManager {
     /// fresh free. Branch moves also push a refreshed plans list so
     /// `ffable` recomputes against the new live target, then pump so a
     /// moved target unblocks finishes or re-runs a landing rebase.
-    fn watch_branch(&self, repo_root: &Path) {
+    fn watch_branch(&self, window: &str, repo_root: &Path) {
         let root = repo_root.to_path_buf();
+        let label = window.to_string();
         let state = Arc::clone(&self.state);
         let app = self.app.clone();
         let push_state = Arc::clone(&self.state);
         let push_app = self.app.clone();
         let pump_manager = self.clone();
+        let pump_label = label.clone();
         let watcher = crate::branch::watch_branch(root.clone(), move |branch| {
-            let moved = match state.lock() {
-                Ok(mut guard) => {
+            let moved = match lock_backend(&state) {
+                Some(mut backend) => {
+                    let Some(guard) = backend.windows.get_mut(&label) else {
+                        return;
+                    };
                     if guard.repo_root.as_ref() != Some(&root) || guard.checkout_branch == branch {
                         false
                     } else {
@@ -435,23 +508,23 @@ impl AgentManager {
                         true
                     }
                 }
-                Err(error) => {
-                    log::warn!("failed to record branch change: {error}");
+                None => {
+                    log::warn!("failed to record branch change: state poisoned");
                     false
                 }
             };
             if moved {
                 emit_event(&app, AppEvent::BranchChanged { branch });
-                plans_list::push_sorted(&push_state, &push_app);
-                pump_manager.spawn_pump();
+                plans_list::push_sorted(&push_state, &push_app, &label);
+                pump_manager.spawn_pump(&pump_label);
             }
         });
-        match self.state.lock() {
-            Ok(mut state) => {
-                state.branch_watch = watcher;
+        match lock_backend(&self.state) {
+            Some(mut backend) => {
+                backend.ensure_window(window).branch_watch = watcher;
             }
-            Err(error) => {
-                log::warn!("failed to hold branch watcher: {error}");
+            None => {
+                log::warn!("failed to hold branch watcher: state poisoned");
             }
         }
     }
@@ -459,20 +532,28 @@ impl AgentManager {
     /// Approve the scoping plan: move it to executing and start the
     /// executing agent. Thin over the shared transition core; the pump
     /// drives the same core automatically.
-    pub async fn execute_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
+    pub async fn execute_plan(
+        &self,
+        window: &str,
+        session: SessionKey,
+    ) -> Result<PlansUpdate, AgentError> {
         if session.role != SessionRole::Scoping {
             return Err(AgentError::RequestFailed {
                 raw: "no scoping plan to execute".to_string(),
             });
         }
-        self.transition(advance::Transition::Execute { plan: session.plan })
+        self.transition(window, advance::Transition::Execute { plan: session.plan })
             .await
     }
 
     /// Finish a plan via the shared transition core: a clean
     /// fast-forwardable executing or evergreening plan completes directly,
     /// a clean landing plan finishes the same way once it lands.
-    pub async fn finish_landing(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
+    pub async fn finish_landing(
+        &self,
+        window: &str,
+        session: SessionKey,
+    ) -> Result<PlansUpdate, AgentError> {
         let action = match session.role {
             SessionRole::Executing => advance::Transition::FinishExecuting { plan: session.plan },
             SessionRole::Evergreening => {
@@ -485,13 +566,17 @@ impl AgentManager {
                 });
             }
         };
-        self.transition(action).await
+        self.transition(window, action).await
     }
 
     /// Move a clean diverged executing or evergreening plan into the landing
     /// queue via the shared core. Move-only: explicit commands never spawn;
     /// the pump starts the head. Thin over `transition`.
-    pub async fn begin_landing(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
+    pub async fn begin_landing(
+        &self,
+        window: &str,
+        session: SessionKey,
+    ) -> Result<PlansUpdate, AgentError> {
         if !matches!(
             session.role,
             SessionRole::Executing | SessionRole::Evergreening
@@ -500,8 +585,11 @@ impl AgentManager {
                 raw: "no executing or evergreening plan to land".to_string(),
             });
         }
-        self.transition(advance::Transition::BeginLanding { plan: session.plan })
-            .await
+        self.transition(
+            window,
+            advance::Transition::BeginLanding { plan: session.plan },
+        )
+        .await
     }
 
     /// Cancel an active plan. An empty scoping session vanishes without a
@@ -509,17 +597,22 @@ impl AgentManager {
     /// force-removing the worktree and branch for executing and landing
     /// plans. The selection follows only when the cancelled plan is viewed,
     /// landing on the cancelled (now read-only) session.
-    pub async fn cancel_plan(&self, session: SessionKey) -> Result<PlansUpdate, AgentError> {
-        ensure_idle(&self.state, &session)?;
+    pub async fn cancel_plan(
+        &self,
+        window: &str,
+        session: SessionKey,
+    ) -> Result<PlansUpdate, AgentError> {
+        ensure_idle(&self.state, window, &session)?;
         let (repo_root, _) = self
-            .reopen_snapshot()
+            .reopen_snapshot(window)
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
         if session.role == SessionRole::Scoping {
-            let vanished = match self.state.lock() {
-                Ok(mut state) => {
-                    if abandon_empty_scoping(&mut state, &repo_root, &session, None, "cancel") {
+            let vanished = match lock_backend(&self.state) {
+                Some(mut backend) => {
+                    let state = backend.ensure_window(window);
+                    if abandon_empty_scoping(state, &repo_root, &session, None, "cancel") {
                         if plans_list::is_viewed(state.current.as_ref(), &session.plan) {
                             let checkout_branch = state.checkout_branch.clone();
                             let plans = plans_list::sorted_entries(
@@ -539,18 +632,20 @@ impl AgentManager {
                                 });
                             }
                         }
+                        backend.recompute_awake();
                         true
                     } else {
+                        backend.recompute_awake();
                         false
                     }
                 }
-                Err(error) => {
-                    log::warn!("failed to check empty session: {error}");
+                None => {
+                    log::warn!("failed to check empty session: state poisoned");
                     false
                 }
             };
             if vanished {
-                return Ok(self.plans_update());
+                return Ok(self.plans_update(window));
             }
         }
         let phase = session::role_phase(session.role);
@@ -567,23 +662,24 @@ impl AgentManager {
             phase,
             plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Landing
         ) {
-            self.remove_worktree(&repo_root, &from.name, true)?;
+            self.remove_worktree(window, &repo_root, &from.name, true)?;
         }
         let next = plans::cancel(&repo_root, &from)?;
         if phase == plans::Phase::Scoping {
-            self.drop_live(&session).await;
+            self.drop_live(window, &session).await;
         } else {
-            self.drop_plan_lives(&from.name).await;
+            self.drop_plan_lives(window, &from.name).await;
         }
-        self.carry_prompted(&from.name, &next.name);
+        self.carry_prompted(window, &from.name, &next.name);
         self.select_if_viewed(
+            window,
             &session.plan,
             SessionKey {
                 plan: next.name,
                 role: session.role,
             },
         );
-        Ok(self.plans_update())
+        Ok(self.plans_update(window))
     }
 
     /// Flip one plan between automatic and manual mode. Persists `manual`
@@ -592,10 +688,11 @@ impl AgentManager {
     /// to A pumps at once so a held plan joins the flow immediately.
     pub async fn set_plan_mode(
         &self,
+        window: &str,
         plan: String,
         manual: bool,
     ) -> Result<PlansUpdate, AgentError> {
-        self.update_plan_state(plan, |state| state.manual = manual)
+        self.update_plan_state(window, plan, |state| state.manual = manual)
             .await
     }
 
@@ -605,10 +702,11 @@ impl AgentManager {
     /// while paused never fires: the held plan joins the flow on resume.
     pub async fn set_plan_evergreen(
         &self,
+        window: &str,
         plan: String,
         evergreen: bool,
     ) -> Result<PlansUpdate, AgentError> {
-        self.update_plan_state(plan, |state| state.evergreen = evergreen)
+        self.update_plan_state(window, plan, |state| state.evergreen = evergreen)
             .await
     }
 
@@ -617,11 +715,12 @@ impl AgentManager {
     /// is on auto, then the refreshed list.
     async fn update_plan_state(
         &self,
+        window: &str,
         plan: String,
         mutate: impl FnOnce(&mut plans::PlanState),
     ) -> Result<PlansUpdate, AgentError> {
         let (repo_root, _) = self
-            .reopen_snapshot()
+            .reopen_snapshot(window)
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
@@ -634,9 +733,9 @@ impl AgentManager {
         mutate(&mut state);
         plans::store_state(&plan_dir, &state);
         if !state.manual {
-            self.pump().await;
+            self.pump(window).await;
         }
-        Ok(self.plans_update())
+        Ok(self.plans_update(window))
     }
 
     /// Select one session, keeping a previously-selected empty scoping
@@ -647,16 +746,18 @@ impl AgentManager {
     /// empty previous session is never working.
     pub async fn select_plan(
         &self,
+        window: &str,
         session: SessionKey,
         draft: Option<String>,
     ) -> Result<PlansUpdate, AgentError> {
         let (repo_root, _) = self
-            .reopen_snapshot()
+            .reopen_snapshot(window)
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
         {
-            let state = self.state.lock().expect("state poisoned");
+            let backend = lock_backend(&self.state).expect("state poisoned");
+            let state = backend.windows.get(window).expect("window gone");
             // Name-based across all phases: finished plans live under
             // `completed/` or `cancelled/` and stay selectable read-only.
             // Only names missing everywhere report "plan is gone".
@@ -669,28 +770,35 @@ impl AgentManager {
                 });
             }
         }
-        match self.state.lock() {
-            Ok(mut state) => {
+        match lock_backend(&self.state) {
+            Some(mut backend) => {
+                let state = backend.ensure_window(window);
                 if let Some(prev) = state.current.clone()
                     && prev != session
                 {
-                    abandon_empty_scoping(&mut state, &repo_root, &prev, draft, "select");
+                    abandon_empty_scoping(state, &repo_root, &prev, draft, "select");
                 }
                 state.current = Some(session);
+                backend.recompute_awake();
             }
-            Err(error) => {
-                log::warn!("failed to select session: {error}");
+            None => {
+                log::warn!("failed to select session: state poisoned");
             }
         }
-        Ok(self.plans_update())
+        Ok(self.plans_update(window))
     }
 
     /// Live `plan.md` text for one session's plan, or `None` when the file
     /// does not exist yet (fresh scoping, pending, or bare). Searches every
     /// phase by name since the file travels with renames; read-only, never
     /// creates directories. Pure file read except the repo-root snapshot.
-    pub fn plan_md_text(&self, session: SessionKey) -> Result<Option<String>, AgentError> {
-        let Some(repo_root) = lock_state(&self.state).and_then(|state| state.repo_root.clone())
+    pub fn plan_md_text(
+        &self,
+        window: &str,
+        session: SessionKey,
+    ) -> Result<Option<String>, AgentError> {
+        let Some(repo_root) = lock_backend(&self.state)
+            .and_then(|backend| backend.windows.get(window)?.repo_root.clone())
         else {
             return Err(AgentError::NoSession {
                 raw: "open a repository first".to_string(),
@@ -704,14 +812,18 @@ impl AgentManager {
     /// a branch switch mid-flight retargets in-flight plans.
     fn worktree_status_for(
         &self,
+        window: &str,
         repo_root: &Path,
         plan_name: &str,
     ) -> Result<WorktreeLive, AgentError> {
-        let (record, target_branch) = match lock_state(&self.state) {
-            Some(state) => (
-                state.worktrees.get(plan_name).cloned(),
-                state.checkout_branch.clone(),
-            ),
+        let (record, target_branch) = match lock_backend(&self.state) {
+            Some(backend) => match backend.windows.get(window) {
+                Some(state) => (
+                    state.worktrees.get(plan_name).cloned(),
+                    state.checkout_branch.clone(),
+                ),
+                None => (None, String::new()),
+            },
             None => (None, String::new()),
         };
         let (path, worktree_branch) = match record {
@@ -736,16 +848,19 @@ impl AgentManager {
 
     /// Drop every live session a plan owns. Finishes and cancels land on
     /// history rows; the transcripts stay frontend-side.
-    async fn drop_plan_lives(&self, plan_name: &str) {
+    async fn drop_plan_lives(&self, window: &str, plan_name: &str) {
         for role in [
             SessionRole::Executing,
             SessionRole::Evergreening,
             SessionRole::Landing,
         ] {
-            self.drop_live(&SessionKey {
-                plan: plan_name.to_string(),
-                role,
-            })
+            self.drop_live(
+                window,
+                &SessionKey {
+                    plan: plan_name.to_string(),
+                    role,
+                },
+            )
             .await;
         }
     }
@@ -756,12 +871,19 @@ impl AgentManager {
     /// and branch so recovered plans still clean up.
     fn remove_worktree(
         &self,
+        window: &str,
         repo_root: &Path,
         plan_name: &str,
         force: bool,
     ) -> Result<(), AgentError> {
-        let record =
-            lock_state(&self.state).and_then(|state| state.worktrees.get(plan_name).cloned());
+        let record = lock_backend(&self.state).and_then(|backend| {
+            backend
+                .windows
+                .get(window)?
+                .worktrees
+                .get(plan_name)
+                .cloned()
+        });
         let (path, worktree_branch) = match record {
             Some(record) => (record.path, record.worktree_branch),
             None => (
@@ -770,7 +892,9 @@ impl AgentManager {
             ),
         };
         crate::worktrees::remove(repo_root, &path, &worktree_branch, force)?;
-        if let Some(mut state) = lock_state(&self.state) {
+        if let Some(mut backend) = lock_backend(&self.state)
+            && let Some(state) = backend.windows.get_mut(window)
+        {
             state.worktrees.remove(plan_name);
         }
         Ok(())
@@ -842,11 +966,20 @@ fn gate_landing(dirty: bool, ffable: bool, step: LandingStep) -> Result<(), Agen
 }
 
 /// Refuse plan transitions while the session's turn runs. A poisoned lock
-/// only logs, matching `lock_state`.
-fn ensure_idle(state: &Mutex<State>, key: &SessionKey) -> Result<(), AgentError> {
+/// only logs, matching `lock_backend`.
+fn ensure_idle(
+    state: &Mutex<BackendState>,
+    window: &str,
+    key: &SessionKey,
+) -> Result<(), AgentError> {
     match state.lock() {
-        Ok(state) => {
-            if state.is_working(key) {
+        Ok(backend) => {
+            let working = backend
+                .windows
+                .get(window)
+                .map(|win| win.is_working(key))
+                .unwrap_or(false);
+            if working {
                 return Err(AgentError::RequestFailed {
                     raw: "a turn is already running".to_string(),
                 });
@@ -868,9 +1001,14 @@ fn emit_event(app: &AppHandle, event: AppEvent) {
     }
 }
 
-/// Lock agent state. A poisoned mutex means a prior panic elsewhere; log it
-/// instead of silently dropping the update.
-fn lock_state(state: &Mutex<State>) -> Option<std::sync::MutexGuard<'_, State>> {
+/// Window label for a Tauri window. Pure.
+pub(crate) fn window_label(window: &tauri::Window) -> String {
+    window.label().to_string()
+}
+
+/// Lock backend state. A poisoned mutex means a prior panic elsewhere; log
+/// it instead of silently dropping the update.
+fn lock_backend(state: &Mutex<BackendState>) -> Option<std::sync::MutexGuard<'_, BackendState>> {
     match state.lock() {
         Ok(guard) => Some(guard),
         Err(error) => {
@@ -880,27 +1018,35 @@ fn lock_state(state: &Mutex<State>) -> Option<std::sync::MutexGuard<'_, State>> 
     }
 }
 
-fn set_working(state: &Mutex<State>, key: &SessionKey, working: bool) {
-    let Some(mut guard) = lock_state(state) else {
+fn set_working(state: &Mutex<BackendState>, window: &str, key: &SessionKey, working: bool) {
+    let Some(mut backend) = lock_backend(state) else {
         return;
     };
-    guard.set_working(key, working);
+    let Some(win) = backend.windows.get_mut(window) else {
+        return;
+    };
+    win.set_working(key, working);
+    backend.recompute_awake();
 }
 
-fn set_failed(state: &Mutex<State>, key: &SessionKey, failed: bool) {
-    let Some(mut guard) = lock_state(state) else {
+fn set_failed(state: &Mutex<BackendState>, window: &str, key: &SessionKey, failed: bool) {
+    let Some(mut backend) = lock_backend(state) else {
         return;
     };
-    if let Some(session) = guard.sessions.get_mut(key) {
+    if let Some(win) = backend.windows.get_mut(window)
+        && let Some(session) = win.sessions.get_mut(key)
+    {
         session.failed = failed;
     }
 }
 
-fn set_approval(state: &Mutex<State>, key: &SessionKey, approval: bool) {
-    let Some(mut guard) = lock_state(state) else {
+fn set_approval(state: &Mutex<BackendState>, window: &str, key: &SessionKey, approval: bool) {
+    let Some(mut backend) = lock_backend(state) else {
         return;
     };
-    if let Some(session) = guard.sessions.get_mut(key) {
+    if let Some(win) = backend.windows.get_mut(window)
+        && let Some(session) = win.sessions.get_mut(key)
+    {
         session.approval = approval;
     }
 }
@@ -1015,40 +1161,43 @@ mod tests {
         }
     }
 
-    fn state_with_session() -> Mutex<State> {
-        let mut state = State::default();
+    fn state_with_session() -> Mutex<BackendState> {
+        let mut backend = BackendState::default();
         let key = test_key();
-        state.sessions.insert(
+        let win = backend.ensure_window("main");
+        win.sessions.insert(
             key.clone(),
             LiveSession::fresh(
                 ActivePlan::scoping("2026-09-25.10-54-59".to_string()),
                 crate::repo_state::RepoState::default(),
             ),
         );
-        state.current = Some(key);
-        Mutex::new(state)
+        win.current = Some(key);
+        Mutex::new(backend)
     }
 
     #[test]
     fn working_releases_awake_guard() {
         let state = state_with_session();
         let key = test_key();
-        set_working(&state, &key, true);
+        set_working(&state, "main", &key, true);
         {
             let guard = state.lock().expect("state poisoned");
-            assert!(guard.sessions.get(&key).expect("session").working);
+            let win = guard.windows.get("main").expect("window");
+            assert!(win.sessions.get(&key).expect("session").working);
         }
-        set_working(&state, &key, false);
+        set_working(&state, "main", &key, false);
         {
             let guard = state.lock().expect("state poisoned");
-            assert!(!guard.sessions.get(&key).expect("session").working);
+            let win = guard.windows.get("main").expect("window");
+            assert!(!win.sessions.get(&key).expect("session").working);
             assert!(guard.awake.is_none());
         }
     }
 
     #[test]
     fn working_holds_guard_while_any_session_runs() {
-        let state = Mutex::new(State::default());
+        let state = Mutex::new(BackendState::default());
         let first = SessionKey {
             plan: "a".to_string(),
             role: SessionRole::Scoping,
@@ -1059,14 +1208,15 @@ mod tests {
         };
         {
             let mut guard = state.lock().expect("state poisoned");
-            guard.sessions.insert(
+            let win = guard.ensure_window("main");
+            win.sessions.insert(
                 first.clone(),
                 LiveSession::fresh(
                     ActivePlan::scoping("a".to_string()),
                     crate::repo_state::RepoState::default(),
                 ),
             );
-            guard.sessions.insert(
+            win.sessions.insert(
                 second.clone(),
                 LiveSession::fresh(
                     ActivePlan::scoping("b".to_string()),
@@ -1074,14 +1224,14 @@ mod tests {
                 ),
             );
         }
-        set_working(&state, &first, true);
-        set_working(&state, &second, true);
-        set_working(&state, &first, false);
+        set_working(&state, "main", &first, true);
+        set_working(&state, "main", &second, true);
+        set_working(&state, "main", &first, false);
         {
             let guard = state.lock().expect("state poisoned");
             assert!(guard.awake.is_some());
         }
-        set_working(&state, &second, false);
+        set_working(&state, "main", &second, false);
         {
             let guard = state.lock().expect("state poisoned");
             assert!(guard.awake.is_none());
@@ -1092,21 +1242,23 @@ mod tests {
     fn failed_flag_tracks_turn_outcome() {
         let state = state_with_session();
         let key = test_key();
-        set_failed(&state, &key, true);
+        set_failed(&state, "main", &key, true);
         {
             let guard = state.lock().expect("state poisoned");
-            assert!(guard.sessions.get(&key).expect("session").failed);
+            let win = guard.windows.get("main").expect("window");
+            assert!(win.sessions.get(&key).expect("session").failed);
         }
-        set_failed(&state, &key, false);
+        set_failed(&state, "main", &key, false);
         {
             let guard = state.lock().expect("state poisoned");
-            assert!(!guard.sessions.get(&key).expect("session").failed);
+            let win = guard.windows.get("main").expect("window");
+            assert!(!win.sessions.get(&key).expect("session").failed);
         }
     }
 
     #[test]
     fn idle_gate_is_per_session() {
-        let state = Mutex::new(State::default());
+        let state = Mutex::new(BackendState::default());
         let first = SessionKey {
             plan: "a".to_string(),
             role: SessionRole::Scoping,
@@ -1117,8 +1269,9 @@ mod tests {
         };
         {
             let mut guard = state.lock().expect("state poisoned");
+            let win = guard.ensure_window("main");
             for (key, name) in [(&first, "a"), (&second, "b")] {
-                guard.sessions.insert(
+                win.sessions.insert(
                     key.clone(),
                     LiveSession::fresh(
                         ActivePlan::scoping(name.to_string()),
@@ -1127,9 +1280,108 @@ mod tests {
                 );
             }
         }
-        set_working(&state, &first, true);
-        assert!(ensure_idle(&state, &first).is_err());
-        assert!(ensure_idle(&state, &second).is_ok());
+        set_working(&state, "main", &first, true);
+        assert!(ensure_idle(&state, "main", &first).is_err());
+        assert!(ensure_idle(&state, "main", &second).is_ok());
+    }
+
+    #[test]
+    fn windows_hold_separate_repos_and_selections() {
+        let state = Mutex::new(BackendState::default());
+        {
+            let mut backend = state.lock().expect("state poisoned");
+            let a = backend.ensure_window("a");
+            a.repo_root = Some(PathBuf::from("/repo-a"));
+            a.current = Some(SessionKey {
+                plan: "plan-a".to_string(),
+                role: SessionRole::Scoping,
+            });
+            a.pending_scoping
+                .insert("plan-a".to_string(), Some("A".to_string()));
+            let b = backend.ensure_window("b");
+            b.repo_root = Some(PathBuf::from("/repo-b"));
+            b.current = Some(SessionKey {
+                plan: "plan-b".to_string(),
+                role: SessionRole::Scoping,
+            });
+            b.pending_scoping.insert("plan-b".to_string(), None);
+        }
+        let (repo_a, repo_b) = {
+            let backend = state.lock().expect("state poisoned");
+            (
+                backend.windows.get("a").expect("a").repo_root.clone(),
+                backend.windows.get("b").expect("b").repo_root.clone(),
+            )
+        };
+        assert_eq!(repo_a, Some(PathBuf::from("/repo-a")));
+        assert_eq!(repo_b, Some(PathBuf::from("/repo-b")));
+        // Clearing B must not clear A.
+        {
+            let mut backend = state.lock().expect("state poisoned");
+            if let Some(win) = backend.windows.get_mut("b") {
+                win.sessions.clear();
+                win.current = None;
+                win.pending_scoping.clear();
+                win.worktrees.clear();
+                win.clear_start_claims();
+            }
+            backend.recompute_awake();
+        }
+        {
+            let backend = state.lock().expect("state poisoned");
+            let a = backend.windows.get("a").expect("a");
+            assert_eq!(a.repo_root, Some(PathBuf::from("/repo-a")));
+            assert!(a.pending_scoping.contains_key("plan-a"));
+            let b = backend.windows.get("b").expect("b");
+            assert!(b.pending_scoping.is_empty());
+        }
+    }
+
+    #[test]
+    fn awake_covers_working_in_any_window() {
+        let state = Mutex::new(BackendState::default());
+        let key_a = SessionKey {
+            plan: "a".to_string(),
+            role: SessionRole::Scoping,
+        };
+        let key_b = SessionKey {
+            plan: "b".to_string(),
+            role: SessionRole::Scoping,
+        };
+        {
+            let mut backend = state.lock().expect("state poisoned");
+            for (label, key) in [("a", &key_a), ("b", &key_b)] {
+                backend.ensure_window(label).sessions.insert(
+                    key.clone(),
+                    LiveSession::fresh(
+                        ActivePlan::scoping(key.plan.clone()),
+                        crate::repo_state::RepoState::default(),
+                    ),
+                );
+            }
+        }
+        set_working(&state, "b", &key_b, true);
+        {
+            let guard = state.lock().expect("state poisoned");
+            assert!(guard.awake.is_some());
+        }
+        set_working(&state, "b", &key_b, false);
+        {
+            let guard = state.lock().expect("state poisoned");
+            assert!(guard.awake.is_none());
+        }
+        set_working(&state, "a", &key_a, true);
+        set_working(&state, "b", &key_b, true);
+        set_working(&state, "a", &key_a, false);
+        {
+            let guard = state.lock().expect("state poisoned");
+            assert!(guard.awake.is_some());
+        }
+        set_working(&state, "b", &key_b, false);
+        {
+            let guard = state.lock().expect("state poisoned");
+            assert!(guard.awake.is_none());
+        }
     }
 
     fn write_plan_dir(root: &Path, phase: plans::Phase, name: &str, title: Option<&str>) {
@@ -1425,7 +1677,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
-        let mut state = State::default();
+        let mut state = WindowState::default();
         assert!(is_empty_scoping(&state, root, name));
         plans::materialize_scoping(root, name).expect("materialize");
         assert!(is_empty_scoping(&state, root, name));
@@ -1446,7 +1698,7 @@ mod tests {
         assert!(is_empty_scoping(&state, root, name));
         state.sessions.get_mut(&key).expect("live").last_prompt = Some("hi".to_string());
         assert!(!is_empty_scoping(&state, root, name));
-        let state = State::default();
+        let state = WindowState::default();
         plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("materialize");
         std::fs::write(
             root.join(".samokod/plans/scoping/2026-09-26.08-41-04/plan.md"),
@@ -1480,7 +1732,7 @@ mod tests {
         let name = "2026-09-26.08-41-03";
         plans::materialize_scoping(root, name).expect("materialize");
         session_ids::mark_prompted(root, name);
-        let state = State::default();
+        let state = WindowState::default();
         assert!(!is_empty_scoping(&state, root, name));
     }
 
@@ -1490,7 +1742,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
-        let mut state = State {
+        let mut state = WindowState {
             pending_scoping: HashMap::from([(name.to_string(), None)]),
             ..Default::default()
         };
@@ -1508,7 +1760,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
-        let mut state = State {
+        let mut state = WindowState {
             pending_scoping: HashMap::from([(name.to_string(), None)]),
             ..Default::default()
         };
@@ -1556,7 +1808,7 @@ mod tests {
             plan: name.to_string(),
             role: SessionRole::Scoping,
         };
-        let state = State {
+        let state = WindowState {
             pending_scoping: HashMap::from([(name.to_string(), None)]),
             ..Default::default()
         };
@@ -1570,19 +1822,22 @@ mod tests {
             "# T\n",
         )
         .expect("write");
-        assert_eq!(scoping_preview_for(&State::default(), root, &key), None);
+        assert_eq!(
+            scoping_preview_for(&WindowState::default(), root, &key),
+            None
+        );
 
-        let mut prompted = State::default();
+        let mut prompted = WindowState::default();
         plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("materialize");
         let other = SessionKey {
             plan: "2026-09-26.08-41-04".to_string(),
             role: SessionRole::Scoping,
         };
-        assert!(scoping_preview_for(&State::default(), root, &other).is_some());
+        assert!(scoping_preview_for(&WindowState::default(), root, &other).is_some());
         prompted.prompted.insert(other.plan.clone());
         assert_eq!(scoping_preview_for(&prompted, root, &other), None);
 
-        let mut sent_state = State::default();
+        let mut sent_state = WindowState::default();
         plans::materialize_scoping(root, "2026-09-26.08-41-05").expect("materialize");
         let sent = SessionKey {
             plan: "2026-09-26.08-41-05".to_string(),
@@ -1607,7 +1862,7 @@ mod tests {
             role: SessionRole::Executing,
         };
         assert_eq!(
-            scoping_preview_for(&State::default(), root, &executing),
+            scoping_preview_for(&WindowState::default(), root, &executing),
             None
         );
 
@@ -1615,7 +1870,10 @@ mod tests {
             plan: "2026-09-26.08-41-99".to_string(),
             role: SessionRole::Scoping,
         };
-        assert_eq!(scoping_preview_for(&State::default(), root, &gone), None);
+        assert_eq!(
+            scoping_preview_for(&WindowState::default(), root, &gone),
+            None
+        );
     }
 
     #[test]
@@ -1653,7 +1911,7 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
         plans::materialize_scoping(root, name).expect("materialize");
-        let mut state = State {
+        let mut state = WindowState {
             pending_scoping: HashMap::from([(name.to_string(), None)]),
             ..Default::default()
         };
@@ -1688,7 +1946,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
-        let mut state = State::default();
+        let mut state = WindowState::default();
         let name = reserve_scoping_name(root, &state.pending_scoping);
         state.pending_scoping.insert(name.clone(), None);
         state.current = Some(SessionKey {
@@ -1716,7 +1974,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
-        let mut state = State {
+        let mut state = WindowState {
             pending_scoping: HashMap::from([("2026-09-26.08-41-03".to_string(), None)]),
             ..Default::default()
         };
@@ -1744,7 +2002,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("target");
-        let mut state = State {
+        let mut state = WindowState {
             pending_scoping: HashMap::from([("2026-09-26.08-41-03".to_string(), None)]),
             current: Some(SessionKey {
                 plan: "2026-09-26.08-41-03".to_string(),
@@ -1782,7 +2040,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
-        let mut state = State {
+        let mut state = WindowState {
             pending_scoping: HashMap::from([(name.to_string(), None)]),
             ..Default::default()
         };
@@ -1815,7 +2073,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
-        let mut state = State {
+        let mut state = WindowState {
             pending_scoping: HashMap::from([(name.to_string(), None)]),
             ..Default::default()
         };
@@ -1840,7 +2098,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
-        let mut state = State {
+        let mut state = WindowState {
             pending_scoping: HashMap::from([(name.to_string(), None)]),
             ..Default::default()
         };
@@ -1875,7 +2133,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
-        let mut state = State {
+        let mut state = WindowState {
             pending_scoping: HashMap::from([(
                 name.to_string(),
                 Some("Login flow fixes".to_string()),
@@ -1902,7 +2160,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
-        let mut state = State {
+        let mut state = WindowState {
             pending_scoping: HashMap::from([("2026-09-26.08-41-03".to_string(), None)]),
             current: Some(SessionKey {
                 plan: "2026-09-26.08-41-03".to_string(),
@@ -1947,7 +2205,7 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
-        let mut state = State {
+        let mut state = WindowState {
             pending_scoping: HashMap::from([(name.to_string(), None)]),
             ..Default::default()
         };

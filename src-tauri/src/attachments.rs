@@ -16,14 +16,17 @@ impl AgentManager {
     /// clears it. Returns the absolute file path.
     pub fn save_attachment(
         &self,
+        window: &str,
         session: SessionKey,
         data_base64: String,
     ) -> Result<String, AgentError> {
-        let repo_root = self.current_repo().ok_or_else(|| AgentError::NoSession {
-            raw: "open a repository first".to_string(),
-        })?;
+        let repo_root = self
+            .current_repo(window)
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "open a repository first".to_string(),
+            })?;
         let materialize =
-            session.role == SessionRole::Scoping && self.is_pending_scoping(&session.plan);
+            session.role == SessionRole::Scoping && self.is_pending_scoping(window, &session.plan);
         let path = save_plan_attachment(&repo_root, &session.plan, materialize, &data_base64)?;
         Ok(path.to_string_lossy().to_string())
     }

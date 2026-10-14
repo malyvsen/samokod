@@ -8,16 +8,17 @@ use crate::acp;
 use crate::types::{AgentError, AppEvent, PermissionOptionView, PermissionView, SessionKey};
 
 use super::AgentManager;
-use super::State;
+use super::BackendState;
 use super::plans_list::push_sorted;
 use super::session::PermissionDecision;
-use super::{emit_event, lock_state, set_approval};
+use super::{emit_event, lock_backend, set_approval};
 
 impl AgentManager {
     /// Answer one permission card. `Some` selects the allow-once or reject
     /// option; `None` answers cancelled.
     pub fn answer_permission(
         &self,
+        window: &str,
         session: SessionKey,
         tool_call_id: &str,
         option_id: Option<String>,
@@ -28,8 +29,10 @@ impl AgentManager {
             .map_err(|_| AgentError::RequestFailed {
                 raw: "permission state poisoned".to_string(),
             })
-            .map(|mut guard| {
-                guard
+            .map(|mut backend| {
+                backend
+                    .windows
+                    .get_mut(window)?
                     .sessions
                     .get_mut(&session)
                     .and_then(|live| live.pending.remove(tool_call_id))
@@ -53,11 +56,12 @@ impl AgentManager {
     }
 }
 
-pub(crate) fn cancel_pending(state: &Mutex<State>, key: &SessionKey) {
+pub(crate) fn cancel_pending(state: &Mutex<BackendState>, window: &str, key: &SessionKey) {
     let senders: Vec<tokio::sync::oneshot::Sender<PermissionDecision>> = match state.lock() {
-        Ok(mut guard) => guard
-            .sessions
-            .get_mut(key)
+        Ok(mut backend) => backend
+            .windows
+            .get_mut(window)
+            .and_then(|win| win.sessions.get_mut(key))
             .map(|session| session.pending.drain().map(|(_, sender)| sender).collect())
             .unwrap_or_default(),
         Err(error) => {
@@ -73,14 +77,17 @@ pub(crate) fn cancel_pending(state: &Mutex<State>, key: &SessionKey) {
 }
 
 pub(crate) async fn handle_permission_request(
-    state: &Mutex<State>,
+    state: &Mutex<BackendState>,
     app: &AppHandle,
+    window: &str,
     key: &SessionKey,
     request: acp::RequestPermissionRequest,
     responder: agent_client_protocol::Responder<acp::RequestPermissionResponse>,
 ) {
-    let current = lock_state(state).and_then(|guard| {
-        guard
+    let current = lock_backend(state).and_then(|backend| {
+        backend
+            .windows
+            .get(window)?
             .sessions
             .get(key)
             .and_then(|session| session.session_id.clone())
@@ -96,8 +103,14 @@ pub(crate) async fn handle_permission_request(
         answer_cancelled(responder, "for empty options");
         return;
     }
-    if lock_state(state)
-        .map(|guard| guard.is_history_loading(key))
+    if lock_backend(state)
+        .map(|backend| {
+            backend
+                .windows
+                .get(window)
+                .map(|win| win.is_history_loading(key))
+                .unwrap_or(false)
+        })
         .unwrap_or(false)
     {
         emit_replayed_approval(app, key, &request, options, responder);
@@ -107,18 +120,22 @@ pub(crate) async fn handle_permission_request(
     let tool_call_id = permission.tool_call_id.clone();
     let (tx, rx) = tokio::sync::oneshot::channel::<PermissionDecision>();
     {
-        let Some(mut guard) = lock_state(state) else {
+        let Some(mut backend) = lock_backend(state) else {
             answer_cancelled(responder, "while state locked");
             return;
         };
-        let Some(session) = guard.sessions.get_mut(key) else {
+        let Some(win) = backend.windows.get_mut(window) else {
+            answer_cancelled(responder, "for closed window");
+            return;
+        };
+        let Some(session) = win.sessions.get_mut(key) else {
             answer_cancelled(responder, "for missing session");
             return;
         };
         session.pending.insert(tool_call_id.clone(), tx);
     }
-    set_approval(state, key, true);
-    push_sorted(state, app);
+    set_approval(state, window, key, true);
+    push_sorted(state, app, window);
     emit_event(
         app,
         AppEvent::PermissionAsked {
@@ -133,8 +150,9 @@ pub(crate) async fn handle_permission_request(
             PermissionDecision::Cancelled
         }
     };
-    if let Some(mut guard) = lock_state(state)
-        && let Some(session) = guard.sessions.get_mut(key)
+    if let Some(mut backend) = lock_backend(state)
+        && let Some(win) = backend.windows.get_mut(window)
+        && let Some(session) = win.sessions.get_mut(key)
     {
         session.pending.remove(&tool_call_id);
     }
@@ -162,8 +180,8 @@ pub(crate) async fn handle_permission_request(
             }
         }
     }
-    set_approval(state, key, false);
-    push_sorted(state, app);
+    set_approval(state, window, key, false);
+    push_sorted(state, app, window);
     emit_event(
         app,
         AppEvent::PermissionResolved {

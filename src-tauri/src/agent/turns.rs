@@ -13,24 +13,31 @@ use crate::todos::{diff_todos, todos_from_call, todos_from_update};
 use crate::types::{AgentError, AppEvent, SessionKey, SessionRole, TodoView};
 
 use super::AgentManager;
-use super::State;
+use super::BackendState;
+use super::WindowState;
 use super::config::config_views;
 use super::permissions::cancel_pending;
 use super::plans_list::push_sorted;
-use super::{emit_event, lock_state, set_failed, set_working};
+use super::{emit_event, lock_backend, set_failed, set_working};
 
 impl AgentManager {
     /// Resend the last prompt. When the transport is closed, reopen the
     /// session on the held plan first. Returns false when nothing ran.
-    pub async fn retry_last(&self, session: SessionKey) -> Result<bool, AgentError> {
-        self.wait_for_history(&session).await?;
-        let Some(text) = lock_state(&self.state)
-            .and_then(|state| state.sessions.get(&session)?.last_prompt.clone())
-        else {
+    pub async fn retry_last(&self, window: &str, session: SessionKey) -> Result<bool, AgentError> {
+        self.wait_for_history(window, &session).await?;
+        let Some(text) = lock_backend(&self.state).and_then(|backend| {
+            backend
+                .windows
+                .get(window)?
+                .sessions
+                .get(&session)?
+                .last_prompt
+                .clone()
+        }) else {
             return Ok(false);
         };
-        let (connection, session_id) = self.ensure_live(&session).await?;
-        self.start_turn(connection, session_id, session, text)
+        let (connection, session_id) = self.ensure_live(window, &session).await?;
+        self.start_turn(window, connection, session_id, session, text)
             .await?;
         Ok(true)
     }
@@ -41,7 +48,12 @@ impl AgentManager {
     /// prefixes the template server-side as one message. A reserved
     /// pending scoping session materializes its directory here, before
     /// the `ensure_live` path.
-    pub async fn send_prompt(&self, session: SessionKey, text: String) -> Result<(), AgentError> {
+    pub async fn send_prompt(
+        &self,
+        window: &str,
+        session: SessionKey,
+        text: String,
+    ) -> Result<(), AgentError> {
         log::info!(
             "send_prompt session {}::{:?} text_len {}",
             session.plan,
@@ -50,81 +62,95 @@ impl AgentManager {
         );
         if session.role == SessionRole::Scoping {
             let repo_root = self
-                .reopen_snapshot()
+                .reopen_snapshot(window)
                 .map(|(root, _)| root)
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "open a repository first".to_string(),
                 })?;
             // Working title from the user's text before the server prefix.
             // Set-once; headings win; empty stays `Untitled`.
-            store_first_title(&self.state, &repo_root, &session.plan, &text);
-            let pending_match = match self.state.lock() {
-                Ok(state) => state.pending_scoping.contains_key(&session.plan),
-                Err(error) => {
-                    log::warn!("failed to check pending session: {error}");
+            store_first_title(&self.state, window, &repo_root, &session.plan, &text);
+            let pending_match = match lock_backend(&self.state) {
+                Some(backend) => backend
+                    .windows
+                    .get(window)
+                    .map(|win| win.pending_scoping.contains_key(&session.plan))
+                    .unwrap_or(false),
+                None => {
+                    log::warn!("failed to check pending session: state poisoned");
                     false
                 }
             };
             if pending_match {
                 plans::materialize_scoping(&repo_root, &session.plan)?;
-                carry_pending_title(&self.state, &repo_root, &session.plan);
-                match self.state.lock() {
-                    Ok(mut state) => {
-                        state.pending_scoping.remove(&session.plan);
+                carry_pending_title(&self.state, window, &repo_root, &session.plan);
+                match lock_backend(&self.state) {
+                    Some(mut backend) => {
+                        if let Some(win) = backend.windows.get_mut(window) {
+                            win.pending_scoping.remove(&session.plan);
+                        }
                     }
-                    Err(error) => {
-                        log::warn!("failed to clear pending session: {error}");
+                    None => {
+                        log::warn!("failed to clear pending session: state poisoned");
                     }
                 }
             }
         }
         // A prompt never races a replay: it waits for an in-flight load
         // rather than interleaving live chunks with history chunks.
-        self.wait_for_history(&session).await?;
+        self.wait_for_history(window, &session).await?;
         // Queued landings hold with no live session: prompting one fails
         // fast instead of minting a second rebase. Cancel and finish paths
         // stay allowed.
-        if let Some((repo_root, _)) = self.reopen_snapshot()
+        if let Some((repo_root, _)) = self.reopen_snapshot(window)
             && super::landing_queue::is_held(&repo_root, &session)
         {
             return Err(AgentError::RequestFailed {
                 raw: "landing is queued, waiting its turn".to_string(),
             });
         }
-        let (connection, session_id) = self.ensure_live(&session).await?;
+        let (connection, session_id) = self.ensure_live(window, &session).await?;
         // A warmed pending session spawns before its directory exists, so
         // its ID goes unrecorded; persisting here heals it once the first
         // prompt materializes the directory, along with any missing file.
-        if let Some((repo_root, _)) = self.reopen_snapshot() {
+        if let Some((repo_root, _)) = self.reopen_snapshot(window) {
             super::session_ids::record_session(&repo_root, &session, &session_id);
         }
         // A fresh prompt clears the failed flag; the dot goes green while
         // the turn runs.
-        if let Some(mut state) = lock_state(&self.state)
-            && let Some(live) = state.sessions.get_mut(&session)
+        if let Some(mut backend) = lock_backend(&self.state)
+            && let Some(win) = backend.windows.get_mut(window)
+            && let Some(live) = win.sessions.get_mut(&session)
         {
             live.failed = false;
         }
-        self.mark_prompted(&session.plan);
+        self.mark_prompted(window, &session.plan);
         let mut text = text;
-        if let Some(prefixed) = self.claim_role_prefix(&session, &text) {
+        if let Some(prefixed) = self.claim_role_prefix(window, &session, &text) {
             text = prefixed;
         }
-        self.start_turn(connection, session_id, session, text).await
+        self.start_turn(window, connection, session_id, session, text)
+            .await
     }
 
     /// Guard one turn and stream it as events. Records the prompt so retry
     /// resends exactly what ran, prefixed or not.
     pub(crate) async fn start_turn(
         &self,
+        window: &str,
         connection: ConnectionTo<Agent>,
         session_id: String,
         key: SessionKey,
         text: String,
     ) -> Result<(), AgentError> {
         {
-            let mut state = self.state.lock().expect("state poisoned");
-            if state.is_working(&key) {
+            let mut backend = lock_backend(&self.state).expect("state poisoned");
+            let Some(win) = backend.windows.get_mut(window) else {
+                return Err(AgentError::NoSession {
+                    raw: "open a repository first".to_string(),
+                });
+            };
+            if win.is_working(&key) {
                 log::warn!(
                     "start_turn already running session {}::{:?}",
                     key.plan,
@@ -134,19 +160,23 @@ impl AgentManager {
                     raw: "a turn is already running".to_string(),
                 });
             }
-            state.set_working(&key, true);
-            if let Some(session) = state.sessions.get_mut(&key) {
+            win.set_working(&key, true);
+            if let Some(session) = win.sessions.get_mut(&key) {
                 session.last_prompt = Some(text.clone());
             }
+            backend.recompute_awake();
         }
         // Dots go green while the turn runs; titles and order refresh when
         // it lands.
-        self.push_plans();
+        self.push_plans(window);
         let state = Arc::clone(&self.state);
+        let window_owned = window.to_string();
         let app = self.app.clone();
         let push_state = Arc::clone(&self.state);
+        let push_window = window.to_string();
         let push_app = self.app.clone();
         let pump_manager = self.clone();
+        let pump_window = window.to_string();
         tauri::async_runtime::spawn(async move {
             let prompt = acp::PromptRequest::new(
                 acp::SessionId::new(session_id),
@@ -154,8 +184,8 @@ impl AgentManager {
             );
             match connection.send_request(prompt).block_task().await {
                 Ok(_) => {
-                    set_working(&state, &key, false);
-                    set_failed(&state, &key, false);
+                    set_working(&state, &window_owned, &key, false);
+                    set_failed(&state, &window_owned, &key, false);
                     log::info!("TurnDone session {}::{:?}", key.plan, key.role);
                     emit_event(
                         &app,
@@ -163,26 +193,28 @@ impl AgentManager {
                             session: key.clone(),
                         },
                     );
-                    push_sorted(&push_state, &push_app);
+                    push_sorted(&push_state, &push_app, &push_window);
                     // Automatic plans advance once the turn ends clean.
                     drop(connection);
-                    pump_manager.spawn_pump();
+                    pump_manager.spawn_pump(&pump_window);
                 }
                 Err(error) => {
                     let raw = error.to_string();
                     let transport_gone = is_transport_error(&raw);
-                    set_working(&state, &key, false);
-                    set_failed(&state, &key, true);
+                    set_working(&state, &window_owned, &key, false);
+                    set_failed(&state, &window_owned, &key, true);
                     if transport_gone {
-                        match state.lock() {
-                            Ok(mut guard) => {
-                                if let Some(session) = guard.sessions.get_mut(&key) {
+                        match lock_backend(&state) {
+                            Some(mut backend) => {
+                                if let Some(win) = backend.windows.get_mut(&window_owned)
+                                    && let Some(session) = win.sessions.get_mut(&key)
+                                {
                                     session.connection = None;
                                     session.session_id = None;
                                 }
                             }
-                            Err(error) => {
-                                log::warn!("failed to drop dead agent connection: {error}");
+                            None => {
+                                log::warn!("failed to drop dead agent connection: state poisoned");
                             }
                         }
                     }
@@ -197,7 +229,7 @@ impl AgentManager {
                             retryable: hint.retryable,
                         },
                     );
-                    push_sorted(&push_state, &push_app);
+                    push_sorted(&push_state, &push_app, &push_window);
                 }
             }
         });
@@ -206,20 +238,20 @@ impl AgentManager {
 
     /// Stop the turn via `session/cancel`, answering every open card as
     /// cancelled per protocol.
-    pub async fn cancel_turn(&self, session: SessionKey) -> Result<(), AgentError> {
-        let (connection, session_id, _, _) =
-            self.session_snapshot_for(&session)
-                .ok_or_else(|| AgentError::NoSession {
-                    raw: "no active turn".to_string(),
-                })?;
-        cancel_pending(&self.state, &session);
+    pub async fn cancel_turn(&self, window: &str, session: SessionKey) -> Result<(), AgentError> {
+        let (connection, session_id, _, _) = self
+            .session_snapshot_for(window, &session)
+            .ok_or_else(|| AgentError::NoSession {
+                raw: "no active turn".to_string(),
+            })?;
+        cancel_pending(&self.state, window, &session);
         if let Err(error) = connection.send_notification(acp::build_cancel_notification(
             acp::SessionId::new(session_id),
         )) {
             log::warn!("failed to send session cancel: {error}");
         }
-        set_working(&self.state, &session, false);
-        self.push_plans();
+        set_working(&self.state, window, &session, false);
+        self.push_plans(window);
         Ok(())
     }
 
@@ -229,8 +261,9 @@ impl AgentManager {
     /// runs with cwd at the repo root, while executing and landing use
     /// absolute paths into the checkout. Evergreening never prefixes here:
     /// the transition core sends its full first turn at spawn.
-    fn claim_role_prefix(&self, key: &SessionKey, user_text: &str) -> Option<String> {
-        let mut state = lock_state(&self.state)?;
+    fn claim_role_prefix(&self, window: &str, key: &SessionKey, user_text: &str) -> Option<String> {
+        let mut backend = lock_backend(&self.state)?;
+        let state = backend.windows.get_mut(window)?;
         let repo_root = state.repo_root.clone()?;
         let live = state.sessions.get(key)?;
         if live.plan.prefixed {
@@ -282,12 +315,21 @@ impl AgentManager {
 }
 
 pub(crate) fn handle_notification(
-    state: &Mutex<State>,
+    state: &Mutex<BackendState>,
     app: &AppHandle,
+    window: &str,
     key: &SessionKey,
     notification: &acp::SessionNotification,
 ) {
-    let current = lock_state(state).and_then(|guard| guard.sessions.get(key)?.session_id.clone());
+    let current = lock_backend(state).and_then(|backend| {
+        backend
+            .windows
+            .get(window)?
+            .sessions
+            .get(key)?
+            .session_id
+            .clone()
+    });
     if let Some(current) = current
         && notification.session_id.to_string() != current
     {
@@ -320,8 +362,14 @@ pub(crate) fn handle_notification(
     // executing/landing first prompts arrive as their own event), so
     // mapping them outside a replay would double-add every prompt.
     if let Some(chunk) = crate::updates::user_text_of(&notification.update)
-        && lock_state(state)
-            .map(|guard| guard.is_history_loading(key))
+        && lock_backend(state)
+            .map(|backend| {
+                backend
+                    .windows
+                    .get(window)
+                    .map(|win| win.is_history_loading(key))
+                    .unwrap_or(false)
+            })
             .unwrap_or(false)
     {
         for bubble in replay_bubbles(key, &chunk) {
@@ -336,13 +384,18 @@ pub(crate) fn handle_notification(
     }
     match &notification.update {
         acp::SessionUpdate::ToolCall(call) => {
-            let merged = lock_state(state).and_then(|mut guard| {
-                guard.sessions.get_mut(key).map(|session| {
-                    session
-                        .tool_calls
-                        .insert(call.tool_call_id.to_string(), call.clone());
-                    call.clone()
-                })
+            let merged = lock_backend(state).and_then(|mut backend| {
+                backend
+                    .windows
+                    .get_mut(window)?
+                    .sessions
+                    .get_mut(key)
+                    .map(|session| {
+                        session
+                            .tool_calls
+                            .insert(call.tool_call_id.to_string(), call.clone());
+                        call.clone()
+                    })
             });
             let Some(merged) = merged else {
                 log::warn!("tool call {} has no live session", call.tool_call_id);
@@ -351,7 +404,7 @@ pub(crate) fn handle_notification(
             // Todo-carrying calls render as a TODOS block instead of a `▸` line.
             if let Some(fresh) = todos_from_call(merged.raw_input.as_ref()) {
                 log::debug!("todo call {} todos {}", call.tool_call_id, fresh.len());
-                update_todos(state, app, key, fresh);
+                update_todos(state, app, window, key, fresh);
             } else {
                 let line = crate::updates::format_tool_line(&merged);
                 emit_event(
@@ -364,18 +417,23 @@ pub(crate) fn handle_notification(
             }
         }
         acp::SessionUpdate::ToolCallUpdate(update) => {
-            let merged = lock_state(state).and_then(|mut guard| {
-                guard.sessions.get_mut(key).map(|session| {
-                    let existing = session
-                        .tool_calls
-                        .get(&update.tool_call_id.to_string())
-                        .cloned();
-                    let merged = crate::updates::with_update(existing, update);
-                    session
-                        .tool_calls
-                        .insert(update.tool_call_id.to_string(), merged.clone());
-                    merged
-                })
+            let merged = lock_backend(state).and_then(|mut backend| {
+                backend
+                    .windows
+                    .get_mut(window)?
+                    .sessions
+                    .get_mut(key)
+                    .map(|session| {
+                        let existing = session
+                            .tool_calls
+                            .get(&update.tool_call_id.to_string())
+                            .cloned();
+                        let merged = crate::updates::with_update(existing, update);
+                        session
+                            .tool_calls
+                            .insert(update.tool_call_id.to_string(), merged.clone());
+                        merged
+                    })
             });
             let Some(merged) = merged else {
                 log::warn!("tool call {} has no live session", update.tool_call_id);
@@ -385,7 +443,7 @@ pub(crate) fn handle_notification(
                 todos_from_update(merged.raw_input.as_ref(), merged.raw_output.as_ref())
             {
                 log::debug!("todo update {} todos {}", update.tool_call_id, fresh.len());
-                update_todos(state, app, key, fresh);
+                update_todos(state, app, window, key, fresh);
             } else {
                 let line = crate::updates::format_tool_line(&merged);
                 emit_event(
@@ -402,9 +460,10 @@ pub(crate) fn handle_notification(
             let ctx_pct = context_pct(update.used, update.size);
             // Snapshot the repo root under the lock, then persist after it
             // is released so file IO never runs under the mutex.
-            let repo_root = lock_state(state).and_then(|mut guard| {
-                let root = guard.repo_root.clone();
-                if let Some(live) = guard.sessions.get_mut(key) {
+            let repo_root = lock_backend(state).and_then(|mut backend| {
+                let win = backend.windows.get_mut(window)?;
+                let root = win.repo_root.clone();
+                if let Some(live) = win.sessions.get_mut(key) {
                     live.cost = cost;
                     live.ctx_pct = ctx_pct;
                 }
@@ -418,7 +477,7 @@ pub(crate) fn handle_notification(
                     ctx_pct,
                 },
             );
-            push_sorted(state, app);
+            push_sorted(state, app, window);
             if let Some(repo_root) = repo_root {
                 super::session_ids::record_cost(&repo_root, key, cost);
             }
@@ -447,9 +506,9 @@ pub(crate) fn handle_notification(
 /// `state.json:working_title` (dir exists), inserting on `Some` and
 /// clearing on `None`. `overwrite` gates existing titles: set-once skips,
 /// draft-keep overwrites. Headings win at display time; storing skips when
-/// a heading already exists. Caller owns any lock via `&mut State`.
+/// a heading already exists. Caller owns any lock via `&mut WindowState`.
 fn store_title(
-    state: &mut State,
+    state: &mut WindowState,
     repo_root: &std::path::Path,
     plan_name: &str,
     title: Option<String>,
@@ -494,7 +553,8 @@ fn store_title(
 /// Send-path title: set-once from the user's text. Never overwrites a
 /// draft-kept title; empty stays `Untitled` via extractor `None`.
 fn store_first_title(
-    state: &Mutex<State>,
+    state: &Mutex<BackendState>,
+    window: &str,
     repo_root: &std::path::Path,
     plan_name: &str,
     user_text: &str,
@@ -504,16 +564,17 @@ fn store_first_title(
         return;
     }
     let title = crate::working_title::extract_working_title(trimmed);
-    let Some(mut guard) = lock_state(state) else {
+    let Some(mut backend) = lock_backend(state) else {
         return;
     };
-    store_title(&mut guard, repo_root, plan_name, title, false);
+    let win = backend.ensure_window(window);
+    store_title(win, repo_root, plan_name, title, false);
 }
 
 /// Keep-path title: overwrites from the switch-away draft on every keep.
 /// Extractor `None` clears to `Untitled`.
 pub(crate) fn store_draft_title(
-    state: &mut State,
+    state: &mut WindowState,
     repo_root: &std::path::Path,
     plan_name: &str,
     user_text: &str,
@@ -528,8 +589,19 @@ pub(crate) fn store_draft_title(
 
 /// Move a pending working title into `state.json` at materialize time.
 /// Set-once: never overwrites a disk title. Removes the pending-map entry.
-fn carry_pending_title(state: &Mutex<State>, repo_root: &std::path::Path, plan_name: &str) {
-    let removed = lock_state(state).and_then(|mut guard| guard.pending_scoping.remove(plan_name));
+fn carry_pending_title(
+    state: &Mutex<BackendState>,
+    window: &str,
+    repo_root: &std::path::Path,
+    plan_name: &str,
+) {
+    let removed = lock_backend(state).and_then(|mut backend| {
+        backend
+            .windows
+            .get_mut(window)?
+            .pending_scoping
+            .remove(plan_name)
+    });
     let Some(Some(title)) = removed else {
         return;
     };
@@ -538,9 +610,10 @@ fn carry_pending_title(state: &Mutex<State>, repo_root: &std::path::Path, plan_n
         phase: plans::Phase::Scoping,
     };
     if !plan_ref.path(repo_root).is_dir() {
-        if let Some(mut guard) = lock_state(state) {
-            guard
-                .pending_scoping
+        if let Some(mut backend) = lock_backend(state)
+            && let Some(win) = backend.windows.get_mut(window)
+        {
+            win.pending_scoping
                 .insert(plan_name.to_string(), Some(title));
         }
         return;
@@ -591,11 +664,20 @@ fn split_scoping_replay(template: &str, text: &str) -> Option<(String, String)> 
 /// Replace the held list with a fresh todo list and emit when it moved.
 /// Identical lists stay silent. Tracks when the current list started for
 /// the plans-payload ETA and refreshes headers live.
-fn update_todos(state: &Mutex<State>, app: &AppHandle, key: &SessionKey, fresh: Vec<TodoView>) {
-    let Some(mut guard) = lock_state(state) else {
+fn update_todos(
+    state: &Mutex<BackendState>,
+    app: &AppHandle,
+    window: &str,
+    key: &SessionKey,
+    fresh: Vec<TodoView>,
+) {
+    let Some(mut backend) = lock_backend(state) else {
         return;
     };
-    let Some(session) = guard.sessions.get_mut(key) else {
+    let Some(win) = backend.windows.get_mut(window) else {
+        return;
+    };
+    let Some(session) = win.sessions.get_mut(key) else {
         return;
     };
     if fresh == session.todos {
@@ -610,7 +692,7 @@ fn update_todos(state: &Mutex<State>, app: &AppHandle, key: &SessionKey, fresh: 
         session.todos_started_at = None;
     }
     session.todos = fresh.clone();
-    drop(guard);
+    drop(backend);
     emit_event(
         app,
         AppEvent::TodosChanged {
@@ -619,7 +701,7 @@ fn update_todos(state: &Mutex<State>, app: &AppHandle, key: &SessionKey, fresh: 
             changes,
         },
     );
-    push_sorted(state, app);
+    push_sorted(state, app, window);
 }
 
 #[cfg(test)]
@@ -694,9 +776,9 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
         plans::materialize_scoping(root, name).expect("materialize");
-        let state = Mutex::new(State::default());
+        let state = Mutex::new(BackendState::default());
         let first = "Fix the login flow login errors on login retry.";
-        store_first_title(&state, root, name, first);
+        store_first_title(&state, "main", root, name, first);
         let stored = plans::load_state(
             &plans::PlanRef {
                 name: name.to_string(),
@@ -707,7 +789,7 @@ mod tests {
         let title = stored.working_title.clone().expect("title stored");
         assert!(title.to_lowercase().contains("login"));
         let second = "Fix the checkout flow checkout errors on checkout retry.";
-        store_first_title(&state, root, name, second);
+        store_first_title(&state, "main", root, name, second);
         let kept = plans::load_state(
             &plans::PlanRef {
                 name: name.to_string(),
@@ -724,30 +806,36 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
-        let state = Mutex::new(State::default());
+        let state = Mutex::new(BackendState::default());
         {
-            state
-                .lock()
-                .expect("state")
+            let mut backend = state.lock().expect("state");
+            backend
+                .ensure_window("main")
                 .pending_scoping
                 .insert(name.to_string(), None);
         }
         let text = "Fix the login flow login errors on login retry.";
-        store_first_title(&state, root, name, text);
+        store_first_title(&state, "main", root, name, text);
         assert!(
             state
                 .lock()
                 .expect("state")
+                .windows
+                .get("main")
+                .expect("window")
                 .pending_scoping
                 .get(name)
                 .is_some_and(|title| title.is_some())
         );
         plans::materialize_scoping(root, name).expect("materialize");
-        carry_pending_title(&state, root, name);
+        carry_pending_title(&state, "main", root, name);
         assert!(
             !state
                 .lock()
                 .expect("state")
+                .windows
+                .get("main")
+                .expect("window")
                 .pending_scoping
                 .contains_key(name)
         );
@@ -775,8 +863,8 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
         plans::materialize_scoping(root, name).expect("materialize");
-        let state = Mutex::new(State::default());
-        store_first_title(&state, root, name, "   \n  ");
+        let state = Mutex::new(BackendState::default());
+        store_first_title(&state, "main", root, name, "   \n  ");
         let stored = plans::load_state(
             &plans::PlanRef {
                 name: name.to_string(),
@@ -793,16 +881,19 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         let name = "2026-09-26.08-41-03";
-        let state = Mutex::new(State::default());
-        state
-            .lock()
-            .expect("state")
-            .pending_scoping
-            .insert(name.to_string(), None);
+        let state = Mutex::new(BackendState::default());
         {
-            let mut guard = state.lock().expect("state");
+            let mut backend = state.lock().expect("state");
+            backend
+                .ensure_window("main")
+                .pending_scoping
+                .insert(name.to_string(), None);
+        }
+        {
+            let mut backend = state.lock().expect("state");
+            let win = backend.ensure_window("main");
             store_draft_title(
-                &mut guard,
+                win,
                 root,
                 name,
                 "Fix the login flow login errors on login retry.",
@@ -811,15 +902,19 @@ mod tests {
         let first = state
             .lock()
             .expect("state")
+            .windows
+            .get("main")
+            .expect("window")
             .pending_scoping
             .get(name)
             .cloned()
             .expect("pending");
         assert!(first.is_some_and(|title| title.to_lowercase().contains("login")));
         {
-            let mut guard = state.lock().expect("state");
+            let mut backend = state.lock().expect("state");
+            let win = backend.ensure_window("main");
             store_draft_title(
-                &mut guard,
+                win,
                 root,
                 name,
                 "Fix the checkout flow checkout errors on checkout retry.",
@@ -828,6 +923,9 @@ mod tests {
         let second = state
             .lock()
             .expect("state")
+            .windows
+            .get("main")
+            .expect("window")
             .pending_scoping
             .get(name)
             .cloned()
@@ -835,6 +933,7 @@ mod tests {
         assert!(second.is_some_and(|title| title.to_lowercase().contains("checkout")));
         store_first_title(
             &state,
+            "main",
             root,
             name,
             "Fix the login flow login errors on login retry.",
@@ -842,6 +941,9 @@ mod tests {
         let kept = state
             .lock()
             .expect("state")
+            .windows
+            .get("main")
+            .expect("window")
             .pending_scoping
             .get(name)
             .cloned()

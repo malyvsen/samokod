@@ -16,20 +16,26 @@ impl AgentManager {
     /// it fails instead of guessing.
     pub async fn set_global_config_option(
         &self,
+        window: &str,
         config_id: String,
         value: String,
     ) -> Result<Vec<ConfigOptionView>, AgentError> {
         let live: Vec<(SessionKey, ConnectionTo<Agent>, String)> = match self.state.lock() {
-            Ok(state) => state
-                .sessions
-                .iter()
-                .filter_map(|(key, live)| {
-                    let connection = live.connection.clone()?;
-                    let session_id = live.session_id.clone()?;
-                    (!connection.is_incoming_closed())
-                        .then(|| (key.clone(), connection, session_id))
+            Ok(backend) => backend
+                .windows
+                .get(window)
+                .map(|win| {
+                    win.sessions
+                        .iter()
+                        .filter_map(|(key, live)| {
+                            let connection = live.connection.clone()?;
+                            let session_id = live.session_id.clone()?;
+                            (!connection.is_incoming_closed())
+                                .then(|| (key.clone(), connection, session_id))
+                        })
+                        .collect()
                 })
-                .collect(),
+                .unwrap_or_default(),
             Err(error) => {
                 log::warn!("failed to snapshot live sessions: {error}");
                 Vec::new()
@@ -52,28 +58,31 @@ impl AgentManager {
             .map_err(|error| AgentError::RequestFailed { raw: error })?;
             let roles = crate::repo_state::roles_from_options(&response);
             let moved = match self.state.lock() {
-                Ok(mut state) => {
-                    let current = state
-                        .sessions
-                        .get(&key)
-                        .map(|live| live.last_roles.clone())
-                        .unwrap_or_default();
-                    let moved: Vec<crate::repo_state::ConfigRole> =
-                        crate::repo_state::ConfigRole::ALL
-                            .into_iter()
-                            .filter(|role| role.get(&current) != role.get(&roles))
-                            .collect();
-                    if let Some(live) = state.sessions.get_mut(&key) {
-                        live.last_roles = roles.clone();
+                Ok(mut backend) => match backend.windows.get_mut(window) {
+                    Some(win) => {
+                        let current = win
+                            .sessions
+                            .get(&key)
+                            .map(|live| live.last_roles.clone())
+                            .unwrap_or_default();
+                        let moved: Vec<crate::repo_state::ConfigRole> =
+                            crate::repo_state::ConfigRole::ALL
+                                .into_iter()
+                                .filter(|role| role.get(&current) != role.get(&roles))
+                                .collect();
+                        if let Some(live) = win.sessions.get_mut(&key) {
+                            live.last_roles = roles.clone();
+                        }
+                        Some(moved)
                     }
-                    Some(moved)
-                }
+                    None => None,
+                },
                 Err(error) => {
                     log::warn!("failed to remember global choice: {error}");
                     None
                 }
             };
-            if let (Some(moved), Some(repo)) = (moved, self.current_repo()) {
+            if let (Some(moved), Some(repo)) = (moved, self.current_repo(window)) {
                 for role in moved {
                     crate::repo_state::set_role(&repo, role, role.get(&roles).map(String::as_str));
                 }

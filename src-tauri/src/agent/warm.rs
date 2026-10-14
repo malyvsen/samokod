@@ -7,7 +7,7 @@ use crate::plans;
 use crate::types::{AgentError, SessionKey};
 
 use super::AgentManager;
-use super::lock_state;
+use super::lock_backend;
 use super::start::WarmGuard;
 
 /// Finished plans never warm: completed/cancelled dirs hold the name.
@@ -30,8 +30,9 @@ impl AgentManager {
     /// started histories skip; live sessions skip since the warm would fork
     /// a fresh session beside them. Failures log and release so the next
     /// explicit prompt retries through the existing error path.
-    pub async fn warm_session(&self, session: SessionKey) -> Result<(), AgentError> {
-        let repo_root = lock_state(&self.state).and_then(|state| state.repo_root.clone());
+    pub async fn warm_session(&self, window: &str, session: SessionKey) -> Result<(), AgentError> {
+        let repo_root = lock_backend(&self.state)
+            .and_then(|backend| backend.windows.get(window)?.repo_root.clone());
         let Some(repo_root) = repo_root else {
             log::debug!("skipping warm: no repository open");
             return Ok(());
@@ -52,7 +53,7 @@ impl AgentManager {
             );
             return Ok(());
         }
-        if let Some((connection, _, _, _)) = self.session_snapshot_for(&session)
+        if let Some((connection, _, _, _)) = self.session_snapshot_for(window, &session)
             && !connection.is_incoming_closed()
         {
             log::debug!(
@@ -62,8 +63,14 @@ impl AgentManager {
             );
             return Ok(());
         }
-        if lock_state(&self.state)
-            .map(|state| state.history_started(&session))
+        if lock_backend(&self.state)
+            .map(|backend| {
+                backend
+                    .windows
+                    .get(window)
+                    .map(|win| win.history_started(&session))
+                    .unwrap_or(false)
+            })
             .unwrap_or(false)
         {
             log::debug!(
@@ -73,7 +80,7 @@ impl AgentManager {
             );
             return Ok(());
         }
-        let Some(_guard) = WarmGuard::claim(&self.state, &session) else {
+        let Some(_guard) = WarmGuard::claim(&self.state, window, &session) else {
             log::debug!(
                 "skipping warm for {} {:?}: warm already in flight",
                 session.plan,
@@ -81,7 +88,7 @@ impl AgentManager {
             );
             return Ok(());
         };
-        let result = self.ensure_live_claimed(&session).await;
+        let result = self.ensure_live_claimed(window, &session).await;
         if let Err(error) = &result {
             log::warn!("failed to warm session {}: {error}", session.plan);
         }

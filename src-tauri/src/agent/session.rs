@@ -21,7 +21,7 @@ use super::start::{
     ENSURE_LIVE_TIMEOUT, HISTORY_TIMEOUT, HistoryGuard, WARM_TIMEOUT, WarmGuard, wait_until,
 };
 use super::turns::handle_notification;
-use super::{emit_event, lock_state, map_startup_error, set_failed};
+use super::{emit_event, lock_backend, map_startup_error, set_failed};
 
 /// User decision for one permission card.
 #[derive(Debug, Clone)]
@@ -186,26 +186,26 @@ impl LiveSession {
 impl AgentManager {
     /// Shut down one live session and forget it. Its transcript stays
     /// frontend-side; the row turns gray.
-    pub(crate) async fn drop_live(&self, key: &SessionKey) {
-        let snapshot = self.session_snapshot_for(key);
-        match self.state.lock() {
-            Ok(mut state) => {
-                if let Some(session) = state.sessions.get_mut(key) {
-                    session.connection = None;
-                    session.session_id = None;
-                    for (_, sender) in session.pending.drain() {
-                        if sender.send(PermissionDecision::Cancelled).is_err() {
-                            log::debug!("pending permission receiver gone during drop");
+    pub(crate) async fn drop_live(&self, window: &str, key: &SessionKey) {
+        let snapshot = self.session_snapshot_for(window, key);
+        match lock_backend(&self.state) {
+            Some(mut backend) => {
+                if let Some(win) = backend.windows.get_mut(window) {
+                    if let Some(session) = win.sessions.get_mut(key) {
+                        session.connection = None;
+                        session.session_id = None;
+                        for (_, sender) in session.pending.drain() {
+                            if sender.send(PermissionDecision::Cancelled).is_err() {
+                                log::debug!("pending permission receiver gone during drop");
+                            }
                         }
                     }
+                    win.sessions.remove(key);
                 }
-                state.sessions.remove(key);
-                if state.sessions.values().all(|live| !live.working) {
-                    state.awake = None;
-                }
+                backend.recompute_awake();
             }
-            Err(error) => {
-                log::warn!("failed to drop live session: {error}");
+            None => {
+                log::warn!("failed to drop live session: state poisoned");
             }
         }
         if let Some((connection, id, supports_close, _)) = snapshot
@@ -227,6 +227,7 @@ impl AgentManager {
     /// Shared by lazy first prompts and the eager executing start.
     pub(crate) async fn spawn_session(
         &self,
+        window: &str,
         repo_root: &Path,
         branch: &str,
         plan: ActivePlan,
@@ -238,7 +239,7 @@ impl AgentManager {
         })?;
         let stored = crate::repo_state::load_repo_state(repo_root);
         let connection = self
-            .ensure_connection_for(&key, &plan, opencode::agent_env(&plan.plan_ref()))
+            .ensure_connection_for(window, &key, &plan, opencode::agent_env(&plan.plan_ref()))
             .await?;
         let cwd = plan.cwd(repo_root);
         let response = connection
@@ -275,7 +276,8 @@ impl AgentManager {
         }
         log_roles("applied", &applied);
         {
-            let mut state = self.state.lock().expect("state poisoned");
+            let mut backend = lock_backend(&self.state).expect("state poisoned");
+            let state = backend.ensure_window(window);
             let supports_close = state
                 .sessions
                 .get(&key)
@@ -312,6 +314,7 @@ impl AgentManager {
             );
             state.repo_root = Some(repo_root.to_path_buf());
             state.checkout_branch = branch.to_string();
+            backend.recompute_awake();
         }
         super::session_ids::record_session(repo_root, &key, &session_id);
         log::info!(
@@ -343,26 +346,33 @@ impl AgentManager {
     /// racing warm: one spawner wins, the other polls for liveness.
     pub(crate) async fn ensure_live(
         &self,
+        window: &str,
         key: &SessionKey,
     ) -> Result<(ConnectionTo<Agent>, String), AgentError> {
-        if let Some(live) = self.live_snapshot_for(key) {
+        if let Some(live) = self.live_snapshot_for(window, key) {
             return Ok(live);
         }
-        if let Some(_guard) = WarmGuard::claim(&self.state, key) {
+        if let Some(_guard) = WarmGuard::claim(&self.state, window, key) {
             log::debug!("ensure_live claimed {} {:?}", key.plan, key.role);
-            return self.ensure_live_claimed(key).await;
+            return self.ensure_live_claimed(window, key).await;
         }
         let start = std::time::Instant::now();
         loop {
             let remaining = ENSURE_LIVE_TIMEOUT.saturating_sub(start.elapsed());
             let settled = wait_until(remaining, || {
-                self.live_snapshot_for(key).is_some()
-                    || lock_state(&self.state)
-                        .map(|state| !state.is_warming(key))
+                self.live_snapshot_for(window, key).is_some()
+                    || lock_backend(&self.state)
+                        .map(|backend| {
+                            backend
+                                .windows
+                                .get(window)
+                                .map(|win| !win.is_warming(key))
+                                .unwrap_or(true)
+                        })
                         .unwrap_or(true)
             })
             .await;
-            if let Some(live) = self.live_snapshot_for(key) {
+            if let Some(live) = self.live_snapshot_for(window, key) {
                 log::debug!(
                     "ensure_live polled {} {:?} in {:?}",
                     key.plan,
@@ -371,28 +381,34 @@ impl AgentManager {
                 );
                 return Ok(live);
             }
-            let still_warming = lock_state(&self.state)
-                .map(|state| state.is_warming(key))
+            let still_warming = lock_backend(&self.state)
+                .map(|backend| {
+                    backend
+                        .windows
+                        .get(window)
+                        .map(|win| win.is_warming(key))
+                        .unwrap_or(false)
+                })
                 .unwrap_or(false);
             if !still_warming {
-                if let Some(live) = self.live_snapshot_for(key) {
+                if let Some(live) = self.live_snapshot_for(window, key) {
                     return Ok(live);
                 }
-                if let Some(_guard) = WarmGuard::claim(&self.state, key) {
+                if let Some(_guard) = WarmGuard::claim(&self.state, window, key) {
                     log::debug!(
                         "ensure_live reclaimed {} {:?} in {:?}",
                         key.plan,
                         key.role,
                         start.elapsed()
                     );
-                    return self.ensure_live_claimed(key).await;
+                    return self.ensure_live_claimed(window, key).await;
                 }
             }
             if !settled || start.elapsed() >= ENSURE_LIVE_TIMEOUT {
-                if let Some(live) = self.live_snapshot_for(key) {
+                if let Some(live) = self.live_snapshot_for(window, key) {
                     return Ok(live);
                 }
-                let snapshot_present = self.session_snapshot_for(key).is_some();
+                let snapshot_present = self.session_snapshot_for(window, key).is_some();
                 log::warn!(
                     "ensure_live timeout {} {:?} after {:?}: still_warming={} snapshot_present={}",
                     key.plan,
@@ -414,20 +430,23 @@ impl AgentManager {
     /// first prompt materializes it later.
     pub(crate) async fn ensure_live_claimed(
         &self,
+        window: &str,
         key: &SessionKey,
     ) -> Result<(ConnectionTo<Agent>, String), AgentError> {
-        let (repo_root, branch) = self
-            .reopen_snapshot()
-            .ok_or_else(|| AgentError::NoSession {
-                raw: "open a repository first".to_string(),
-            })?;
+        let (repo_root, branch) =
+            self.reopen_snapshot(window)
+                .ok_or_else(|| AgentError::NoSession {
+                    raw: "open a repository first".to_string(),
+                })?;
         let plan_ref = plans::PlanRef {
             name: key.plan.clone(),
             phase: role_phase(key.role),
         };
-        let is_pending = lock_state(&self.state)
-            .map(|state| {
-                state.pending_scoping.contains_key(&key.plan) && key.role == SessionRole::Scoping
+        let is_pending = lock_backend(&self.state)
+            .map(|backend| {
+                backend.windows.get(window).is_some_and(|win| {
+                    win.pending_scoping.contains_key(&key.plan) && key.role == SessionRole::Scoping
+                })
             })
             .unwrap_or(false);
         if !plan_ref.path(&repo_root).is_dir() && !is_pending {
@@ -435,8 +454,14 @@ impl AgentManager {
                 raw: "plan is gone".to_string(),
             });
         }
-        let stored_prefixed = lock_state(&self.state)
-            .and_then(|state| state.sessions.get(key).map(|live| live.plan.prefixed));
+        let stored_prefixed = lock_backend(&self.state).and_then(|backend| {
+            backend
+                .windows
+                .get(window)?
+                .sessions
+                .get(key)
+                .map(|live| live.plan.prefixed)
+        });
         let mut plan = ActivePlan::for_session(key);
         // A known session keeps its prefix state across transport deaths;
         // anything without an entry starts with the caller's flag.
@@ -445,8 +470,9 @@ impl AgentManager {
         // role already went out as the full first turn.
         plan.prefixed = stored_prefixed.unwrap_or(plan.prefixed);
         let agent = opencode::agent_for(plan.phase);
-        let (connection, session_id, _) =
-            self.spawn_session(&repo_root, &branch, plan, agent).await?;
+        let (connection, session_id, _) = self
+            .spawn_session(window, &repo_root, &branch, plan, agent)
+            .await?;
         Ok((connection, session_id))
     }
 
@@ -459,26 +485,44 @@ impl AgentManager {
     /// it from the CLI on demand; with no past at all (a brand-new plan) a
     /// live session starts instead so the pickers turn live and the
     /// transcript stays empty.
-    pub async fn load_history(&self, session: SessionKey) -> Result<(), AgentError> {
+    pub async fn load_history(&self, window: &str, session: SessionKey) -> Result<(), AgentError> {
         // Serialize a racing warm: history replays wait for the connection
         // to settle instead of silently skipping and leaving the transcript
         // empty forever under the fire-once `useSessionStart`.
-        if lock_state(&self.state)
-            .map(|state| state.is_warming(&session))
+        if lock_backend(&self.state)
+            .map(|backend| {
+                backend
+                    .windows
+                    .get(window)
+                    .map(|win| win.is_warming(&session))
+                    .unwrap_or(false)
+            })
             .unwrap_or(false)
         {
             let wait_start = std::time::Instant::now();
             let settled = wait_until(WARM_TIMEOUT, || {
-                lock_state(&self.state)
-                    .map(|state| !state.is_warming(&session))
+                lock_backend(&self.state)
+                    .map(|backend| {
+                        backend
+                            .windows
+                            .get(window)
+                            .map(|win| !win.is_warming(&session))
+                            .unwrap_or(true)
+                    })
                     .unwrap_or(true)
             })
             .await;
             if !settled {
-                let still_warming = lock_state(&self.state)
-                    .map(|state| state.is_warming(&session))
+                let still_warming = lock_backend(&self.state)
+                    .map(|backend| {
+                        backend
+                            .windows
+                            .get(window)
+                            .map(|win| win.is_warming(&session))
+                            .unwrap_or(false)
+                    })
                     .unwrap_or(false);
-                let snapshot_present = self.session_snapshot_for(&session).is_some();
+                let snapshot_present = self.session_snapshot_for(window, &session).is_some();
                 log::warn!(
                     "history wait timeout {} {:?} after {:?}: still_warming={} snapshot_present={}",
                     session.plan,
@@ -492,13 +536,13 @@ impl AgentManager {
                 return Err(AgentError::RequestFailed { raw });
             }
         }
-        let Some(history_guard) = HistoryGuard::claim(&self.state, &session) else {
+        let Some(history_guard) = HistoryGuard::claim(&self.state, window, &session) else {
             return Ok(());
         };
         // Guard drop aborts on early return: a missing repo no longer wedges
         // the key on `history_loading` forever.
         let (repo_root, _) = self
-            .reopen_snapshot()
+            .reopen_snapshot(window)
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
@@ -518,11 +562,18 @@ impl AgentManager {
         // HistoryBegin only follows when past exists and the connection is
         // ready, just before `session/load`; empty keys finish without it.
         let Some(session_id) = super::session_ids::resolve(&repo_root, &session) else {
-            return self.finish_empty_history(session, history_guard).await;
+            return self
+                .finish_empty_history(window, session, history_guard)
+                .await;
         };
         let plan = ActivePlan::for_session(&session);
         let connection = match self
-            .ensure_connection_for(&session, &plan, opencode::agent_env(&plan.plan_ref()))
+            .ensure_connection_for(
+                window,
+                &session,
+                &plan,
+                opencode::agent_env(&plan.plan_ref()),
+            )
             .await
         {
             Ok(connection) => connection,
@@ -533,8 +584,9 @@ impl AgentManager {
                 return Err(error);
             }
         };
-        if let Some(mut state) = lock_state(&self.state)
-            && let Some(live) = state.sessions.get_mut(&session)
+        if let Some(mut backend) = lock_backend(&self.state)
+            && let Some(win) = backend.windows.get_mut(window)
+            && let Some(live) = win.sessions.get_mut(&session)
         {
             live.session_id = Some(session_id.clone());
         }
@@ -553,8 +605,9 @@ impl AgentManager {
             Ok(response) => {
                 let views = config_views(&response.config_options.unwrap_or_default());
                 let roles = crate::repo_state::roles_from_options(&views);
-                if let Some(mut state) = lock_state(&self.state)
-                    && let Some(live) = state.sessions.get_mut(&session)
+                if let Some(mut backend) = lock_backend(&self.state)
+                    && let Some(win) = backend.windows.get_mut(window)
+                    && let Some(live) = win.sessions.get_mut(&session)
                 {
                     live.last_roles = roles;
                 }
@@ -567,7 +620,7 @@ impl AgentManager {
                     },
                 );
                 emit_event(&self.app, AppEvent::HistoryDone { session });
-                self.push_plans();
+                self.push_plans(window);
                 Ok(())
             }
             Err(error) => {
@@ -594,10 +647,11 @@ impl AgentManager {
     /// histories, so the double-hold is the single spawner.
     async fn finish_empty_history(
         &self,
+        window: &str,
         session: SessionKey,
         history_guard: HistoryGuard,
     ) -> Result<(), AgentError> {
-        if let Some((repo_root, _)) = self.reopen_snapshot()
+        if let Some((repo_root, _)) = self.reopen_snapshot(window)
             && super::session_ids::is_finished(&repo_root, &session.plan)
         {
             let raw = "no saved session found for this plan - it predates session recording or its session was pruned"
@@ -606,20 +660,20 @@ impl AgentManager {
             self.emit_history_failed(&session, raw.clone());
             return Err(AgentError::RequestFailed { raw });
         }
-        if let Some((repo_root, _)) = self.reopen_snapshot()
+        if let Some((repo_root, _)) = self.reopen_snapshot(window)
             && super::landing_queue::is_held(&repo_root, &session)
         {
             history_guard.finish();
             emit_event(&self.app, AppEvent::HistoryDone { session });
             return Ok(());
         }
-        let Some(warm_guard) = WarmGuard::claim(&self.state, &session) else {
+        let Some(warm_guard) = WarmGuard::claim(&self.state, window, &session) else {
             let raw = "agent is still starting, try again".to_string();
             history_guard.fail();
             self.emit_history_failed(&session, raw.clone());
             return Err(AgentError::RequestFailed { raw });
         };
-        let result = self.ensure_live_claimed(&session).await;
+        let result = self.ensure_live_claimed(window, &session).await;
         drop(warm_guard);
         match result {
             Ok(_) => {
@@ -655,21 +709,37 @@ impl AgentManager {
     /// Wait for an in-flight history replay to settle. Prompts never
     /// interleave a live turn with the replay; on timeout the caller
     /// refuses instead.
-    pub(crate) async fn wait_for_history(&self, key: &SessionKey) -> Result<(), AgentError> {
+    pub(crate) async fn wait_for_history(
+        &self,
+        window: &str,
+        key: &SessionKey,
+    ) -> Result<(), AgentError> {
         let wait_start = std::time::Instant::now();
         let settled = wait_until(HISTORY_TIMEOUT, || {
-            lock_state(&self.state)
-                .map(|state| !state.is_history_loading(key))
+            lock_backend(&self.state)
+                .map(|backend| {
+                    backend
+                        .windows
+                        .get(window)
+                        .map(|win| !win.is_history_loading(key))
+                        .unwrap_or(true)
+                })
                 .unwrap_or(true)
         })
         .await;
         if settled {
             return Ok(());
         }
-        let still_warming = lock_state(&self.state)
-            .map(|state| state.is_warming(key))
+        let still_warming = lock_backend(&self.state)
+            .map(|backend| {
+                backend
+                    .windows
+                    .get(window)
+                    .map(|win| win.is_warming(key))
+                    .unwrap_or(false)
+            })
             .unwrap_or(false);
-        let snapshot_present = self.session_snapshot_for(key).is_some();
+        let snapshot_present = self.session_snapshot_for(window, key).is_some();
         log::warn!(
             "history wait timeout {} {:?} after {:?}: still_warming={} snapshot_present={}",
             key.plan,
@@ -684,31 +754,37 @@ impl AgentManager {
     }
 
     /// Drop every live session entry. Repo opens start from scratch.
-    pub(crate) fn clear_sessions(&self) {
-        match self.state.lock() {
-            Ok(mut state) => {
-                state.sessions.clear();
-                state.current = None;
-                state.awake = None;
-                state.pending_scoping.clear();
-                state.worktrees.clear();
-                state.clear_start_claims();
+    pub(crate) fn clear_sessions(&self, window: &str) {
+        match lock_backend(&self.state) {
+            Some(mut backend) => {
+                if let Some(win) = backend.windows.get_mut(window) {
+                    win.sessions.clear();
+                    win.current = None;
+                    win.pending_scoping.clear();
+                    win.worktrees.clear();
+                    win.clear_start_claims();
+                    win.branch_watch = None;
+                } else {
+                    backend
+                        .windows
+                        .insert(window.to_string(), Default::default());
+                }
+                backend.recompute_awake();
             }
-            Err(error) => {
-                log::warn!("failed to clear sessions: {error}");
+            None => {
+                log::warn!("failed to clear sessions: state poisoned");
             }
         }
     }
 
     /// Current repository root, when a session is open.
-    pub fn current_repo(&self) -> Option<PathBuf> {
-        lock_state(&self.state)?.repo_root.clone()
+    pub fn current_repo(&self, window: &str) -> Option<PathBuf> {
+        self.with_window(window, |win| win.repo_root.clone())?
     }
 
     /// True while a scoping name is still a reserved pending session.
-    pub(crate) fn is_pending_scoping(&self, name: &str) -> bool {
-        lock_state(&self.state)
-            .map(|state| state.pending_scoping.contains_key(name))
+    pub(crate) fn is_pending_scoping(&self, window: &str, name: &str) -> bool {
+        self.with_window(window, |win| win.pending_scoping.contains_key(name))
             .unwrap_or(false)
     }
 
@@ -718,22 +794,25 @@ impl AgentManager {
     /// merges over the process environment.
     async fn ensure_connection_for(
         &self,
+        window: &str,
         key: &SessionKey,
         plan: &ActivePlan,
         extra_env: HashMap<String, String>,
     ) -> Result<ConnectionTo<Agent>, AgentError> {
-        if let Some(connection) = self.connection_snapshot_for(key) {
+        if let Some(connection) = self.connection_snapshot_for(window, key) {
             if !connection.is_incoming_closed() {
                 return Ok(connection);
             }
-            match self.state.lock() {
-                Ok(mut state) => {
-                    if let Some(session) = state.sessions.get_mut(key) {
+            match lock_backend(&self.state) {
+                Some(mut backend) => {
+                    if let Some(win) = backend.windows.get_mut(window)
+                        && let Some(session) = win.sessions.get_mut(key)
+                    {
                         session.connection = None;
                     }
                 }
-                Err(error) => {
-                    log::warn!("failed to drop closed agent connection: {error}");
+                None => {
+                    log::warn!("failed to drop closed agent connection: state poisoned");
                 }
             }
         }
@@ -745,13 +824,17 @@ impl AgentManager {
         let config = AcpAgentConfig::new(binary).arg("acp").envs(env);
         let agent = AcpAgent::new(config);
         let slot = Arc::clone(&self.state);
+        let slot_window = window.to_string();
         let notify_state = Arc::clone(&self.state);
+        let notify_window = window.to_string();
         let notify_app = self.app.clone();
         let notify_key = key.clone();
         let ask_state = Arc::clone(&self.state);
+        let ask_window = window.to_string();
         let ask_app = self.app.clone();
         let ask_key = key.clone();
         let exit_app = self.app.clone();
+        let exit_window = window.to_string();
         let exit_key = key.clone();
         let slot_key = key.clone();
         let slot_plan = plan.clone();
@@ -767,9 +850,10 @@ impl AgentManager {
                     move |notification: acp::SessionNotification, _cx| {
                         let state = Arc::clone(&notify_state);
                         let app = notify_app.clone();
+                        let window = notify_window.clone();
                         let key = notify_key.clone();
                         async move {
-                            handle_notification(&state, &app, &key, &notification);
+                            handle_notification(&state, &app, &window, &key, &notification);
                             Ok(())
                         }
                     },
@@ -779,9 +863,13 @@ impl AgentManager {
                     move |request: acp::RequestPermissionRequest, responder, _cx| {
                         let state = Arc::clone(&ask_state);
                         let app = ask_app.clone();
+                        let window = ask_window.clone();
                         let key = ask_key.clone();
                         async move {
-                            handle_permission_request(&state, &app, &key, request, responder).await;
+                            handle_permission_request(
+                                &state, &app, &window, &key, request, responder,
+                            )
+                            .await;
                             Ok(())
                         }
                     },
@@ -790,6 +878,7 @@ impl AgentManager {
                 .connect_with(agent, |connection: ConnectionTo<Agent>| {
                     let slot = Arc::clone(&slot);
                     let ready = Arc::clone(&ready_for_handler);
+                    let window = slot_window.clone();
                     let key = slot_key.clone();
                     let plan = slot_plan.clone();
                     async move {
@@ -799,13 +888,14 @@ impl AgentManager {
                             .await
                             .map_err(|error| acp::internal_error(error.to_string()))?;
                         {
-                            let mut state = slot.lock().expect("state poisoned");
+                            let mut backend = slot.lock().expect("state poisoned");
+                            let win = backend.ensure_window(&window);
                             let supports_close = init_response
                                 .agent_capabilities
                                 .session_capabilities
                                 .close
                                 .is_some();
-                            match state.sessions.get_mut(&key) {
+                            match win.sessions.get_mut(&key) {
                                 Some(session) => {
                                     session.connection = Some(connection.clone());
                                     session.supports_close = supports_close;
@@ -817,9 +907,10 @@ impl AgentManager {
                                     );
                                     fresh.connection = Some(connection.clone());
                                     fresh.supports_close = supports_close;
-                                    state.sessions.insert(key.clone(), fresh);
+                                    win.sessions.insert(key.clone(), fresh);
                                 }
                             }
+                            backend.recompute_awake();
                         }
                         if let Some(tx) = ready.lock().expect("ready poisoned").take()
                             && tx.send(Ok(())).is_err()
@@ -837,8 +928,8 @@ impl AgentManager {
                     let hint = classify_error(&raw);
                     // Startup failures land on the failed flag so the row
                     // dot turns red even before any prompt ran.
-                    set_failed(&slot, &exit_key, true);
-                    push_sorted(&slot, &exit_app);
+                    set_failed(&slot, &exit_window, &exit_key, true);
+                    push_sorted(&slot, &exit_app, &exit_window);
                     emit_event(
                         &exit_app,
                         AppEvent::AgentExited {
@@ -859,7 +950,7 @@ impl AgentManager {
 
         match ready_rx.await {
             Ok(Ok(())) => {
-                self.connection_snapshot_for(key)
+                self.connection_snapshot_for(window, key)
                     .ok_or_else(|| AgentError::RequestFailed {
                         raw: "agent connection vanished during initialize".to_string(),
                     })
@@ -871,21 +962,35 @@ impl AgentManager {
         }
     }
 
-    pub(crate) fn reopen_snapshot(&self) -> Option<(PathBuf, String)> {
-        let state = lock_state(&self.state)?;
-        Some((state.repo_root.clone()?, state.checkout_branch.clone()))
+    pub(crate) fn reopen_snapshot(&self, window: &str) -> Option<(PathBuf, String)> {
+        let backend = lock_backend(&self.state)?;
+        let win = backend.windows.get(window)?;
+        Some((win.repo_root.clone()?, win.checkout_branch.clone()))
     }
 
-    pub(crate) fn connection_snapshot_for(&self, key: &SessionKey) -> Option<ConnectionTo<Agent>> {
-        lock_state(&self.state).and_then(|state| state.sessions.get(key)?.connection.clone())
+    pub(crate) fn connection_snapshot_for(
+        &self,
+        window: &str,
+        key: &SessionKey,
+    ) -> Option<ConnectionTo<Agent>> {
+        lock_backend(&self.state).and_then(|backend| {
+            backend
+                .windows
+                .get(window)?
+                .sessions
+                .get(key)?
+                .connection
+                .clone()
+        })
     }
 
     pub(crate) fn session_snapshot_for(
         &self,
+        window: &str,
         key: &SessionKey,
     ) -> Option<(ConnectionTo<Agent>, String, bool, SessionKey)> {
-        let state = lock_state(&self.state)?;
-        let session = state.sessions.get(key)?;
+        let backend = lock_backend(&self.state)?;
+        let session = backend.windows.get(window)?.sessions.get(key)?;
         Some((
             session.connection.clone()?,
             session.session_id.clone()?,
@@ -898,9 +1003,10 @@ impl AgentManager {
     /// Pure read; callers that need to spawn fall through to the warm claim.
     pub(crate) fn live_snapshot_for(
         &self,
+        window: &str,
         key: &SessionKey,
     ) -> Option<(ConnectionTo<Agent>, String)> {
-        let (connection, session_id, _, _) = self.session_snapshot_for(key)?;
+        let (connection, session_id, _, _) = self.session_snapshot_for(window, key)?;
         (!connection.is_incoming_closed()).then_some((connection, session_id))
     }
 }

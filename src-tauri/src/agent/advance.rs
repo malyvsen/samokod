@@ -18,7 +18,7 @@ use crate::types::{AgentError, PlansUpdate, SessionKey, SessionRole};
 
 use super::landing_queue::{self, LandingPosition};
 use super::session::ActivePlan;
-use super::{AgentManager, lock_state};
+use super::{AgentManager, lock_backend};
 
 /// Pump: advance every automatic idle executing, evergreening, or landing
 /// plan that is ready, oldest arrivals first, at most one transition per
@@ -36,14 +36,15 @@ impl AgentManager {
     /// moves). The pump future is not `Send` (it drives the turn
     /// machinery), so it runs blocking on its own thread instead of the
     /// async runtime.
-    pub(crate) fn spawn_pump(&self) {
+    pub(crate) fn spawn_pump(&self, window: &str) {
         let manager = self.clone();
+        let window = window.to_string();
         tauri::async_runtime::spawn_blocking(move || {
-            tauri::async_runtime::block_on(manager.pump());
+            tauri::async_runtime::block_on(manager.pump(&window));
         });
     }
 
-    pub(crate) async fn pump(&self) {
+    pub(crate) async fn pump(&self, window: &str) {
         let mut fired_any = false;
         // Every fired transition makes its plan ineligible for the next
         // pass (its turn starts, or it leaves the phase), so the pump
@@ -53,7 +54,7 @@ impl AgentManager {
         // one move plus one spawn, so distinct transitions may fire once
         // each per pump run.
         let mut fired_once: HashSet<Transition> = HashSet::new();
-        'pump: while let Some((repo_root, _)) = self.reopen_snapshot() {
+        'pump: while let Some((repo_root, _)) = self.reopen_snapshot(window) {
             let mut scanned = plans::scan_plans(&repo_root);
             scanned.retain(|plan| plan.phase.is_active());
             if scanned.is_empty() {
@@ -69,12 +70,12 @@ impl AgentManager {
             let landing_queue = landing_queue::sorted_landing_names(&repo_root);
             let mut fired = false;
             for plan in &scanned {
-                let view = self.plan_view(&repo_root, plan, &landing_queue);
+                let view = self.plan_view(window, &repo_root, plan, &landing_queue);
                 let Some(action) = next_action(&view) else {
                     continue;
                 };
                 let plan_name = action.plan_name().to_string();
-                match self.transition(action.clone()).await {
+                match self.transition(window, action.clone()).await {
                     Ok(_) => {
                         fired = true;
                         fired_any = true;
@@ -95,7 +96,7 @@ impl AgentManager {
             }
         }
         if fired_any {
-            self.push_plans();
+            self.push_plans(window);
         }
     }
 
@@ -105,6 +106,7 @@ impl AgentManager {
     /// once per pump pass so every plan shares one scan.
     fn plan_view(
         &self,
+        window: &str,
         repo_root: &std::path::Path,
         plan: &plans::PlanRef,
         landing_queue: &[String],
@@ -119,21 +121,25 @@ impl AgentManager {
             Phase::Landing => SessionRole::Landing,
             Phase::Completed | Phase::Cancelled => SessionRole::Scoping,
         };
-        let idle = lock_state(&self.state)
-            .map(|state| {
-                state
-                    .sessions
-                    .get(&SessionKey {
-                        plan: plan.name.clone(),
-                        role,
+        let idle = lock_backend(&self.state)
+            .map(|backend| {
+                backend
+                    .windows
+                    .get(window)
+                    .and_then(|win| {
+                        win.sessions
+                            .get(&SessionKey {
+                                plan: plan.name.clone(),
+                                role,
+                            })
+                            .map(|live| !live.working)
                     })
-                    .map(|live| !live.working)
                     .unwrap_or(true)
             })
             .unwrap_or(true);
         let (dirty, ffable, has_commits) = match plan.phase {
             Phase::Executing | Phase::Evergreening => {
-                match self.worktree_status_for(repo_root, &plan.name) {
+                match self.worktree_status_for(window, repo_root, &plan.name) {
                     Ok(status) => (status.dirty, status.ffable, !status.commits.is_empty()),
                     Err(error) => {
                         log::warn!("automatic view for {} held: {error}", plan.name);
@@ -141,7 +147,7 @@ impl AgentManager {
                     }
                 }
             }
-            Phase::Landing => match self.worktree_status_for(repo_root, &plan.name) {
+            Phase::Landing => match self.worktree_status_for(window, repo_root, &plan.name) {
                 Ok(status) => (status.dirty, status.ffable, false),
                 Err(error) => {
                     log::warn!("automatic view for {} held: {error}", plan.name);
@@ -170,8 +176,8 @@ impl AgentManager {
     /// finds its landing ffable after all should finish instead. Dirty or
     /// missing plans report false so the caller falls through to the
     /// normal branch, which refuses loud with the usual message.
-    fn landing_is_ffable(&self, plan: &str) -> Result<bool, AgentError> {
-        let Some((repo_root, _)) = self.reopen_snapshot() else {
+    fn landing_is_ffable(&self, window: &str, plan: &str) -> Result<bool, AgentError> {
+        let Some((repo_root, _)) = self.reopen_snapshot(window) else {
             return Err(AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             });
@@ -183,7 +189,7 @@ impl AgentManager {
         if !from.path(&repo_root).is_dir() {
             return Ok(false);
         }
-        match self.worktree_status_for(&repo_root, plan) {
+        match self.worktree_status_for(window, &repo_root, plan) {
             Ok(status) => Ok(!status.dirty && status.ffable),
             Err(_) => Ok(false),
         }
@@ -194,13 +200,17 @@ impl AgentManager {
     /// selection, and plans update happen once here for every entry point.
     /// The manual commands map their session onto a `Transition` and
     /// delegate; the pump calls this directly.
-    pub(crate) async fn transition(&self, action: Transition) -> Result<PlansUpdate, AgentError> {
+    pub(crate) async fn transition(
+        &self,
+        window: &str,
+        action: Transition,
+    ) -> Result<PlansUpdate, AgentError> {
         // A landing that finds itself ffable after all finishes instead.
         // Redirected up front so the core below stays a single straight
         // match with no recursion.
         let action = match action {
             Transition::StartLanding { plan } | Transition::RebaseLanding { plan }
-                if self.landing_is_ffable(&plan)? =>
+                if self.landing_is_ffable(window, &plan)? =>
             {
                 Transition::FinishLanding { plan }
             }
@@ -212,9 +222,9 @@ impl AgentManager {
                     plan: plan.clone(),
                     role: SessionRole::Scoping,
                 };
-                super::ensure_idle(&self.state, &session)?;
+                super::ensure_idle(&self.state, window, &session)?;
                 let (repo_root, branch) =
-                    self.reopen_snapshot()
+                    self.reopen_snapshot(window)
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
@@ -230,23 +240,27 @@ impl AgentManager {
                 }
                 let next = plans::execute(&repo_root, &from)?;
                 let record = crate::worktrees::create(&repo_root, &next.name, &base)?;
-                match self.state.lock() {
-                    Ok(mut state) => {
-                        state.worktrees.insert(next.name.clone(), record);
+                match lock_backend(&self.state) {
+                    Some(mut backend) => {
+                        backend
+                            .ensure_window(window)
+                            .worktrees
+                            .insert(next.name.clone(), record);
+                        backend.recompute_awake();
                     }
-                    Err(error) => {
-                        log::warn!("failed to record worktree: {error}");
+                    None => {
+                        log::warn!("failed to record worktree: state poisoned");
                     }
                 }
-                self.drop_live(&session).await;
-                self.carry_prompted(&from.name, &next.name);
+                self.drop_live(window, &session).await;
+                self.carry_prompted(window, &from.name, &next.name);
                 let mut active = ActivePlan::executing(next.name.clone());
                 // The role goes out as the full first turn below, so later
                 // turns never prefix again.
                 active.prefixed = true;
                 let plan_dir_abs = next.path(&repo_root).to_string_lossy().to_string();
                 let text = opencode::executing_first_message(&plan_dir_abs);
-                self.spawn_with_first_turn(&repo_root, &branch, &from.name, active, text)
+                self.spawn_with_first_turn(window, &repo_root, &branch, &from.name, active, text)
                     .await
             }
             Transition::BeginEvergreening { plan } => {
@@ -254,9 +268,9 @@ impl AgentManager {
                     plan: plan.clone(),
                     role: SessionRole::Executing,
                 };
-                super::ensure_idle(&self.state, &session)?;
+                super::ensure_idle(&self.state, window, &session)?;
                 let (repo_root, branch) =
-                    self.reopen_snapshot()
+                    self.reopen_snapshot(window)
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
@@ -272,14 +286,14 @@ impl AgentManager {
                 // Same worktree, so no landing-busy gate and no rebase
                 // precondition; a dirty tree still refuses so user edits
                 // never mix into the cleanup.
-                let status = self.worktree_status_for(&repo_root, &from.name)?;
+                let status = self.worktree_status_for(window, &repo_root, &from.name)?;
                 if status.dirty {
                     return Err(AgentError::RequestFailed {
                         raw: "commit or discard worktree changes first".to_string(),
                     });
                 }
                 let next = plans::begin_evergreening(&repo_root, &from)?;
-                self.drop_live(&session).await;
+                self.drop_live(window, &session).await;
                 let mut active = ActivePlan::evergreening(next.name.clone());
                 // The role goes out as the full first turn below, so later
                 // turns never prefix again.
@@ -292,12 +306,12 @@ impl AgentManager {
                     &status.target_branch,
                     &status.commits.join("\n"),
                 );
-                self.spawn_with_first_turn(&repo_root, &branch, &from.name, active, text)
+                self.spawn_with_first_turn(window, &repo_root, &branch, &from.name, active, text)
                     .await
             }
             Transition::BeginLanding { plan } => {
                 let (repo_root, _) =
-                    self.reopen_snapshot()
+                    self.reopen_snapshot(window)
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
@@ -335,34 +349,35 @@ impl AgentManager {
                         (evergreening, session)
                     }
                 };
-                super::ensure_idle(&self.state, &session)?;
-                let status = self.worktree_status_for(&repo_root, &from.name)?;
+                super::ensure_idle(&self.state, window, &session)?;
+                let status = self.worktree_status_for(window, &repo_root, &from.name)?;
                 super::gate_landing(status.dirty, status.ffable, super::LandingStep::Begin)?;
                 let next = plans::begin_landing(&repo_root, &from)?;
-                self.drop_live(&session).await;
-                self.carry_prompted(&from.name, &next.name);
+                self.drop_live(window, &session).await;
+                self.carry_prompted(window, &from.name, &next.name);
                 self.select_if_viewed(
+                    window,
                     &plan,
                     SessionKey {
                         plan: next.name,
                         role: SessionRole::Landing,
                     },
                 );
-                Ok(self.plans_update())
+                Ok(self.plans_update(window))
             }
             Transition::StartLanding { plan } => {
                 let session = SessionKey {
                     plan: plan.clone(),
                     role: SessionRole::Landing,
                 };
-                super::ensure_idle(&self.state, &session)?;
+                super::ensure_idle(&self.state, window, &session)?;
                 let (repo_root, branch) =
-                    self.reopen_snapshot()
+                    self.reopen_snapshot(window)
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
                 let from = require_landing_head(&repo_root, &plan)?;
-                let status = self.worktree_status_for(&repo_root, &from.name)?;
+                let status = self.worktree_status_for(window, &repo_root, &from.name)?;
                 super::gate_landing(status.dirty, status.ffable, super::LandingStep::Start)?;
                 let mut active = ActivePlan::landing(from.name.clone());
                 // The role goes out as the full first turn below, so later
@@ -370,7 +385,7 @@ impl AgentManager {
                 active.prefixed = true;
                 let plan_md_abs = from.plan_md(&repo_root).to_string_lossy().to_string();
                 let text = landing_first_turn_text(&status, &plan_md_abs);
-                self.spawn_with_first_turn(&repo_root, &branch, &plan, active, text)
+                self.spawn_with_first_turn(window, &repo_root, &branch, &plan, active, text)
                     .await
             }
             Transition::FinishExecuting { plan } => {
@@ -378,9 +393,9 @@ impl AgentManager {
                     plan: plan.clone(),
                     role: SessionRole::Executing,
                 };
-                super::ensure_idle(&self.state, &session)?;
+                super::ensure_idle(&self.state, window, &session)?;
                 let (repo_root, _) =
-                    self.reopen_snapshot()
+                    self.reopen_snapshot(window)
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
@@ -393,34 +408,35 @@ impl AgentManager {
                         raw: "no active plan to complete".to_string(),
                     });
                 }
-                let status = self.worktree_status_for(&repo_root, &from.name)?;
+                let status = self.worktree_status_for(window, &repo_root, &from.name)?;
                 super::gate_landing(status.dirty, status.ffable, super::LandingStep::Finish)?;
                 crate::worktrees::fast_forward(
                     &repo_root,
                     &status.target_branch,
                     &status.worktree_branch,
                 )?;
-                self.remove_worktree(&repo_root, &from.name, false)?;
+                self.remove_worktree(window, &repo_root, &from.name, false)?;
                 let next = plans::complete(&repo_root, &from)?;
-                self.drop_plan_lives(&from.name).await;
-                self.carry_prompted(&from.name, &next.name);
+                self.drop_plan_lives(window, &from.name).await;
+                self.carry_prompted(window, &from.name, &next.name);
                 self.select_if_viewed(
+                    window,
                     &plan,
                     SessionKey {
                         plan: next.name,
                         role: SessionRole::Executing,
                     },
                 );
-                Ok(self.plans_update())
+                Ok(self.plans_update(window))
             }
             Transition::FinishEvergreening { plan } => {
                 let session = SessionKey {
                     plan: plan.clone(),
                     role: SessionRole::Evergreening,
                 };
-                super::ensure_idle(&self.state, &session)?;
+                super::ensure_idle(&self.state, window, &session)?;
                 let (repo_root, _) =
-                    self.reopen_snapshot()
+                    self.reopen_snapshot(window)
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
@@ -433,34 +449,35 @@ impl AgentManager {
                         raw: "no active plan to complete".to_string(),
                     });
                 }
-                let status = self.worktree_status_for(&repo_root, &from.name)?;
+                let status = self.worktree_status_for(window, &repo_root, &from.name)?;
                 super::gate_landing(status.dirty, status.ffable, super::LandingStep::Finish)?;
                 crate::worktrees::fast_forward(
                     &repo_root,
                     &status.target_branch,
                     &status.worktree_branch,
                 )?;
-                self.remove_worktree(&repo_root, &from.name, false)?;
+                self.remove_worktree(window, &repo_root, &from.name, false)?;
                 let next = plans::complete(&repo_root, &from)?;
-                self.drop_plan_lives(&from.name).await;
-                self.carry_prompted(&from.name, &next.name);
+                self.drop_plan_lives(window, &from.name).await;
+                self.carry_prompted(window, &from.name, &next.name);
                 self.select_if_viewed(
+                    window,
                     &plan,
                     SessionKey {
                         plan: next.name,
                         role: SessionRole::Evergreening,
                     },
                 );
-                Ok(self.plans_update())
+                Ok(self.plans_update(window))
             }
             Transition::FinishLanding { plan } => {
                 let session = SessionKey {
                     plan: plan.clone(),
                     role: SessionRole::Landing,
                 };
-                super::ensure_idle(&self.state, &session)?;
+                super::ensure_idle(&self.state, window, &session)?;
                 let (repo_root, _) =
-                    self.reopen_snapshot()
+                    self.reopen_snapshot(window)
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
@@ -473,39 +490,40 @@ impl AgentManager {
                         raw: "no active plan to complete".to_string(),
                     });
                 }
-                let status = self.worktree_status_for(&repo_root, &from.name)?;
+                let status = self.worktree_status_for(window, &repo_root, &from.name)?;
                 super::gate_landing(status.dirty, status.ffable, super::LandingStep::Finish)?;
                 crate::worktrees::fast_forward(
                     &repo_root,
                     &status.target_branch,
                     &status.worktree_branch,
                 )?;
-                self.remove_worktree(&repo_root, &from.name, false)?;
+                self.remove_worktree(window, &repo_root, &from.name, false)?;
                 let next = plans::finish_landing(&repo_root, &from)?;
-                self.drop_plan_lives(&from.name).await;
-                self.carry_prompted(&from.name, &next.name);
+                self.drop_plan_lives(window, &from.name).await;
+                self.carry_prompted(window, &from.name, &next.name);
                 self.select_if_viewed(
+                    window,
                     &plan,
                     SessionKey {
                         plan: next.name,
                         role: SessionRole::Landing,
                     },
                 );
-                Ok(self.plans_update())
+                Ok(self.plans_update(window))
             }
             Transition::RebaseLanding { plan } => {
                 let session = SessionKey {
                     plan: plan.clone(),
                     role: SessionRole::Landing,
                 };
-                super::ensure_idle(&self.state, &session)?;
+                super::ensure_idle(&self.state, window, &session)?;
                 let (repo_root, _) =
-                    self.reopen_snapshot()
+                    self.reopen_snapshot(window)
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
                 let from = require_landing_head(&repo_root, &plan)?;
-                let status = self.worktree_status_for(&repo_root, &from.name)?;
+                let status = self.worktree_status_for(window, &repo_root, &from.name)?;
                 if status.dirty {
                     return Err(AgentError::RequestFailed {
                         raw: "commit or discard worktree changes first".to_string(),
@@ -513,12 +531,18 @@ impl AgentManager {
                 }
                 let plan_md_abs = from.plan_md(&repo_root).to_string_lossy().to_string();
                 let text = landing_first_turn_text(&status, &plan_md_abs);
-                let (connection, session_id) = self.ensure_live(&session).await?;
-                self.mark_prompted(&from.name);
-                self.start_turn(connection, session_id, session.clone(), text.clone())
-                    .await?;
+                let (connection, session_id) = self.ensure_live(window, &session).await?;
+                self.mark_prompted(window, &from.name);
+                self.start_turn(
+                    window,
+                    connection,
+                    session_id,
+                    session.clone(),
+                    text.clone(),
+                )
+                .await?;
                 self.announce_first_prompt(&session, &text);
-                Ok(self.plans_update())
+                Ok(self.plans_update(window))
             }
         }
     }
@@ -531,6 +555,7 @@ impl AgentManager {
     /// `active` so the prompted flag follows it. Follows its own move only.
     async fn spawn_with_first_turn(
         &self,
+        window: &str,
         repo_root: &std::path::Path,
         branch: &str,
         acted_plan: &str,
@@ -539,14 +564,15 @@ impl AgentManager {
     ) -> Result<PlansUpdate, AgentError> {
         let plan_name = active.name.clone();
         let agent = opencode::agent_for(active.phase);
-        let (connection, session_id, key) =
-            self.spawn_session(repo_root, branch, active, agent).await?;
-        self.select_if_viewed(acted_plan, key.clone());
-        self.mark_prompted(&plan_name);
-        self.start_turn(connection, session_id, key.clone(), text.clone())
+        let (connection, session_id, key) = self
+            .spawn_session(window, repo_root, branch, active, agent)
+            .await?;
+        self.select_if_viewed(window, acted_plan, key.clone());
+        self.mark_prompted(window, &plan_name);
+        self.start_turn(window, connection, session_id, key.clone(), text.clone())
             .await?;
         self.announce_first_prompt(&key, &text);
-        Ok(self.plans_update())
+        Ok(self.plans_update(window))
     }
 }
 

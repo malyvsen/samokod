@@ -17,16 +17,17 @@ use super::AgentManager;
 use super::landing_queue;
 use super::scoping_preview_for;
 use super::session::LiveSession;
-use super::{State, emit_event, lock_state};
+use super::{BackendState, WindowState, emit_event, lock_backend};
 
 impl AgentManager {
     /// Current repo payload: plans plus the most-recent session.
-    pub(crate) fn open_result(&self) -> OpenRepoResult {
-        let state = self.state.lock().expect("state poisoned");
+    pub(crate) fn open_result(&self, window: &str) -> OpenRepoResult {
+        let backend = lock_backend(&self.state).expect("state poisoned");
+        let state = backend.windows.get(window).expect("window gone");
         let branch = state.checkout_branch.clone();
-        let (repo_root, plans, selected) = listed(&state, None);
+        let (repo_root, plans, selected) = listed(state, None);
         let config_defaults = defaults_for(&repo_root);
-        let scoping_preview = scoping_preview_for(&state, &repo_root, &selected);
+        let scoping_preview = scoping_preview_for(state, &repo_root, &selected);
         OpenRepoResult {
             repo_root: repo_root.to_string_lossy().to_string(),
             branch,
@@ -39,11 +40,12 @@ impl AgentManager {
 
     /// Fresh plans payload with the current selection. Emitted after every
     /// prompt, transition, or title change.
-    pub(crate) fn plans_update(&self) -> PlansUpdate {
-        let state = self.state.lock().expect("state poisoned");
-        let (repo_root, plans, selected) = listed(&state, state.current.as_ref());
+    pub(crate) fn plans_update(&self, window: &str) -> PlansUpdate {
+        let backend = lock_backend(&self.state).expect("state poisoned");
+        let state = backend.windows.get(window).expect("window gone");
+        let (repo_root, plans, selected) = listed(state, state.current.as_ref());
         let config_defaults = defaults_for(&repo_root);
-        let scoping_preview = scoping_preview_for(&state, &repo_root, &selected);
+        let scoping_preview = scoping_preview_for(state, &repo_root, &selected);
         PlansUpdate {
             plans,
             selected,
@@ -54,14 +56,17 @@ impl AgentManager {
 
     /// Lightweight push: list plus selection only. Responses carry the
     /// preview and defaults; pushes never do.
-    pub(crate) fn push_plans(&self) {
-        let (plans, selected) = match self.state.lock() {
-            Ok(state) => {
-                let (_, plans, selected) = listed(&state, state.current.as_ref());
+    pub(crate) fn push_plans(&self, window: &str) {
+        let (plans, selected) = match lock_backend(&self.state) {
+            Some(backend) => {
+                let Some(state) = backend.windows.get(window) else {
+                    return;
+                };
+                let (_, plans, selected) = listed(state, state.current.as_ref());
                 (plans, selected)
             }
-            Err(error) => {
-                log::warn!("failed to rebuild plans list: {error}");
+            None => {
+                log::warn!("failed to rebuild plans list: state poisoned");
                 return;
             }
         };
@@ -70,24 +75,28 @@ impl AgentManager {
 
     /// Record one user prompt for the empty-scoping gate, in memory and
     /// on disk.
-    pub(crate) fn mark_prompted(&self, plan: &str) {
-        let repo_root = match lock_state(&self.state) {
-            Some(mut state) => {
+    pub(crate) fn mark_prompted(&self, window: &str, plan: &str) {
+        let repo_root = match lock_backend(&self.state) {
+            Some(mut backend) => {
+                let state = backend.ensure_window(window);
                 state.prompted.insert(plan.to_string());
-                state.repo_root.clone()
+                let root = state.repo_root.clone();
+                backend.recompute_awake();
+                root
             }
             None => None,
         };
         if let Some(root) = repo_root {
             super::session_ids::mark_prompted(&root, plan);
         }
-        self.push_plans();
+        self.push_plans(window);
     }
 
     /// Carry the memory copy of the gate flag across a plan rename. The
     /// disk copy travels with the directory move.
-    pub(crate) fn carry_prompted(&self, from: &str, to: &str) {
-        if let Some(mut state) = lock_state(&self.state)
+    pub(crate) fn carry_prompted(&self, window: &str, from: &str, to: &str) {
+        if let Some(mut backend) = lock_backend(&self.state)
+            && let Some(state) = backend.windows.get_mut(window)
             && state.prompted.remove(from)
         {
             state.prompted.insert(to.to_string());
@@ -95,25 +104,29 @@ impl AgentManager {
     }
 
     /// Pin the selection to one session key.
-    pub(crate) fn select_key(&self, key: SessionKey) {
-        match self.state.lock() {
-            Ok(mut state) => {
-                state.current = Some(key);
-            }
-            Err(error) => {
-                log::warn!("failed to select session: {error}");
-            }
+    pub(crate) fn select_key(&self, window: &str, key: SessionKey) {
+        if self
+            .with_window_mut(window, |win| {
+                win.current = Some(key);
+            })
+            .is_none()
+        {
+            log::warn!("failed to select session: state poisoned");
         }
     }
 
     /// Follow the acted plan's own move: pin the selection to `next` only
     /// when the viewed plan is the acted one, otherwise leave it alone so
     /// background work never steals the selection.
-    pub(crate) fn select_if_viewed(&self, acted_plan: &str, next: SessionKey) {
-        let follows = lock_state(&self.state)
-            .is_some_and(|state| is_viewed(state.current.as_ref(), acted_plan));
+    pub(crate) fn select_if_viewed(&self, window: &str, acted_plan: &str, next: SessionKey) {
+        let follows = lock_backend(&self.state).is_some_and(|backend| {
+            backend
+                .windows
+                .get(window)
+                .is_some_and(|state| is_viewed(state.current.as_ref(), acted_plan))
+        });
         if follows {
-            self.select_key(next);
+            self.select_key(window, next);
         }
     }
 }
@@ -415,7 +428,10 @@ fn fallback_selected(plans: &[PlanEntry], current: Option<&SessionKey>) -> Sessi
 /// Sorted plans plus selection for one locked state: the shared prefix of
 /// every plans payload. Responses extend it with defaults and the scoping
 /// preview; pushes emit it as-is.
-fn listed(state: &State, current: Option<&SessionKey>) -> (PathBuf, Vec<PlanEntry>, SessionKey) {
+fn listed(
+    state: &WindowState,
+    current: Option<&SessionKey>,
+) -> (PathBuf, Vec<PlanEntry>, SessionKey) {
     let repo_root = state.repo_root.clone().unwrap_or_default();
     let plans = sorted_entries(
         &repo_root,
@@ -429,18 +445,21 @@ fn listed(state: &State, current: Option<&SessionKey>) -> (PathBuf, Vec<PlanEntr
 
 /// Rebuild the plans list from a spawned task holding only state and app.
 /// Titles re-read here, so every finished turn refreshes plan names.
-pub(crate) fn push_sorted(state: &Mutex<State>, app: &AppHandle) {
+pub(crate) fn push_sorted(state: &Mutex<BackendState>, app: &AppHandle, window: &str) {
     let (plans, selected) = match state.lock() {
         Ok(guard) => {
-            let repo_root = guard.repo_root.clone().unwrap_or_default();
-            let checkout_branch = guard.checkout_branch.clone();
+            let Some(win) = guard.windows.get(window) else {
+                return;
+            };
+            let repo_root = win.repo_root.clone().unwrap_or_default();
+            let checkout_branch = win.checkout_branch.clone();
             let plans = sorted_entries(
                 &repo_root,
                 &checkout_branch,
-                &guard.sessions,
-                &guard.pending_scoping,
+                &win.sessions,
+                &win.pending_scoping,
             );
-            let selected = guard.current.clone().or_else(|| most_recent_key(&plans));
+            let selected = win.current.clone().or_else(|| most_recent_key(&plans));
             (plans, selected)
         }
         Err(error) => {

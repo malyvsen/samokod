@@ -21,8 +21,10 @@ mod worktrees;
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, Window};
 use tauri_plugin_log::{Target, TargetKind};
+
+use crate::agent::window_label;
 
 use crate::agent::AgentManager;
 use crate::prefs::{load_prefs, record_open, save_prefs};
@@ -42,12 +44,14 @@ fn validate_repo_path(path: String) -> Result<RepoInfo, String> {
 #[tauri::command]
 async fn open_repo(
     app: AppHandle,
+    window: Window,
     state: State<'_, AgentManager>,
     path: String,
 ) -> Result<OpenRepoResult, String> {
     let info = validate_repo(&PathBuf::from(&path))?;
+    let label = window_label(&window);
     let result = state
-        .open_repo(PathBuf::from(&info.root))
+        .open_repo(&label, PathBuf::from(&info.root))
         .await
         .map_err(|error| error.to_string())?;
     let dir = prefs_dir(&app)?;
@@ -60,189 +64,218 @@ async fn open_repo(
 }
 
 #[tauri::command]
-async fn refresh_branch(state: State<'_, AgentManager>) -> Result<String, String> {
+async fn refresh_branch(window: Window, state: State<'_, AgentManager>) -> Result<String, String> {
     state
-        .refresh_branch()
+        .refresh_branch(&window_label(&window))
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn create_plan(
+    window: Window,
     state: State<'_, AgentManager>,
     draft: Option<String>,
 ) -> Result<PlansUpdate, String> {
     state
-        .create_plan(draft)
+        .create_plan(&window_label(&window), draft)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn execute_plan(
+    window: Window,
     state: State<'_, AgentManager>,
     session: SessionKey,
 ) -> Result<PlansUpdate, String> {
     state
-        .execute_plan(session)
+        .execute_plan(&window_label(&window), session)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn finish_landing(
+    window: Window,
     state: State<'_, AgentManager>,
     session: SessionKey,
 ) -> Result<PlansUpdate, String> {
     state
-        .finish_landing(session)
+        .finish_landing(&window_label(&window), session)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn begin_landing(
+    window: Window,
     state: State<'_, AgentManager>,
     session: SessionKey,
 ) -> Result<PlansUpdate, String> {
     state
-        .begin_landing(session)
+        .begin_landing(&window_label(&window), session)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn cancel_plan(
+    window: Window,
     state: State<'_, AgentManager>,
     session: SessionKey,
 ) -> Result<PlansUpdate, String> {
     state
-        .cancel_plan(session)
+        .cancel_plan(&window_label(&window), session)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn select_plan(
+    window: Window,
     state: State<'_, AgentManager>,
     session: SessionKey,
     draft: Option<String>,
 ) -> Result<PlansUpdate, String> {
     state
-        .select_plan(session, draft)
+        .select_plan(&window_label(&window), session, draft)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn set_plan_mode(
+    window: Window,
     state: State<'_, AgentManager>,
     plan: String,
     manual: bool,
 ) -> Result<PlansUpdate, String> {
     state
-        .set_plan_mode(plan, manual)
+        .set_plan_mode(&window_label(&window), plan, manual)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn set_plan_evergreen(
+    window: Window,
     state: State<'_, AgentManager>,
     plan: String,
     evergreen: bool,
 ) -> Result<PlansUpdate, String> {
     state
-        .set_plan_evergreen(plan, evergreen)
+        .set_plan_evergreen(&window_label(&window), plan, evergreen)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn send_prompt(
+    window: Window,
     state: State<'_, AgentManager>,
     session: SessionKey,
     text: String,
 ) -> Result<(), String> {
     state
-        .send_prompt(session, text)
+        .send_prompt(&window_label(&window), session, text)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn retry_last(state: State<'_, AgentManager>, session: SessionKey) -> Result<bool, String> {
+async fn retry_last(
+    window: Window,
+    state: State<'_, AgentManager>,
+    session: SessionKey,
+) -> Result<bool, String> {
     state
-        .retry_last(session)
+        .retry_last(&window_label(&window), session)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn cancel_turn(state: State<'_, AgentManager>, session: SessionKey) -> Result<(), String> {
+async fn cancel_turn(
+    window: Window,
+    state: State<'_, AgentManager>,
+    session: SessionKey,
+) -> Result<(), String> {
     state
-        .cancel_turn(session)
+        .cancel_turn(&window_label(&window), session)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn answer_permission(
+    window: Window,
     state: State<'_, AgentManager>,
     session: SessionKey,
     tool_call_id: String,
     option_id: Option<String>,
 ) -> Result<(), String> {
     state
-        .answer_permission(session, &tool_call_id, option_id)
+        .answer_permission(&window_label(&window), session, &tool_call_id, option_id)
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn set_global_config_option(
+    window: Window,
     state: State<'_, AgentManager>,
     config_id: String,
     value: String,
 ) -> Result<Vec<ConfigOptionView>, String> {
     state
-        .set_global_config_option(config_id, value)
+        .set_global_config_option(&window_label(&window), config_id, value)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn plan_md_text(
+    window: Window,
     state: State<'_, AgentManager>,
     session: SessionKey,
 ) -> Result<Option<String>, String> {
     state
-        .plan_md_text(session)
+        .plan_md_text(&window_label(&window), session)
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn save_attachment(
+    window: Window,
     state: State<'_, AgentManager>,
     session: SessionKey,
     data_base64: String,
 ) -> Result<String, String> {
     state
-        .save_attachment(session, data_base64)
+        .save_attachment(&window_label(&window), session, data_base64)
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn warm_session(state: State<'_, AgentManager>, session: SessionKey) -> Result<(), String> {
+async fn warm_session(
+    window: Window,
+    state: State<'_, AgentManager>,
+    session: SessionKey,
+) -> Result<(), String> {
     state
-        .warm_session(session)
+        .warm_session(&window_label(&window), session)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn load_history(state: State<'_, AgentManager>, session: SessionKey) -> Result<(), String> {
+async fn load_history(
+    window: Window,
+    state: State<'_, AgentManager>,
+    session: SessionKey,
+) -> Result<(), String> {
     state
-        .load_history(session)
+        .load_history(&window_label(&window), session)
         .await
         .map_err(|error| error.to_string())
 }

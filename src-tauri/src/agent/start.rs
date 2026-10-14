@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::types::SessionKey;
 
-use super::{State, lock_state};
+use super::{BackendState, WindowState, lock_backend};
 
 /// Bounds the `ensure_live` wait for a racing warm to settle: cold
 /// spawns cover process start, initialize, new session, mode pin, and
@@ -40,7 +40,7 @@ pub(crate) async fn wait_until(timeout: Duration, mut predicate: impl FnMut() ->
     }
 }
 
-impl State {
+impl WindowState {
     /// True while a history replay runs for the key. Prompts wait on this;
     /// replayed notifications and approvals render on this.
     pub(crate) fn is_history_loading(&self, key: &SessionKey) -> bool {
@@ -110,18 +110,22 @@ impl State {
 
 /// RAII warm claim: releases on drop so every early return settles it.
 pub(crate) struct WarmGuard {
-    inner: Option<(Arc<Mutex<State>>, SessionKey)>,
+    inner: Option<(Arc<Mutex<BackendState>>, String, SessionKey)>,
 }
 
 impl WarmGuard {
     /// Claim the warm slot, returning the guard on success.
-    pub(crate) fn claim(state: &Arc<Mutex<State>>, key: &SessionKey) -> Option<Self> {
-        let claimed = lock_state(state)
-            .map(|mut guard| guard.claim_warm(key))
+    pub(crate) fn claim(
+        state: &Arc<Mutex<BackendState>>,
+        window: &str,
+        key: &SessionKey,
+    ) -> Option<Self> {
+        let claimed = lock_backend(state)
+            .map(|mut backend| backend.ensure_window(window).claim_warm(key))
             .unwrap_or(false);
         if claimed {
             Some(WarmGuard {
-                inner: Some((Arc::clone(state), key.clone())),
+                inner: Some((Arc::clone(state), window.to_string(), key.clone())),
             })
         } else {
             None
@@ -137,10 +141,11 @@ impl WarmGuard {
 
 impl Drop for WarmGuard {
     fn drop(&mut self) {
-        if let Some((state, key)) = self.inner.take()
-            && let Some(mut guard) = lock_state(&state)
+        if let Some((state, window, key)) = self.inner.take()
+            && let Some(mut backend) = lock_backend(&state)
+            && let Some(win) = backend.windows.get_mut(&window)
         {
-            guard.release_warm(&key);
+            win.release_warm(&key);
         }
     }
 }
@@ -148,18 +153,22 @@ impl Drop for WarmGuard {
 /// RAII history claim: explicit `finish` / `fail` consume the guard,
 /// drop defaults to abort so a missing repo never wedges the key.
 pub(crate) struct HistoryGuard {
-    inner: Option<(Arc<Mutex<State>>, SessionKey)>,
+    inner: Option<(Arc<Mutex<BackendState>>, String, SessionKey)>,
 }
 
 impl HistoryGuard {
     /// Claim the history slot, returning the guard on success.
-    pub(crate) fn claim(state: &Arc<Mutex<State>>, key: &SessionKey) -> Option<Self> {
-        let claimed = lock_state(state)
-            .map(|mut guard| guard.claim_history(key))
+    pub(crate) fn claim(
+        state: &Arc<Mutex<BackendState>>,
+        window: &str,
+        key: &SessionKey,
+    ) -> Option<Self> {
+        let claimed = lock_backend(state)
+            .map(|mut backend| backend.ensure_window(window).claim_history(key))
             .unwrap_or(false);
         if claimed {
             Some(HistoryGuard {
-                inner: Some((Arc::clone(state), key.clone())),
+                inner: Some((Arc::clone(state), window.to_string(), key.clone())),
             })
         } else {
             None
@@ -168,19 +177,21 @@ impl HistoryGuard {
 
     /// Settle a finished replay, consuming the guard.
     pub(crate) fn finish(mut self) {
-        if let Some((state, key)) = self.inner.take()
-            && let Some(mut guard) = lock_state(&state)
+        if let Some((state, window, key)) = self.inner.take()
+            && let Some(mut backend) = lock_backend(&state)
+            && let Some(win) = backend.windows.get_mut(&window)
         {
-            guard.finish_history(&key);
+            win.finish_history(&key);
         }
     }
 
     /// Release a failed replay, consuming the guard.
     pub(crate) fn fail(mut self) {
-        if let Some((state, key)) = self.inner.take()
-            && let Some(mut guard) = lock_state(&state)
+        if let Some((state, window, key)) = self.inner.take()
+            && let Some(mut backend) = lock_backend(&state)
+            && let Some(win) = backend.windows.get_mut(&window)
         {
-            guard.abort_history(&key);
+            win.abort_history(&key);
         }
     }
 
@@ -193,10 +204,11 @@ impl HistoryGuard {
 
 impl Drop for HistoryGuard {
     fn drop(&mut self) {
-        if let Some((state, key)) = self.inner.take()
-            && let Some(mut guard) = lock_state(&state)
+        if let Some((state, window, key)) = self.inner.take()
+            && let Some(mut backend) = lock_backend(&state)
+            && let Some(win) = backend.windows.get_mut(&window)
         {
-            guard.abort_history(&key);
+            win.abort_history(&key);
         }
     }
 }
@@ -216,7 +228,7 @@ mod tests {
 
     #[test]
     fn claim_is_single_flight() {
-        let mut state = State::default();
+        let mut state = WindowState::default();
         let key = key();
         assert!(state.claim_warm(&key));
         assert!(!state.claim_warm(&key));
@@ -224,7 +236,7 @@ mod tests {
 
     #[test]
     fn release_allows_reclaim_after_failure() {
-        let mut state = State::default();
+        let mut state = WindowState::default();
         let key = key();
         assert!(state.claim_warm(&key));
         state.release_warm(&key);
@@ -233,7 +245,7 @@ mod tests {
 
     #[test]
     fn warm_claims_during_history() {
-        let mut state = State::default();
+        let mut state = WindowState::default();
         let key = key();
         assert!(state.claim_history(&key));
         assert!(state.claim_warm(&key));
@@ -242,7 +254,7 @@ mod tests {
 
     #[test]
     fn history_refused_during_turn() {
-        let mut state = State::default();
+        let mut state = WindowState::default();
         let key = key();
         state.sessions.insert(
             key.clone(),
@@ -257,78 +269,67 @@ mod tests {
 
     #[test]
     fn history_claims_during_warm() {
-        let mut state = State::default();
+        let mut state = WindowState::default();
         let key = key();
         assert!(state.claim_warm(&key));
         assert!(state.claim_history(&key));
     }
 
+    fn window_is(
+        state: &Arc<Mutex<BackendState>>,
+        window: &str,
+        key: &SessionKey,
+    ) -> (bool, bool, bool) {
+        let backend = lock_backend(state).expect("lock");
+        let win = backend.windows.get(window).expect("window");
+        (
+            win.is_warming(key),
+            win.is_history_loading(key),
+            win.history_started(key),
+        )
+    }
+
     #[test]
     fn empty_path_holds_both_guards() {
-        let state = Arc::new(Mutex::new(State::default()));
+        let state = Arc::new(Mutex::new(BackendState::default()));
         let key = key();
-        let history = HistoryGuard::claim(&state, &key).expect("history");
+        let history = HistoryGuard::claim(&state, "main", &key).expect("history");
         assert!(history.is_held());
-        let warm = WarmGuard::claim(&state, &key).expect("warm");
+        let warm = WarmGuard::claim(&state, "main", &key).expect("warm");
         assert!(warm.is_held());
-        assert!(
-            lock_state(&state)
-                .map(|guard| guard.is_warming(&key) && guard.is_history_loading(&key))
-                .unwrap_or(false)
-        );
+        let (warming, loading, _) = window_is(&state, "main", &key);
+        assert!(warming && loading);
         drop(warm);
-        assert!(
-            lock_state(&state)
-                .map(|guard| !guard.is_warming(&key) && guard.is_history_loading(&key))
-                .unwrap_or(false)
-        );
+        let (warming, loading, _) = window_is(&state, "main", &key);
+        assert!(!warming && loading);
         history.finish();
-        assert!(
-            lock_state(&state)
-                .map(|guard| !guard.is_history_loading(&key) && guard.history_started(&key))
-                .unwrap_or(false)
-        );
+        let (_, loading, started) = window_is(&state, "main", &key);
+        assert!(!loading && started);
     }
 
     #[test]
     fn warm_guard_releases_on_drop() {
-        let state = Arc::new(Mutex::new(State::default()));
+        let state = Arc::new(Mutex::new(BackendState::default()));
         let key = key();
         for _ in 0..2 {
-            let guard = WarmGuard::claim(&state, &key).expect("claim");
+            let guard = WarmGuard::claim(&state, "main", &key).expect("claim");
             assert!(guard.is_held());
-            assert!(
-                lock_state(&state)
-                    .map(|guard| guard.is_warming(&key))
-                    .unwrap_or(false)
-            );
+            assert!(window_is(&state, "main", &key).0);
             drop(guard);
-            assert!(
-                !lock_state(&state)
-                    .map(|guard| guard.is_warming(&key))
-                    .unwrap_or(true)
-            );
+            assert!(!window_is(&state, "main", &key).0);
         }
     }
 
     #[test]
     fn history_guard_aborts_on_drop() {
-        let state = Arc::new(Mutex::new(State::default()));
+        let state = Arc::new(Mutex::new(BackendState::default()));
         let key = key();
         {
-            let guard = HistoryGuard::claim(&state, &key).expect("claim");
+            let guard = HistoryGuard::claim(&state, "main", &key).expect("claim");
             assert!(guard.is_held());
-            assert!(
-                lock_state(&state)
-                    .map(|guard| guard.is_history_loading(&key))
-                    .unwrap_or(false)
-            );
+            assert!(window_is(&state, "main", &key).1);
         }
-        assert!(
-            !lock_state(&state)
-                .map(|guard| guard.is_history_loading(&key))
-                .unwrap_or(true)
-        );
-        assert!(HistoryGuard::claim(&state, &key).is_some());
+        assert!(!window_is(&state, "main", &key).1);
+        assert!(HistoryGuard::claim(&state, "main", &key).is_some());
     }
 }
