@@ -193,4 +193,40 @@ describe("settings selectors", () => {
 			expect.stringContaining("High"),
 		]);
 	});
+
+	test("escape closes the model menu", async () => {
+		const user = userEvent.setup();
+		render(selectors(standard, false, vi.fn()));
+		await user.click(screen.getByLabelText("Model"));
+		expect(screen.getByText("Muse Spark 1.3")).toBeInTheDocument();
+		await user.keyboard("{Escape}");
+		expect(screen.queryByText("Muse Spark 1.3")).not.toBeInTheDocument();
+	});
+
+	test("outside clicks close the model menu", async () => {
+		const user = userEvent.setup();
+		render(selectors(standard, false, vi.fn()));
+		await user.click(screen.getByLabelText("Model"));
+		expect(screen.getByText("Muse Spark 1.3")).toBeInTheDocument();
+		await user.click(screen.getByLabelText("Thought"));
+		expect(screen.queryByText("Muse Spark 1.3")).not.toBeInTheDocument();
+	});
+
+	test("escape closes the effort menu", async () => {
+		const user = userEvent.setup();
+		render(selectors(standard, false, vi.fn()));
+		await user.click(screen.getByLabelText("Thought"));
+		expect(screen.getByText("low")).toBeInTheDocument();
+		await user.keyboard("{Escape}");
+		expect(screen.queryByText("low")).not.toBeInTheDocument();
+	});
+
+	test("outside clicks close the effort menu", async () => {
+		const user = userEvent.setup();
+		render(selectors(standard, false, vi.fn()));
+		await user.click(screen.getByLabelText("Thought"));
+		expect(screen.getByText("low")).toBeInTheDocument();
+		await user.click(screen.getByLabelText("Model"));
+		expect(screen.queryByText("low")).not.toBeInTheDocument();
+	});
 });

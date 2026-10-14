@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
 	ConfigOptionValueView,
 	ConfigOptionView,
@@ -97,19 +97,38 @@ export function OptionDropdown({
 	onChange: (configId: string, value: string) => void;
 }) {
 	const [open, setOpen] = useState(false);
+	const rootRef = useRef<HTMLSpanElement>(null);
+
+	useEffect(() => {
+		if (!open) return;
+		function onPointerDown(event: PointerEvent) {
+			if (rootRef.current?.contains(event.target as Node)) return;
+			setOpen(false);
+		}
+		function onKeyDown(event: KeyboardEvent) {
+			if (event.key === "Escape") setOpen(false);
+		}
+		document.addEventListener("pointerdown", onPointerDown);
+		document.addEventListener("keydown", onKeyDown);
+		return () => {
+			document.removeEventListener("pointerdown", onPointerDown);
+			document.removeEventListener("keydown", onKeyDown);
+		};
+	}, [open]);
 	const selected: ConfigOptionValueView | undefined = option.options.find(
 		(value) => value.value === option.currentValue,
 	);
 	const label = selected !== undefined ? selected.name : option.name;
 	const isFixed = option.options.length <= 1;
 	return (
-		<span className="dwrap">
+		<span className="dwrap" ref={rootRef}>
 			<button
 				className="dsel"
 				type="button"
 				disabled={disabled || isFixed}
 				onClick={() => setOpen((value) => !value)}
 				aria-label={option.name}
+				aria-expanded={open}
 			>
 				<span className="dlabel">{label}</span>
 				<span className="arrow">▾</span>
