@@ -142,6 +142,18 @@ pub enum SessionRole {
     Landing,
 }
 
+impl SessionRole {
+    /// True for the work roles that auto-advance on the pump. Scoping
+    /// always waits for its manual approval click, so STOP and plan drops
+    /// leave it untouched. Pure.
+    pub fn is_work(self) -> bool {
+        matches!(
+            self,
+            SessionRole::Executing | SessionRole::Evergreening | SessionRole::Landing
+        )
+    }
+}
+
 /// Key of one live session: plan directory name plus role.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 pub struct SessionKey {
@@ -418,6 +430,14 @@ mod tests {
     #[test]
     fn missing_binary_names_opencode() {
         assert!(AgentError::MissingBinary.to_string().contains("opencode"));
+    }
+
+    #[test]
+    fn only_work_roles_auto_advance() {
+        assert!(!SessionRole::Scoping.is_work());
+        assert!(SessionRole::Executing.is_work());
+        assert!(SessionRole::Evergreening.is_work());
+        assert!(SessionRole::Landing.is_work());
     }
 
     #[test]

@@ -17,6 +17,12 @@ export function sameSession(
 	return left.plan === right.plan && left.role === right.role;
 }
 
+// True for the work roles that auto-advance. Scoping always waits for its
+// manual approval, so STOP leaves it untouched.
+export function isWorkRole(role: SessionKey["role"]): boolean {
+	return role === "executing" || role === "evergreening" || role === "landing";
+}
+
 export type TranscriptItem =
 	| { kind: "user"; id: string; text: string }
 	| { kind: "agent"; id: string; text: string }

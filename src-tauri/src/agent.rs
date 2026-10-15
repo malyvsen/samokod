@@ -770,14 +770,8 @@ impl AgentManager {
         plan: String,
         manual: bool,
     ) -> Result<PlansUpdate, AgentError> {
-        self.update_plan_state(window, plan, |state| {
-            if state.manual == manual {
-                return false;
-            }
-            state.manual = manual;
-            true
-        })
-        .await
+        self.update_plan_state(window, plan, |state| state.set_manual(manual))
+            .await
     }
 
     /// Flip one plan's evergreen intent. Persists `evergreen` into
@@ -790,14 +784,8 @@ impl AgentManager {
         plan: String,
         evergreen: bool,
     ) -> Result<PlansUpdate, AgentError> {
-        self.update_plan_state(window, plan, |state| {
-            if state.evergreen == evergreen {
-                return false;
-            }
-            state.evergreen = evergreen;
-            true
-        })
-        .await
+        self.update_plan_state(window, plan, |state| state.set_evergreen(evergreen))
+            .await
     }
 
     /// Shared plan-state mutator for the mode and evergreen setters: locate
@@ -854,7 +842,7 @@ impl AgentManager {
             // Only names missing everywhere report "plan is gone".
             let target_exists = (session.role == SessionRole::Scoping
                 && state.pending_scoping.contains_key(&session.plan))
-                || session_ids::plan_exists(&repo_root, &session.plan);
+                || plans::locate(&repo_root, &session.plan).is_some();
             if !target_exists {
                 return Err(AgentError::NoSession {
                     raw: "plan is gone".to_string(),

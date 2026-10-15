@@ -4,10 +4,10 @@ import type { SessionKey } from "../bindings";
 import { sessionKeyOf } from "../types";
 import type { Chats } from "./store";
 
-// Single owner for session start: empty or unknown keys load history once
-// (backend emits preparing, then replaying only with past), including
-// read-only finished plans; idle non-empty keys without live pickers warm
-// once, never for read-only. Never both for one key.
+// Single owner for session start, at most one call per key. Keys with no
+// transcript load history (finished plans included, replayed read-only);
+// idle transcripts holding unsent content warm the pickers instead, never
+// read-only. Never both for one key.
 export function useSessionStart(
 	selectedKey: SessionKey | null,
 	chats: Chats,

@@ -76,7 +76,7 @@ import {
 } from "./sessions/store";
 import { useThoughtTimers } from "./sessions/thoughts";
 import type { AgentStatus, TranscriptItem } from "./types";
-import { sameSession, sessionKeyOf } from "./types";
+import { isWorkRole, sameSession, sessionKeyOf } from "./types";
 import "./App.css";
 
 type View = { kind: "picker" } | { kind: "chat" };
@@ -503,34 +503,30 @@ export function App() {
 	async function handleStop() {
 		const key = selectedRef.current;
 		if (key === null) return;
-		const isWork =
-			key.role === "executing" ||
-			key.role === "evergreening" ||
-			key.role === "landing";
-		let stopped = false;
+		const holds = isWorkRole(key.role);
+		let stopped = true;
 		try {
 			await cancelTurn(key);
-			stopped = true;
-		} finally {
-			updateChat(key, (chat) => ({
-				...chat,
-				working: false,
-				approval: false,
-			}));
+		} catch (error) {
+			stopped = false;
+			console.warn("cancel_turn failed", error);
 		}
-		if (stopped && isWork) {
-			updateChat(key, (chat) => ({
-				...chat,
-				transcript: [
-					...chat.transcript,
-					{
-						kind: "agent",
-						id: crypto.randomUUID(),
-						text: "stopped - switched to manual, flip back to auto to resume",
-					} satisfies TranscriptItem,
-				],
-			}));
-		}
+		updateChat(key, (chat) => ({
+			...chat,
+			working: false,
+			approval: false,
+			transcript:
+				stopped && holds
+					? [
+							...chat.transcript,
+							{
+								kind: "agent",
+								id: crypto.randomUUID(),
+								text: "stopped - switched to manual, flip back to auto to resume",
+							} satisfies TranscriptItem,
+						]
+					: chat.transcript,
+		}));
 		const current = selectedChat(chatsRef.current, key);
 		if (current?.failed) return;
 		if (current?.start.kind === "replaying") return;

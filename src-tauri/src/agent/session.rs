@@ -561,7 +561,7 @@ impl AgentManager {
                 session: session.clone(),
             },
         );
-        // After HistoryPreparing so the spinner covers the slow CLI probes.
+        // After HistoryPreparing so the spinner covers the slow replay.
         // HistoryBegin only follows when past exists and the connection is
         // ready, just before `session/load`; empty keys finish without it.
         let Some(session_id) = super::session_ids::resolve(&repo_root, &session) else {
@@ -641,7 +641,7 @@ impl AgentManager {
     /// gets a live connection and an empty transcript instead of an error
     /// bar, going straight to `ConfigOptions` + `HistoryDone` without ever
     /// emitting `HistoryBegin`. Finished plans never say "plan is gone":
-    /// with no recoverable past they fail with an honest non-retryable
+    /// with no saved past they fail with an honest non-retryable
     /// reason instead. Queued landings finish with `HistoryDone` and no
     /// live session, so selection never mints a second rebase.
     ///
@@ -657,7 +657,7 @@ impl AgentManager {
         history_guard: HistoryGuard,
     ) -> Result<(), AgentError> {
         if let Some((repo_root, _)) = self.reopen_snapshot(window)
-            && super::session_ids::is_finished(&repo_root, &session.plan)
+            && crate::plans::is_finished(&repo_root, &session.plan)
         {
             let raw = "no saved session found for this plan - it predates session recording or its session was pruned"
                 .to_string();

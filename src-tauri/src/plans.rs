@@ -71,6 +71,22 @@ pub fn locate(repo_root: &Path, plan_name: &str) -> Option<PathBuf> {
     None
 }
 
+/// True when a plan name lives in a finished phase. Finished rows stay
+/// read-only and never warm or spawn. Pure except the directory probes.
+pub fn is_finished(repo_root: &Path, plan_name: &str) -> bool {
+    for phase in [Phase::Completed, Phase::Cancelled] {
+        let candidate = PlanRef {
+            name: plan_name.to_string(),
+            phase,
+        }
+        .path(repo_root);
+        if candidate.is_dir() {
+            return true;
+        }
+    }
+    false
+}
+
 /// A plan directory inside a phase. `name` starts with the creation
 /// timestamp and gains a slug on execute.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,9 +213,14 @@ impl PlanState {
         self.record(role).session.as_deref()
     }
 
-    /// Record one role's session ID. Pure.
-    pub(crate) fn set_session(&mut self, role: SessionRole, id: String) {
+    /// Record one role's session ID. True when the stored value changed,
+    /// so callers skip the rewrite otherwise. Pure.
+    pub(crate) fn set_session(&mut self, role: SessionRole, id: String) -> bool {
+        if self.record(role).session.as_deref() == Some(id.as_str()) {
+            return false;
+        }
         self.record_mut(role).session = Some(id);
+        true
     }
 
     /// Last-seen cost for one role. Pure.
@@ -207,9 +228,41 @@ impl PlanState {
         self.record(role).cost
     }
 
-    /// Record one role's cost. Pure.
-    pub(crate) fn set_cost(&mut self, role: SessionRole, cost: f64) {
+    /// Record one role's cost. True when the stored value changed. Pure.
+    pub(crate) fn set_cost(&mut self, role: SessionRole, cost: f64) -> bool {
+        if self.record(role).cost == cost {
+            return false;
+        }
         self.record_mut(role).cost = cost;
+        true
+    }
+
+    /// Flip manual mode. True when the stored value changed. Pure.
+    pub(crate) fn set_manual(&mut self, manual: bool) -> bool {
+        if self.manual == manual {
+            return false;
+        }
+        self.manual = manual;
+        true
+    }
+
+    /// Flip evergreen intent. True when the stored value changed. Pure.
+    pub(crate) fn set_evergreen(&mut self, evergreen: bool) -> bool {
+        if self.evergreen == evergreen {
+            return false;
+        }
+        self.evergreen = evergreen;
+        true
+    }
+
+    /// Mark the plan as prompted for the empty-scoping gate. True on the
+    /// first mark only. Pure.
+    pub(crate) fn mark_prompted(&mut self) -> bool {
+        if self.prompted {
+            return false;
+        }
+        self.prompted = true;
+        true
     }
 }
 
@@ -683,6 +736,67 @@ mod tests {
         assert!(Phase::Landing.is_active());
         assert!(!Phase::Completed.is_active());
         assert!(!Phase::Cancelled.is_active());
+    }
+
+    #[test]
+    fn locate_searches_every_phase() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        ensure_structure(dir.path()).expect("ensure");
+        for phase in Phase::all() {
+            let name = format!("plan-{}", phase.dir_name());
+            let plan = PlanRef {
+                name: name.clone(),
+                phase,
+            };
+            std::fs::create_dir_all(plan.path(dir.path())).expect("mkdir");
+            assert!(locate(dir.path(), &name).is_some_and(|found| found.ends_with(&name)));
+        }
+        assert_eq!(locate(dir.path(), "missing"), None);
+    }
+
+    #[test]
+    fn finished_covers_only_completed_and_cancelled() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        ensure_structure(dir.path()).expect("ensure");
+        for phase in [
+            Phase::Scoping,
+            Phase::Executing,
+            Phase::Evergreening,
+            Phase::Landing,
+        ] {
+            let name = format!("active-{}", phase.dir_name());
+            let plan = PlanRef {
+                name: name.clone(),
+                phase,
+            };
+            std::fs::create_dir_all(plan.path(dir.path())).expect("mkdir");
+            assert!(!is_finished(dir.path(), &name), "{phase:?} active");
+        }
+        for phase in [Phase::Completed, Phase::Cancelled] {
+            let name = format!("done-{}", phase.dir_name());
+            let plan = PlanRef {
+                name: name.clone(),
+                phase,
+            };
+            std::fs::create_dir_all(plan.path(dir.path())).expect("mkdir");
+            assert!(is_finished(dir.path(), &name), "{phase:?} finished");
+        }
+        assert!(!is_finished(dir.path(), "missing"));
+    }
+
+    #[test]
+    fn setters_report_changes() {
+        let mut state = PlanState::default();
+        assert!(state.set_manual(true));
+        assert!(!state.set_manual(true));
+        assert!(state.set_evergreen(false));
+        assert!(!state.set_evergreen(false));
+        assert!(state.mark_prompted());
+        assert!(!state.mark_prompted());
+        assert!(state.set_session(SessionRole::Scoping, "ses_a".to_string()));
+        assert!(!state.set_session(SessionRole::Scoping, "ses_a".to_string()));
+        assert!(state.set_cost(SessionRole::Scoping, 1.5));
+        assert!(!state.set_cost(SessionRole::Scoping, 1.5));
     }
 
     #[test]

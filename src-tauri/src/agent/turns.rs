@@ -255,16 +255,10 @@ impl AgentManager {
         )) {
             log::warn!("failed to send session cancel: {error}");
         }
-        if cancel_holds_plan(session.role) {
-            let _ = self
-                .update_plan_state(window, session.plan.clone(), |state| {
-                    if state.manual {
-                        return false;
-                    }
-                    state.manual = true;
-                    true
-                })
-                .await;
+        if session.role.is_work()
+            && let Some((repo_root, _)) = self.reopen_snapshot(window)
+        {
+            super::session_ids::hold_manual(&repo_root, &session.plan);
         }
         set_working(&self.state, window, &session, false);
         self.push_plans(window);
@@ -654,15 +648,6 @@ fn prefixed_first_message(template: &str, user_text: &str) -> String {
     format!("{}\n\n{}", template, user_text.trim())
 }
 
-/// True when STOP holds the plan: work roles flip to manual, scoping never
-/// auto-advances so it stays untouched. Pure.
-fn cancel_holds_plan(role: SessionRole) -> bool {
-    matches!(
-        role,
-        SessionRole::Executing | SessionRole::Evergreening | SessionRole::Landing
-    )
-}
-
 /// Replayed user text as display bubbles: a scoping first prompt carries
 /// its template, so it splits back into template and message; anything
 /// else is one bubble. Pure.
@@ -985,15 +970,7 @@ mod tests {
     }
 
     #[test]
-    fn cancel_holds_only_work_roles() {
-        assert!(!cancel_holds_plan(SessionRole::Scoping));
-        assert!(cancel_holds_plan(SessionRole::Executing));
-        assert!(cancel_holds_plan(SessionRole::Evergreening));
-        assert!(cancel_holds_plan(SessionRole::Landing));
-    }
-
-    #[test]
-    fn cancel_persists_manual_and_holds_pump() {
+    fn stop_holds_work_and_holds_pump() {
         use super::super::advance::{PlanView, next_action};
         use super::super::landing_queue::LandingPosition;
         use crate::plans::Phase;
@@ -1008,11 +985,8 @@ mod tests {
         };
         std::fs::create_dir_all(executing.path(root)).expect("mkdir");
         let mut stored = plans::load_state(&executing.path(root));
-        assert!(!stored.manual);
-        if cancel_holds_plan(SessionRole::Executing) && !stored.manual {
-            stored.manual = true;
-            plans::store_state(&executing.path(root), &stored);
-        }
+        assert!(stored.set_manual(true));
+        plans::store_state(&executing.path(root), &stored);
         let kept = plans::load_state(&executing.path(root));
         assert!(kept.manual);
         let held = PlanView {
@@ -1035,12 +1009,9 @@ mod tests {
             .expect("mtime");
         std::thread::sleep(std::time::Duration::from_millis(10));
         let mut again = plans::load_state(&executing.path(root));
-        let changed = cancel_holds_plan(SessionRole::Executing) && !again.manual;
-        assert!(!changed);
-        if changed {
-            again.manual = true;
-            plans::store_state(&executing.path(root), &again);
-        }
+        assert!(!again.set_manual(true));
+        // `hold_manual` skips the rewrite when nothing changed, so the
+        // mtime holds without a second store here.
         let after = std::fs::metadata(&path)
             .expect("metadata")
             .modified()
