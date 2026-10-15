@@ -36,7 +36,7 @@ A free-form description of what to do in the non-commit step.
 
 Any number of commits is acceptable, but all work must be committed. Order the commits in such a way that the repo isn't broken or inconsistent at any of them.
 
-Call for refactoring if needed, even if it is major.
+Call for refactoring if needed, even if it is major. If hunting down a bug, follow TDD, but make sure the every commit passes tests - include tests in the fix commit.
 
 Once we've created a plan I'm happy with, I will run another AI agent to execute it. Because of this, make sure the plan is:
 - Concrete - remove unknowns upfront (unless removing an unknown is the very purpose of the plan, that is)
