@@ -503,13 +503,32 @@ export function App() {
 	async function handleStop() {
 		const key = selectedRef.current;
 		if (key === null) return;
+		const isWork =
+			key.role === "executing" ||
+			key.role === "evergreening" ||
+			key.role === "landing";
+		let stopped = false;
 		try {
 			await cancelTurn(key);
+			stopped = true;
 		} finally {
 			updateChat(key, (chat) => ({
 				...chat,
 				working: false,
 				approval: false,
+			}));
+		}
+		if (stopped && isWork) {
+			updateChat(key, (chat) => ({
+				...chat,
+				transcript: [
+					...chat.transcript,
+					{
+						kind: "agent",
+						id: crypto.randomUUID(),
+						text: "stopped - switched to manual, flip back to auto to resume",
+					} satisfies TranscriptItem,
+				],
 			}));
 		}
 		const current = selectedChat(chatsRef.current, key);

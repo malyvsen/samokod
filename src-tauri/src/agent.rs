@@ -770,8 +770,14 @@ impl AgentManager {
         plan: String,
         manual: bool,
     ) -> Result<PlansUpdate, AgentError> {
-        self.update_plan_state(window, plan, |state| state.manual = manual)
-            .await
+        self.update_plan_state(window, plan, |state| {
+            if state.manual == manual {
+                return false;
+            }
+            state.manual = manual;
+            true
+        })
+        .await
     }
 
     /// Flip one plan's evergreen intent. Persists `evergreen` into
@@ -784,8 +790,14 @@ impl AgentManager {
         plan: String,
         evergreen: bool,
     ) -> Result<PlansUpdate, AgentError> {
-        self.update_plan_state(window, plan, |state| state.evergreen = evergreen)
-            .await
+        self.update_plan_state(window, plan, |state| {
+            if state.evergreen == evergreen {
+                return false;
+            }
+            state.evergreen = evergreen;
+            true
+        })
+        .await
     }
 
     /// Shared plan-state mutator for the mode and evergreen setters: locate
@@ -795,7 +807,7 @@ impl AgentManager {
         &self,
         window: &str,
         plan: String,
-        mutate: impl FnOnce(&mut plans::PlanState),
+        mutate: impl FnOnce(&mut plans::PlanState) -> bool,
     ) -> Result<PlansUpdate, AgentError> {
         let (repo_root, _) = self
             .reopen_snapshot(window)
@@ -808,8 +820,9 @@ impl AgentManager {
             });
         };
         let mut state = plans::load_state(&plan_dir);
-        mutate(&mut state);
-        plans::store_state(&plan_dir, &state);
+        if mutate(&mut state) {
+            plans::store_state(&plan_dir, &state);
+        }
         if !state.manual {
             self.pump(window).await;
         }

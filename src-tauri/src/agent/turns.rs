@@ -239,7 +239,10 @@ impl AgentManager {
     }
 
     /// Stop the turn via `session/cancel`, answering every open card as
-    /// cancelled per protocol.
+    /// cancelled per protocol. Work plans hold afterwards: the cancel
+    /// persists `manual:true` before clearing the working flag, so the
+    /// pump re-reads the hold on its next pass. Scoping never
+    /// auto-advances, so it stays untouched.
     pub async fn cancel_turn(&self, window: &str, session: SessionKey) -> Result<(), AgentError> {
         let (connection, session_id, _, _) = self
             .session_snapshot_for(window, &session)
@@ -251,6 +254,17 @@ impl AgentManager {
             acp::SessionId::new(session_id),
         )) {
             log::warn!("failed to send session cancel: {error}");
+        }
+        if cancel_holds_plan(session.role) {
+            let _ = self
+                .update_plan_state(window, session.plan.clone(), |state| {
+                    if state.manual {
+                        return false;
+                    }
+                    state.manual = true;
+                    true
+                })
+                .await;
         }
         set_working(&self.state, window, &session, false);
         self.push_plans(window);
@@ -640,6 +654,15 @@ fn prefixed_first_message(template: &str, user_text: &str) -> String {
     format!("{}\n\n{}", template, user_text.trim())
 }
 
+/// True when STOP holds the plan: work roles flip to manual, scoping never
+/// auto-advances so it stays untouched. Pure.
+fn cancel_holds_plan(role: SessionRole) -> bool {
+    matches!(
+        role,
+        SessionRole::Executing | SessionRole::Evergreening | SessionRole::Landing
+    )
+}
+
 /// Replayed user text as display bubbles: a scoping first prompt carries
 /// its template, so it splits back into template and message; anything
 /// else is one bubble. Pure.
@@ -959,5 +982,69 @@ mod tests {
             .cloned()
             .expect("pending");
         assert!(kept.is_some_and(|title| title.to_lowercase().contains("checkout")));
+    }
+
+    #[test]
+    fn cancel_holds_only_work_roles() {
+        assert!(!cancel_holds_plan(SessionRole::Scoping));
+        assert!(cancel_holds_plan(SessionRole::Executing));
+        assert!(cancel_holds_plan(SessionRole::Evergreening));
+        assert!(cancel_holds_plan(SessionRole::Landing));
+    }
+
+    #[test]
+    fn cancel_persists_manual_and_holds_pump() {
+        use super::super::advance::{PlanView, next_action};
+        use super::super::landing_queue::LandingPosition;
+        use crate::plans::Phase;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03";
+        let executing = plans::PlanRef {
+            name: name.to_string(),
+            phase: Phase::Executing,
+        };
+        std::fs::create_dir_all(executing.path(root)).expect("mkdir");
+        let mut stored = plans::load_state(&executing.path(root));
+        assert!(!stored.manual);
+        if cancel_holds_plan(SessionRole::Executing) && !stored.manual {
+            stored.manual = true;
+            plans::store_state(&executing.path(root), &stored);
+        }
+        let kept = plans::load_state(&executing.path(root));
+        assert!(kept.manual);
+        let held = PlanView {
+            name: name.to_string(),
+            phase: Phase::Executing,
+            manual: kept.manual,
+            evergreen: true,
+            idle: true,
+            dirty: false,
+            ffable: true,
+            has_commits: true,
+            landing: LandingPosition::NotLanding,
+            landing_started: false,
+        };
+        assert_eq!(next_action(&held), None);
+        let path = executing.path(root).join(plans::STATE_FILE);
+        let before = std::fs::metadata(&path)
+            .expect("metadata")
+            .modified()
+            .expect("mtime");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let mut again = plans::load_state(&executing.path(root));
+        let changed = cancel_holds_plan(SessionRole::Executing) && !again.manual;
+        assert!(!changed);
+        if changed {
+            again.manual = true;
+            plans::store_state(&executing.path(root), &again);
+        }
+        let after = std::fs::metadata(&path)
+            .expect("metadata")
+            .modified()
+            .expect("mtime");
+        assert_eq!(before, after);
     }
 }
