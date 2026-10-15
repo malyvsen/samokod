@@ -5,8 +5,9 @@ import { sessionKeyOf } from "../types";
 import type { Chats } from "./store";
 
 // Single owner for session start: empty or unknown keys load history once
-// (backend emits preparing, then replaying only with past); idle
-// non-empty keys without live pickers warm once. Never both for one key.
+// (backend emits preparing, then replaying only with past), including
+// read-only finished plans; idle non-empty keys without live pickers warm
+// once, never for read-only. Never both for one key.
 export function useSessionStart(
 	selectedKey: SessionKey | null,
 	chats: Chats,
@@ -14,7 +15,7 @@ export function useSessionStart(
 ): void {
 	const fired = useRef<Set<string>>(new Set());
 	useEffect(() => {
-		if (selectedKey === null || readOnly) return;
+		if (selectedKey === null) return;
 		const id = sessionKeyOf(selectedKey);
 		if (fired.current.has(id)) return;
 		const chat = chats[id];
@@ -28,6 +29,7 @@ export function useSessionStart(
 			});
 			return;
 		}
+		if (readOnly) return;
 		const needsWarm =
 			chat.start.kind === "idle" &&
 			!chat.working &&

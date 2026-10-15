@@ -403,4 +403,36 @@ mod tests {
             .expect("mtime");
         assert_eq!(before, after);
     }
+
+    #[test]
+    fn finished_with_id_resolves_for_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::plans::ensure_structure(dir.path()).expect("ensure");
+        let name = "2026-09-30.10-00-00";
+        plan_dir(dir.path(), Phase::Completed, name);
+        record_session(dir.path(), &key(name, SessionRole::Executing), "ses_exec");
+        assert!(is_finished(dir.path(), name));
+        assert_eq!(
+            resolve(dir.path(), &key(name, SessionRole::Executing)),
+            Some("ses_exec".to_string())
+        );
+    }
+
+    #[test]
+    fn finished_without_id_yields_none_without_spawning() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::plans::ensure_structure(dir.path()).expect("ensure");
+        let name = "2026-09-30.10-00-00";
+        plan_dir(dir.path(), Phase::Completed, name);
+        assert!(is_finished(dir.path(), name));
+        assert_eq!(
+            resolve(dir.path(), &key(name, SessionRole::Executing)),
+            None
+        );
+        let plan = PlanRef {
+            name: name.to_string(),
+            phase: Phase::Completed,
+        };
+        assert!(!plan.path(dir.path()).join(plans::STATE_FILE).is_file());
+    }
 }

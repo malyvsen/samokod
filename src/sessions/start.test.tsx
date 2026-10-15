@@ -66,7 +66,7 @@ describe("useSessionStart", () => {
 		expect(warmSession).toHaveBeenCalledTimes(1);
 	});
 
-	test("live, working, and read-only fire neither", () => {
+	test("live and working fire neither", () => {
 		const live: Chats = {
 			[KEY_ID]: {
 				...emptyChat(),
@@ -93,11 +93,26 @@ describe("useSessionStart", () => {
 		expect(loadHistory).not.toHaveBeenCalled();
 		expect(warmSession).not.toHaveBeenCalled();
 
-		renderHook(() => useSessionStart(testKey(), idleNonEmpty(), true));
+		renderHook(() => useSessionStart(null, idleEmpty(), false));
 		expect(loadHistory).not.toHaveBeenCalled();
 		expect(warmSession).not.toHaveBeenCalled();
+	});
 
-		renderHook(() => useSessionStart(null, idleEmpty(), false));
+	test("read-only empty fires loadHistory and never warmSession", () => {
+		const { rerender } = renderHook(
+			({ chats }: { chats: Chats }) => useSessionStart(testKey(), chats, true),
+			{ initialProps: { chats: {} } },
+		);
+		expect(loadHistory).toHaveBeenCalledTimes(1);
+		expect(loadHistory).toHaveBeenCalledWith(testKey());
+		expect(warmSession).not.toHaveBeenCalled();
+		rerender({ chats: {} });
+		expect(loadHistory).toHaveBeenCalledTimes(1);
+		expect(warmSession).not.toHaveBeenCalled();
+	});
+
+	test("read-only non-empty fires neither", () => {
+		renderHook(() => useSessionStart(testKey(), idleNonEmpty(), true));
 		expect(loadHistory).not.toHaveBeenCalled();
 		expect(warmSession).not.toHaveBeenCalled();
 	});
