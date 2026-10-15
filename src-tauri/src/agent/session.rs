@@ -483,10 +483,9 @@ impl AgentManager {
     /// the transcript rebuilds with no extra mapping except user bubbles.
     /// Single-flights on the history slot; a live turn owns its session,
     /// so replays never run over a working key. Finished plans replay
-    /// read-only history the same way. Plans without a persisted ID recover
-    /// it from the CLI on demand; with no past at all (a brand-new plan) a
-    /// live session starts instead so the pickers turn live and the
-    /// transcript stays empty.
+    /// read-only history the same way. Plans without a persisted ID have
+    /// no past at all (a brand-new plan), so a live session starts instead
+    /// and the transcript stays empty.
     pub async fn load_history(&self, window: &str, session: SessionKey) -> Result<(), AgentError> {
         // Serialize a racing warm: history replays wait for the connection
         // to settle instead of silently skipping and leaving the transcript

@@ -802,7 +802,7 @@ impl AgentManager {
             .ok_or_else(|| AgentError::NoSession {
                 raw: "open a repository first".to_string(),
             })?;
-        let Some(plan_dir) = session_ids::locate(&repo_root, &plan) else {
+        let Some(plan_dir) = plans::locate(&repo_root, &plan) else {
             return Err(AgentError::NoSession {
                 raw: "plan is gone".to_string(),
             });
