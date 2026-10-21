@@ -462,6 +462,15 @@ pub fn run() {
             }
         })
         .invoke_handler(builder.invoke_handler())
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Reopen { .. } = event {
+                log::info!("reopened: opening picker window");
+                match create_window(app) {
+                    Ok(label) => log::info!("reopened opened picker window={label}"),
+                    Err(error) => log::warn!("reopened failed to open window: {error}"),
+                }
+            }
+        });
 }

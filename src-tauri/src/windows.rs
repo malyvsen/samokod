@@ -72,6 +72,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sequential_creates_yield_distinct_labels_while_both_live() {
+        let first = allocate_window_label(&[]);
+        let existing = vec!["main".to_string(), first.clone()];
+        let second = allocate_window_label(&existing);
+        assert_ne!(first, second);
+        assert_eq!(first, "window-1");
+        assert_eq!(second, "window-2");
+    }
+
+    #[test]
     fn labels_allocate_first_free_slot() {
         assert_eq!(allocate_window_label(&[]), "window-1");
         assert_eq!(
