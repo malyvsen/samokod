@@ -122,13 +122,7 @@ impl WarmGuard {
         key: &SessionKey,
     ) -> Option<Self> {
         let claimed = lock_backend(state)
-            .map(|mut backend| {
-                backend
-                    .windows
-                    .get_mut(window)
-                    .map(|win| win.claim_warm(key))
-                    .unwrap_or(false)
-            })
+            .map(|mut backend| backend.claim_start_slot(window, |win| win.claim_warm(key)))
             .unwrap_or(false);
         if claimed {
             Some(WarmGuard {
@@ -172,13 +166,7 @@ impl HistoryGuard {
         key: &SessionKey,
     ) -> Option<Self> {
         let claimed = lock_backend(state)
-            .map(|mut backend| {
-                backend
-                    .windows
-                    .get_mut(window)
-                    .map(|win| win.claim_history(key))
-                    .unwrap_or(false)
-            })
+            .map(|mut backend| backend.claim_start_slot(window, |win| win.claim_history(key)))
             .unwrap_or(false);
         if claimed {
             Some(HistoryGuard {

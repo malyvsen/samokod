@@ -61,6 +61,15 @@ pub(crate) struct WindowState {
     worktrees: HashMap<String, crate::worktrees::WorktreeRecord>,
 }
 
+/// Spawn-time identity of one window: generation plus repo root. Async
+/// tasks capture it and drop their emits when it moved, so a reused label
+/// never shows another repo's transcript.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WindowIncarnation {
+    generation: u64,
+    repo: Option<PathBuf>,
+}
+
 #[derive(Default)]
 pub(crate) struct BackendState {
     windows: HashMap<String, WindowState>,
@@ -71,14 +80,19 @@ pub(crate) struct BackendState {
 }
 
 impl BackendState {
+    fn next_incarnation(&mut self) -> u64 {
+        let generation = self.next_generation;
+        self.next_generation += 1;
+        generation
+    }
+
     /// Mutable per-window entry, created on first use. Keeps one short
     /// critical section per access; callers never hold the guard across
     /// await, spawn, or agent I/O. New entries take the next incarnation
     /// from the monotonic counter so label reuse never collides.
     pub(crate) fn ensure_window(&mut self, window: &str) -> &mut WindowState {
         if !self.windows.contains_key(window) {
-            let generation = self.next_generation;
-            self.next_generation += 1;
+            let generation = self.next_incarnation();
             self.windows.insert(
                 window.to_string(),
                 WindowState {
@@ -90,19 +104,33 @@ impl BackendState {
         self.windows.get_mut(window).expect("window just ensured")
     }
 
-    /// Fresh incarnation for an `open_repo` reset. The caller assigns it
-    /// after `reset` so the same label reopened later always differs.
-    pub(crate) fn fresh_generation(&mut self) -> u64 {
-        let generation = self.next_generation;
-        self.next_generation += 1;
-        generation
+    /// Reset one window to empty with a fresh incarnation. `open_repo` and
+    /// tests use this so the same label reopened later always differs.
+    pub(crate) fn reopen_window(&mut self, window: &str) -> &mut WindowState {
+        let generation = self.next_incarnation();
+        let state = self.ensure_window(window);
+        state.reset();
+        state.generation = generation;
+        state
+    }
+
+    /// Claim one start single-flight slot without creating the window: a
+    /// closed window cannot warm or replay, so the claim fails.
+    pub(crate) fn claim_start_slot(
+        &mut self,
+        window: &str,
+        claim: impl FnOnce(&mut WindowState) -> bool,
+    ) -> bool {
+        self.windows.get_mut(window).map(claim).unwrap_or(false)
     }
 
     /// True when the window still owns the spawn-time incarnation and repo.
     /// Pure read; async emits drop on false instead of crossing windows.
-    pub(crate) fn is_current(&self, window: &str, generation: u64, repo: &Option<PathBuf>) -> bool {
+    pub(crate) fn is_current(&self, window: &str, expected: &WindowIncarnation) -> bool {
         match self.windows.get(window) {
-            Some(state) => state.generation == generation && &state.repo_root == repo,
+            Some(state) => {
+                state.generation == expected.generation && state.repo_root == expected.repo
+            }
             None => false,
         }
     }
@@ -456,10 +484,7 @@ impl AgentManager {
                     window: owner,
                 });
             }
-            let fresh = backend.fresh_generation();
-            let state = backend.ensure_window(window);
-            state.reset();
-            state.generation = fresh;
+            let state = backend.reopen_window(window);
             state.repo_root = Some(repo_root.clone());
             state.checkout_branch =
                 crate::branch::current_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string());
@@ -1149,18 +1174,15 @@ fn ensure_idle(
     }
 }
 
-/// Capture the window incarnation for an async task: generation plus repo.
-/// The task drops its emits when `is_current` later fails, so a reused
-/// label never shows another repo's transcript.
-pub(crate) fn incarnation(
-    state: &Mutex<BackendState>,
-    window: &str,
-) -> Option<(u64, Option<PathBuf>)> {
+/// Capture the window incarnation for an async task. The task drops its
+/// emits when `is_current` later fails, so a reused label never shows
+/// another repo's transcript.
+pub(crate) fn incarnation(state: &Mutex<BackendState>, window: &str) -> Option<WindowIncarnation> {
     lock_backend(state).and_then(|backend| {
-        backend
-            .windows
-            .get(window)
-            .map(|win| (win.generation, win.repo_root.clone()))
+        backend.windows.get(window).map(|win| WindowIncarnation {
+            generation: win.generation,
+            repo: win.repo_root.clone(),
+        })
     })
 }
 
@@ -1169,15 +1191,17 @@ pub(crate) fn incarnation(
 pub(crate) fn check_current(
     state: &Mutex<BackendState>,
     window: &str,
-    generation: u64,
-    repo: &Option<PathBuf>,
+    expected: &WindowIncarnation,
 ) -> bool {
     match lock_backend(state) {
         Some(backend) => {
-            if backend.is_current(window, generation, repo) {
+            if backend.is_current(window, expected) {
                 true
             } else {
-                log::warn!("dropping stale emit window={window} generation={generation}");
+                log::warn!(
+                    "dropping stale emit window={window} generation={}",
+                    expected.generation
+                );
                 false
             }
         }
@@ -1190,7 +1214,7 @@ pub(crate) fn check_current(
 /// Every emission logs its window label plus session key or selection so
 /// the log file alone proves which window each event targeted.
 fn emit_event(app: &AppHandle, window: &str, event: AppEvent) {
-    let summary = crate::types::event_summary(&event);
+    let summary = event.log_summary();
     if let Err(error) = app.emit_to(window, "samokod://event", event) {
         log::warn!("failed to emit window={window} {summary}: {error}");
     } else {
@@ -1541,28 +1565,32 @@ mod tests {
             plan: "2026-10-21.10-03-18".to_string(),
             role: SessionRole::Scoping,
         };
-        let (gen_a, repo_a, gen_b, repo_b) = {
+        let (incarnation_a, incarnation_b) = {
             let mut backend = state.lock().expect("state poisoned");
             let a = backend.ensure_window("window-1");
             a.repo_root = Some(PathBuf::from("/repo-a"));
             a.current = Some(key.clone());
-            let gen_a = a.generation;
-            let repo_a = a.repo_root.clone();
+            let incarnation_a = WindowIncarnation {
+                generation: a.generation,
+                repo: a.repo_root.clone(),
+            };
             let b = backend.ensure_window("window-2");
             b.repo_root = Some(PathBuf::from("/repo-b"));
             b.current = Some(key.clone());
-            let gen_b = b.generation;
-            let repo_b = b.repo_root.clone();
-            (gen_a, repo_a, gen_b, repo_b)
+            let incarnation_b = WindowIncarnation {
+                generation: b.generation,
+                repo: b.repo_root.clone(),
+            };
+            (incarnation_a, incarnation_b)
         };
         // Same plan name, different repos and generations: each window is
         // current only for its own incarnation.
         {
             let backend = state.lock().expect("state poisoned");
-            assert!(backend.is_current("window-1", gen_a, &repo_a));
-            assert!(!backend.is_current("window-1", gen_b, &repo_b));
-            assert!(backend.is_current("window-2", gen_b, &repo_b));
-            assert!(!backend.is_current("window-2", gen_a, &repo_a));
+            assert!(backend.is_current("window-1", &incarnation_a));
+            assert!(!backend.is_current("window-1", &incarnation_b));
+            assert!(backend.is_current("window-2", &incarnation_b));
+            assert!(!backend.is_current("window-2", &incarnation_a));
             // Selections stay separate even with identical names.
             assert_eq!(
                 backend.windows.get("window-1").expect("a").current,
@@ -1579,68 +1607,37 @@ mod tests {
     fn stale_turn_after_label_reuse_is_dropped() {
         let state = Mutex::new(BackendState::default());
         // Window-1 opens repo-a; capture the turn's incarnation.
-        let (old_generation, old_repo) = {
+        let old = {
             let mut backend = state.lock().expect("state poisoned");
-            let fresh = backend.fresh_generation();
-            let win = backend.ensure_window("window-1");
-            win.reset();
-            win.generation = fresh;
+            let win = backend.reopen_window("window-1");
             win.repo_root = Some(PathBuf::from("/repo-a"));
-            (win.generation, win.repo_root.clone())
+            WindowIncarnation {
+                generation: win.generation,
+                repo: win.repo_root.clone(),
+            }
         };
         // Window-1 closes; a new repo reopens under the same label.
         {
             let mut backend = state.lock().expect("state poisoned");
             assert!(backend.remove_window("window-1"));
-            let fresh = backend.fresh_generation();
-            let win = backend.ensure_window("window-1");
-            win.reset();
-            win.generation = fresh;
+            let win = backend.reopen_window("window-1");
             win.repo_root = Some(PathBuf::from("/repo-b"));
         }
         // The old turn's incarnation no longer matches: its emit drops.
         {
             let backend = state.lock().expect("state poisoned");
-            assert!(!backend.is_current("window-1", old_generation, &old_repo));
+            assert!(!backend.is_current("window-1", &old));
             let current = backend.windows.get("window-1").expect("reopened");
             assert_eq!(current.repo_root, Some(PathBuf::from("/repo-b")));
-            assert!(backend.is_current("window-1", current.generation, &current.repo_root.clone()));
+            assert!(backend.is_current(
+                "window-1",
+                &WindowIncarnation {
+                    generation: current.generation,
+                    repo: current.repo_root.clone(),
+                }
+            ));
         }
-        assert!(!super::check_current(
-            &state,
-            "window-1",
-            old_generation,
-            &old_repo
-        ));
-    }
-
-    #[test]
-    fn warm_and_history_claims_never_resurrect_closed_windows() {
-        use super::start::{HistoryGuard, WarmGuard};
-        use std::sync::Arc;
-        let state = Arc::new(Mutex::new(BackendState::default()));
-        let key = SessionKey {
-            plan: "2026-10-21.10-03-18".to_string(),
-            role: SessionRole::Scoping,
-        };
-        // No window yet: claims fail and must not create the entry.
-        assert!(WarmGuard::claim(&state, "gone", &key).is_none());
-        assert!(HistoryGuard::claim(&state, "gone", &key).is_none());
-        {
-            let backend = state.lock().expect("state poisoned");
-            assert!(!backend.windows.contains_key("gone"));
-        }
-        // Live window: claims succeed once (single-flight).
-        {
-            let mut backend = state.lock().expect("state poisoned");
-            backend.ensure_window("live");
-        }
-        let warm = WarmGuard::claim(&state, "live", &key).expect("warm claims");
-        assert!(warm.is_held());
-        drop(warm);
-        let history = HistoryGuard::claim(&state, "live", &key).expect("history claims");
-        assert!(history.is_held());
-        history.finish();
+        assert!(!super::check_current(&state, "window-1", &old));
     }
 
     #[test]

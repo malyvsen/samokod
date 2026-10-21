@@ -164,6 +164,33 @@ describe("session commands", () => {
 });
 
 describe("app events", () => {
+	function mockSubscriptions(deferred: boolean) {
+		const windowHandlers = new Set<TauriHandler>();
+		const globalHandlers = new Set<TauriHandler>();
+		const track = (handlers: Set<TauriHandler>, handler: TauriHandler) => {
+			handlers.add(handler);
+			if (deferred) {
+				return new Promise<() => void>((resolve) => {
+					queueMicrotask(() => {
+						resolve(() => {
+							handlers.delete(handler);
+						});
+					});
+				});
+			}
+			return Promise.resolve(() => {
+				handlers.delete(handler);
+			});
+		};
+		windowListen.mockImplementation((_: unknown, handler: TauriHandler) =>
+			track(windowHandlers, handler),
+		);
+		listen.mockImplementation((_: unknown, handler: TauriHandler) =>
+			track(globalHandlers, handler),
+		);
+		return { windowHandlers, globalHandlers };
+	}
+
 	test("unlistens when cleanup runs before listen resolves", async () => {
 		const stop = vi.fn();
 		let resolveWindow!: (stop: () => void) => void;
@@ -189,28 +216,7 @@ describe("app events", () => {
 	});
 
 	test("quick resubscribe delivers each chunk once", async () => {
-		const windowHandlers = new Set<TauriHandler>();
-		const globalHandlers = new Set<TauriHandler>();
-		windowListen.mockImplementation((_: unknown, handler: TauriHandler) => {
-			windowHandlers.add(handler);
-			return new Promise<() => void>((resolve) => {
-				queueMicrotask(() => {
-					resolve(() => {
-						windowHandlers.delete(handler);
-					});
-				});
-			});
-		});
-		listen.mockImplementation((_: unknown, handler: TauriHandler) => {
-			globalHandlers.add(handler);
-			return new Promise<() => void>((resolve) => {
-				queueMicrotask(() => {
-					resolve(() => {
-						globalHandlers.delete(handler);
-					});
-				});
-			});
-		});
+		const { windowHandlers, globalHandlers } = mockSubscriptions(true);
 		const seen: string[] = [];
 		const handle = (event: AppEvent) => {
 			if (event.type === "agent_text") {
@@ -239,20 +245,7 @@ describe("app events", () => {
 	});
 
 	test("window subscription takes session events, global takes only the broadcast", async () => {
-		const windowHandlers = new Set<TauriHandler>();
-		const globalHandlers = new Set<TauriHandler>();
-		windowListen.mockImplementation((_: unknown, handler: TauriHandler) => {
-			windowHandlers.add(handler);
-			return Promise.resolve(() => {
-				windowHandlers.delete(handler);
-			});
-		});
-		listen.mockImplementation((_: unknown, handler: TauriHandler) => {
-			globalHandlers.add(handler);
-			return Promise.resolve(() => {
-				globalHandlers.delete(handler);
-			});
-		});
+		const { windowHandlers, globalHandlers } = mockSubscriptions(false);
 		const seen: AppEvent[] = [];
 		onAppEvent((event) => {
 			seen.push(event);

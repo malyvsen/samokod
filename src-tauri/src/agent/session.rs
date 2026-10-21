@@ -832,20 +832,20 @@ impl AgentManager {
             binary.display(),
             path_value
         );
-        let spawn_incarnation = incarnation(&self.state, window);
+        let spawn = incarnation(&self.state, window);
         let mut env = HashMap::from([("PATH".to_string(), path_value)]);
         env.extend(extra_env);
         let config = AcpAgentConfig::new(binary).arg("acp").envs(env);
         let agent = AcpAgent::new(config);
-        let exit_incarnation = incarnation(&self.state, window);
+        let exit_incarnation = spawn.clone();
         let slot = Arc::clone(&self.state);
         let slot_window = window.to_string();
         let notify_state = Arc::clone(&self.state);
         let notify_window = window.to_string();
         let notify_app = self.app.clone();
         let notify_key = key.clone();
-        let notify_incarnation = spawn_incarnation.clone();
-        let ask_incarnation = spawn_incarnation.clone();
+        let notify_incarnation = spawn.clone();
+        let ask_incarnation = spawn;
         let ask_state = Arc::clone(&self.state);
         let ask_window = window.to_string();
         let ask_app = self.app.clone();
@@ -872,14 +872,13 @@ impl AgentManager {
                         let incarnation = notify_incarnation.clone();
                         async move {
                             match incarnation {
-                                Some((generation, repo)) => handle_notification(
+                                Some(expected) => handle_notification(
                                     &state,
                                     &app,
                                     &window,
                                     &key,
                                     &notification,
-                                    generation,
-                                    &repo,
+                                    &expected,
                                 ),
                                 None => {
                                     log::warn!(
@@ -901,15 +900,14 @@ impl AgentManager {
                         let incarnation = ask_incarnation.clone();
                         async move {
                             match incarnation {
-                                Some((generation, repo)) => handle_permission_request(
+                                Some(expected) => handle_permission_request(
                                     &state,
                                     &app,
                                     &window,
                                     &key,
                                     request,
                                     responder,
-                                    generation,
-                                    &repo,
+                                    &expected,
                                 )
                                 .await,
                                 None => {
@@ -982,8 +980,8 @@ impl AgentManager {
                 .await;
             if let Err(error) = result {
                 let raw = error.to_string();
-                if let Some((exit_generation, exit_repo)) = exit_incarnation.clone()
-                    && !check_current(&slot, &exit_window, exit_generation, &exit_repo)
+                if let Some(expected) = exit_incarnation.clone()
+                    && !check_current(&slot, &exit_window, &expected)
                 {
                     if let Some(tx) = ready_for_error.lock().expect("ready poisoned").take() {
                         let _ = tx.send(Err(raw));

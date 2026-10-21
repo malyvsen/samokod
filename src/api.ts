@@ -132,6 +132,13 @@ export function newWindow(): Promise<string> {
 	return unwrap(commands.newWindow());
 }
 
+// True for the owned-repos broadcast (`emit` in the backend), which
+// reaches every window. Everything else is window-targeted (`emit_to`)
+// and arrives only on the owning WebviewWindow.
+function isBroadcast(event: AppEvent): boolean {
+	return event.type === "open_repos_changed";
+}
+
 export function onAppEvent(handler: (event: AppEvent) => void): () => void {
 	let cancelled = false;
 	const stops: (() => void)[] = [];
@@ -142,28 +149,37 @@ export function onAppEvent(handler: (event: AppEvent) => void): () => void {
 			stops.push(stop);
 		}
 	}
-	// Window-targeted events (`emit_to` in the backend) arrive only on the
-	// owning WebviewWindow. Listening here instead of globally keeps one
-	// window's transcript and plans list out of every other window.
-	getCurrentWebviewWindow()
-		.listen<AppEvent>("samokod://event", (event) => {
-			if (event.payload.type === "open_repos_changed") return;
-			handler(event.payload);
-		})
-		.then(track)
-		.catch((error: unknown) => {
-			console.warn("failed to subscribe to window events", error);
-		});
-	// The owned-repos broadcast (`emit` in the backend) reaches every
-	// window. This global subscription handles only that broadcast.
-	listen<AppEvent>("samokod://event", (event) => {
-		if (event.payload.type !== "open_repos_changed") return;
-		handler(event.payload);
-	})
-		.then(track)
-		.catch((error: unknown) => {
-			console.warn("failed to subscribe to app events", error);
-		});
+	function subscribe(
+		start: (accept: (event: AppEvent) => boolean) => Promise<() => void>,
+		accept: (event: AppEvent) => boolean,
+		label: string,
+	) {
+		start(accept)
+			.then(track)
+			.catch((error: unknown) => {
+				console.warn(`failed to subscribe to ${label} events`, error);
+			});
+	}
+	// Window-targeted events arrive only on the owning WebviewWindow, so one
+	// window's transcript and plans list never leak into another window.
+	const window = getCurrentWebviewWindow();
+	subscribe(
+		(accept) =>
+			window.listen<AppEvent>("samokod://event", (event) => {
+				if (accept(event.payload)) handler(event.payload);
+			}),
+		(event) => !isBroadcast(event),
+		"window",
+	);
+	// The owned-repos broadcast reaches every window.
+	subscribe(
+		(accept) =>
+			listen<AppEvent>("samokod://event", (event) => {
+				if (accept(event.payload)) handler(event.payload);
+			}),
+		isBroadcast,
+		"app",
+	);
 	return () => {
 		cancelled = true;
 		for (const stop of stops) stop();

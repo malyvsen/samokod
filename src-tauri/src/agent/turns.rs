@@ -184,7 +184,7 @@ impl AgentManager {
         let pump_manager = self.clone();
         let pump_window = window.to_string();
         tauri::async_runtime::spawn(async move {
-            let Some((spawn_generation, spawn_repo)) = spawn_incarnation else {
+            let Some(spawn) = spawn_incarnation else {
                 log::warn!("dropping turn emit window={window_owned}: window closed at spawn");
                 return;
             };
@@ -194,7 +194,7 @@ impl AgentManager {
             );
             match connection.send_request(prompt).block_task().await {
                 Ok(_) => {
-                    if !check_current(&state, &window_owned, spawn_generation, &spawn_repo) {
+                    if !check_current(&state, &window_owned, &spawn) {
                         return;
                     }
                     set_working(&state, &window_owned, &key, false);
@@ -217,7 +217,7 @@ impl AgentManager {
                     pump_manager.spawn_pump(&pump_window);
                 }
                 Err(error) => {
-                    if !check_current(&state, &window_owned, spawn_generation, &spawn_repo) {
+                    if !check_current(&state, &window_owned, &spawn) {
                         return;
                     }
                     let raw = error.to_string();
@@ -348,17 +348,15 @@ impl AgentManager {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_notification(
     state: &Mutex<BackendState>,
     app: &AppHandle,
     window: &str,
     key: &SessionKey,
     notification: &acp::SessionNotification,
-    expected_generation: u64,
-    expected_repo: &Option<std::path::PathBuf>,
+    expected: &super::WindowIncarnation,
 ) {
-    if !super::check_current(state, window, expected_generation, expected_repo) {
+    if !super::check_current(state, window, expected) {
         return;
     }
     let current = lock_backend(state).and_then(|backend| {
@@ -449,15 +447,7 @@ pub(crate) fn handle_notification(
             // Todo-carrying calls render as a TODOS block instead of a `▸` line.
             if let Some(fresh) = todos_from_call(merged.raw_input.as_ref()) {
                 log::debug!("todo call {} todos {}", call.tool_call_id, fresh.len());
-                update_todos(
-                    state,
-                    app,
-                    window,
-                    key,
-                    fresh,
-                    expected_generation,
-                    expected_repo,
-                );
+                update_todos(state, app, window, key, fresh, expected);
             } else {
                 let line = crate::updates::format_tool_line(&merged);
                 emit_event(
@@ -497,15 +487,7 @@ pub(crate) fn handle_notification(
                 todos_from_update(merged.raw_input.as_ref(), merged.raw_output.as_ref())
             {
                 log::debug!("todo update {} todos {}", update.tool_call_id, fresh.len());
-                update_todos(
-                    state,
-                    app,
-                    window,
-                    key,
-                    fresh,
-                    expected_generation,
-                    expected_repo,
-                );
+                update_todos(state, app, window, key, fresh, expected);
             } else {
                 let line = crate::updates::format_tool_line(&merged);
                 emit_event(
@@ -735,10 +717,9 @@ fn update_todos(
     window: &str,
     key: &SessionKey,
     fresh: Vec<TodoView>,
-    expected_generation: u64,
-    expected_repo: &Option<std::path::PathBuf>,
+    expected: &super::WindowIncarnation,
 ) {
-    if !super::check_current(state, window, expected_generation, expected_repo) {
+    if !super::check_current(state, window, expected) {
         return;
     }
     let Some(mut backend) = lock_backend(state) else {

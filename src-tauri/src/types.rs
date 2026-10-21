@@ -417,84 +417,89 @@ pub struct OpenRepoEntry {
 }
 
 impl AppEvent {
-    /// Stable wire name for log lines. Pure.
-    pub fn name(&self) -> &'static str {
+    /// One-line log summary: wire name plus session key or selection.
+    /// Pure, so the log shape is unit-tested without emitting.
+    pub fn log_summary(&self) -> String {
         match self {
-            AppEvent::AgentText { .. } => "agent_text",
-            AppEvent::AgentThought { .. } => "agent_thought",
-            AppEvent::UserText { .. } => "user_text",
-            AppEvent::ToolLine { .. } => "tool_line",
-            AppEvent::TurnDone { .. } => "turn_done",
-            AppEvent::TurnFailed { .. } => "turn_failed",
-            AppEvent::AgentExited { .. } => "agent_exited",
-            AppEvent::PermissionAsked { .. } => "permission_asked",
-            AppEvent::PermissionResolved { .. } => "permission_resolved",
-            AppEvent::ConfigOptions { .. } => "config_options",
-            AppEvent::TodosChanged { .. } => "todos_changed",
-            AppEvent::SpendTick { .. } => "spend_tick",
-            AppEvent::BranchChanged { .. } => "branch_changed",
-            AppEvent::SessionReset { .. } => "session_reset",
-            AppEvent::HistoryPreparing { .. } => "history_preparing",
-            AppEvent::HistoryBegin { .. } => "history_begin",
-            AppEvent::HistoryDone { .. } => "history_done",
-            AppEvent::HistoryFailed { .. } => "history_failed",
-            AppEvent::PlansChanged { .. } => "plans_changed",
-            AppEvent::OpenReposChanged { .. } => "open_repos_changed",
+            AppEvent::AgentText { session, .. } => {
+                format!("agent_text session={}::{:?}", session.plan, session.role)
+            }
+            AppEvent::AgentThought { session, .. } => {
+                format!("agent_thought session={}::{:?}", session.plan, session.role)
+            }
+            AppEvent::UserText { session, .. } => {
+                format!("user_text session={}::{:?}", session.plan, session.role)
+            }
+            AppEvent::ToolLine { session, .. } => {
+                format!("tool_line session={}::{:?}", session.plan, session.role)
+            }
+            AppEvent::TurnDone { session } => {
+                format!("turn_done session={}::{:?}", session.plan, session.role)
+            }
+            AppEvent::TurnFailed { session, .. } => {
+                format!("turn_failed session={}::{:?}", session.plan, session.role)
+            }
+            AppEvent::AgentExited { session, .. } => {
+                format!("agent_exited session={}::{:?}", session.plan, session.role)
+            }
+            AppEvent::PermissionAsked { session, .. } => {
+                format!(
+                    "permission_asked session={}::{:?}",
+                    session.plan, session.role
+                )
+            }
+            AppEvent::PermissionResolved { session, .. } => {
+                format!(
+                    "permission_resolved session={}::{:?}",
+                    session.plan, session.role
+                )
+            }
+            AppEvent::ConfigOptions { session, .. } => {
+                format!(
+                    "config_options session={}::{:?}",
+                    session.plan, session.role
+                )
+            }
+            AppEvent::TodosChanged { session, .. } => {
+                format!("todos_changed session={}::{:?}", session.plan, session.role)
+            }
+            AppEvent::SpendTick { session, .. } => {
+                format!("spend_tick session={}::{:?}", session.plan, session.role)
+            }
+            AppEvent::SessionReset { session } => {
+                format!("session_reset session={}::{:?}", session.plan, session.role)
+            }
+            AppEvent::HistoryPreparing { session } => {
+                format!(
+                    "history_preparing session={}::{:?}",
+                    session.plan, session.role
+                )
+            }
+            AppEvent::HistoryBegin { session } => {
+                format!("history_begin session={}::{:?}", session.plan, session.role)
+            }
+            AppEvent::HistoryDone { session } => {
+                format!("history_done session={}::{:?}", session.plan, session.role)
+            }
+            AppEvent::HistoryFailed { session, .. } => {
+                format!(
+                    "history_failed session={}::{:?}",
+                    session.plan, session.role
+                )
+            }
+            AppEvent::BranchChanged { branch } => {
+                format!("branch_changed branch={branch}")
+            }
+            AppEvent::PlansChanged { selected, .. } => {
+                format!(
+                    "plans_changed selected={}::{:?}",
+                    selected.plan, selected.role
+                )
+            }
+            AppEvent::OpenReposChanged { repos } => {
+                format!("open_repos_changed count={}", repos.len())
+            }
         }
-    }
-
-    /// Session key carried by session-scoped events, if any. Pure.
-    pub fn session(&self) -> Option<&SessionKey> {
-        match self {
-            AppEvent::AgentText { session, .. }
-            | AppEvent::AgentThought { session, .. }
-            | AppEvent::UserText { session, .. }
-            | AppEvent::ToolLine { session, .. }
-            | AppEvent::TurnDone { session }
-            | AppEvent::TurnFailed { session, .. }
-            | AppEvent::AgentExited { session, .. }
-            | AppEvent::PermissionAsked { session, .. }
-            | AppEvent::PermissionResolved { session, .. }
-            | AppEvent::ConfigOptions { session, .. }
-            | AppEvent::TodosChanged { session, .. }
-            | AppEvent::SpendTick { session, .. }
-            | AppEvent::SessionReset { session }
-            | AppEvent::HistoryPreparing { session }
-            | AppEvent::HistoryBegin { session }
-            | AppEvent::HistoryDone { session }
-            | AppEvent::HistoryFailed { session, .. } => Some(session),
-            AppEvent::BranchChanged { .. }
-            | AppEvent::PlansChanged { .. }
-            | AppEvent::OpenReposChanged { .. } => None,
-        }
-    }
-}
-
-/// One-line log summary for an event: name plus session key or selection.
-/// Pure, so the log shape is unit-tested without emitting.
-pub fn event_summary(event: &AppEvent) -> String {
-    match event {
-        AppEvent::PlansChanged { selected, .. } => {
-            format!(
-                "plans_changed selected={}::{:?}",
-                selected.plan, selected.role
-            )
-        }
-        AppEvent::OpenReposChanged { repos } => {
-            format!("open_repos_changed count={}", repos.len())
-        }
-        AppEvent::BranchChanged { branch } => {
-            format!("branch_changed branch={branch}")
-        }
-        _ => match event.session() {
-            Some(session) => format!(
-                "{} session={}::{:?}",
-                event.name(),
-                session.plan,
-                session.role
-            ),
-            None => event.name().to_string(),
-        },
     }
 }
 
@@ -543,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn event_names_cover_turn_history_and_plans() {
+    fn log_summary_carries_session_or_selection() {
         let key = SessionKey {
             plan: "2026-10-21.10-03-18".to_string(),
             role: SessionRole::Scoping,
@@ -552,15 +557,8 @@ mod tests {
             AppEvent::TurnDone {
                 session: key.clone()
             }
-            .name(),
-            "turn_done"
-        );
-        assert_eq!(
-            AppEvent::HistoryDone {
-                session: key.clone()
-            }
-            .name(),
-            "history_done"
+            .log_summary(),
+            "turn_done session=2026-10-21.10-03-18::Scoping"
         );
         assert_eq!(
             AppEvent::HistoryFailed {
@@ -569,60 +567,15 @@ mod tests {
                 hint: "retry".to_string(),
                 retryable: true,
             }
-            .name(),
-            "history_failed"
-        );
-        assert_eq!(
-            AppEvent::PlansChanged {
-                plans: Vec::new(),
-                selected: key.clone(),
-            }
-            .name(),
-            "plans_changed"
-        );
-        assert_eq!(
-            AppEvent::TurnDone {
-                session: key.clone()
-            }
-            .session(),
-            Some(&key)
-        );
-        assert!(
-            AppEvent::PlansChanged {
-                plans: Vec::new(),
-                selected: key.clone(),
-            }
-            .session()
-            .is_none()
-        );
-    }
-
-    #[test]
-    fn event_summary_carries_session_or_selection() {
-        let key = SessionKey {
-            plan: "2026-10-21.10-03-18".to_string(),
-            role: SessionRole::Scoping,
-        };
-        assert_eq!(
-            event_summary(&AppEvent::TurnDone {
-                session: key.clone()
-            }),
-            "turn_done session=2026-10-21.10-03-18::Scoping"
-        );
-        assert_eq!(
-            event_summary(&AppEvent::HistoryFailed {
-                session: key.clone(),
-                raw: "gone".to_string(),
-                hint: "retry".to_string(),
-                retryable: true,
-            }),
+            .log_summary(),
             "history_failed session=2026-10-21.10-03-18::Scoping"
         );
         assert_eq!(
-            event_summary(&AppEvent::PlansChanged {
+            AppEvent::PlansChanged {
                 plans: Vec::new(),
                 selected: key.clone(),
-            }),
+            }
+            .log_summary(),
             "plans_changed selected=2026-10-21.10-03-18::Scoping"
         );
     }

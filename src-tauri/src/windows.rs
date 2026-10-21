@@ -39,15 +39,15 @@ pub(crate) fn create_window(app: &AppHandle) -> Result<String, String> {
     config.label = label.clone();
     WebviewWindowBuilder::from_config(app, &config)
         .map_err(|error| {
-            log::warn!("failed to build window {label}: {error}");
+            log::warn!("failed to build window={label}: {error}");
             format!("failed to build window {label}: {error}")
         })?
         .build()
         .map_err(|error| {
-            log::warn!("failed to open window {label}: {error}");
+            log::warn!("failed to open window={label}: {error}");
             format!("failed to open window {label}: {error}")
         })?;
-    log::info!("open window {label}");
+    log::info!("open window={label}");
     Ok(label)
 }
 
@@ -61,9 +61,20 @@ pub(crate) fn focus_window(app: &AppHandle, label: &str) -> Result<(), String> {
         .unminimize()
         .and_then(|()| window.set_focus())
         .map_err(|error| {
-            log::warn!("failed to focus window {label}: {error}");
+            log::warn!("failed to focus window={label}: {error}");
             format!("failed to focus window {label}: {error}")
         })
+}
+
+/// Open a fresh picker window for a launch trigger (`single-instance` or
+/// `reopened`). Dock-click focus stays best-effort: opening a new picker is
+/// the accepted fallback.
+pub(crate) fn open_picker_window(app: &AppHandle, reason: &str) {
+    log::info!("{reason}: opening picker window");
+    match create_window(app) {
+        Ok(label) => log::info!("{reason} opened picker window={label}"),
+        Err(error) => log::warn!("{reason} failed to open window: {error}"),
+    }
 }
 
 #[cfg(test)]
@@ -71,23 +82,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sequential_creates_yield_distinct_labels_while_both_live() {
+    fn labels_allocate_monotonically_above_live_labels() {
+        // Sequential creates yield distinct labels while both live.
         let first = allocate_window_label(&[]);
         let existing = vec!["main".to_string(), first.clone()];
         let second = allocate_window_label(&existing);
-        assert_ne!(first, second);
         assert_eq!(first, "window-1");
         assert_eq!(second, "window-2");
-    }
-
-    #[test]
-    fn labels_never_reuse_closed_slots() {
-        assert_eq!(allocate_window_label(&[]), "window-1");
-        assert_eq!(
-            allocate_window_label(&["main".to_string(), "window-1".to_string()]),
-            "window-2"
-        );
-        // A closed window-2 leaves a gap, but allocation moves forward so a
+        // A closed label leaves a gap, but allocation moves forward so a
         // stale task for the dead window can never hit the new one.
         assert_eq!(
             allocate_window_label(&[

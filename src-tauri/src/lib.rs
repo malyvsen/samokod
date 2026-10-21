@@ -33,7 +33,9 @@ use crate::menu::build_menu;
 use crate::prefs::{load_prefs, record_open, save_prefs};
 use crate::repo::{RepoInfo, validate_repo};
 use crate::types::{AppEvent, ConfigOptionView, OpenRepoResult, PlansUpdate, Prefs, SessionKey};
-use crate::windows::{create_window, focus_window as focus_window_by_label, window_label};
+use crate::windows::{
+    create_window, focus_window as focus_window_by_label, open_picker_window, window_label,
+};
 
 fn specta_builder() -> Builder<tauri::Wry> {
     Builder::new()
@@ -427,11 +429,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            log::info!("single-instance second launch: opening picker window");
-            match create_window(app) {
-                Ok(label) => log::info!("single-instance opened picker window={label}"),
-                Err(error) => log::warn!("second instance failed to open window: {error}"),
-            }
+            open_picker_window(app, "single-instance second launch");
         }))
         .setup(|app| {
             app.manage(AgentManager::new(app.handle().clone()));
@@ -466,11 +464,7 @@ pub fn run() {
         .expect("error while running tauri application")
         .run(|app, event| {
             if let tauri::RunEvent::Reopen { .. } = event {
-                log::info!("reopened: opening picker window");
-                match create_window(app) {
-                    Ok(label) => log::info!("reopened opened picker window={label}"),
-                    Err(error) => log::warn!("reopened failed to open window: {error}"),
-                }
+                open_picker_window(app, "reopened");
             }
         });
 }

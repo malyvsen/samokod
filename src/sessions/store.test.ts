@@ -331,28 +331,20 @@ describe("replayed updates", () => {
 	});
 });
 
-describe("global broadcasts", () => {
-	test("open_repos_changed leaves every chat untouched", () => {
-		const before = withChat();
-		const after = applySessionEvent(before, {
-			type: "open_repos_changed",
-			repos: [{ path: "/repo-b", window: "window-2" }],
-		});
-		expect(after).toBe(before);
-	});
-
-	test("plans_changed and branch_changed leave chats untouched", () => {
-		const before = withChat();
-		expect(
-			applySessionEvent(before, {
-				type: "plans_changed",
-				plans: [],
-				selected: testKey(),
-			}),
-		).toBe(before);
-		expect(
-			applySessionEvent(before, { type: "branch_changed", branch: "main" }),
-		).toBe(before);
+describe("global events", () => {
+	test("list-level events leave every chat untouched", () => {
+		const events: AppEvent[] = [
+			{
+				type: "open_repos_changed",
+				repos: [{ path: "/repo-b", window: "window-2" }],
+			},
+			{ type: "plans_changed", plans: [], selected: testKey() },
+			{ type: "branch_changed", branch: "main" },
+		];
+		for (const event of events) {
+			const before = withChat();
+			expect(applySessionEvent(before, event)).toBe(before);
+		}
 	});
 });
 
