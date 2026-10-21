@@ -18,8 +18,12 @@ import type { AppEvent } from "./bindings";
 import { testKey } from "./fixtures";
 
 const listen = vi.hoisted(() => vi.fn());
+const windowListen = vi.hoisted(() => vi.fn());
 
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+	getCurrentWebviewWindow: () => ({ listen: windowListen }),
+}));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 type TauriHandler = (event: { payload: AppEvent }) => void;
@@ -30,6 +34,7 @@ function flush() {
 
 beforeEach(() => {
 	listen.mockReset();
+	windowListen.mockReset();
 	vi.mocked(invoke).mockReset();
 });
 
@@ -161,29 +166,47 @@ describe("session commands", () => {
 describe("app events", () => {
 	test("unlistens when cleanup runs before listen resolves", async () => {
 		const stop = vi.fn();
-		let resolveListen!: (stop: () => void) => void;
+		let resolveWindow!: (stop: () => void) => void;
+		let resolveGlobal!: (stop: () => void) => void;
+		windowListen.mockReturnValueOnce(
+			new Promise<() => void>((resolve) => {
+				resolveWindow = resolve;
+			}),
+		);
 		listen.mockReturnValueOnce(
 			new Promise<() => void>((resolve) => {
-				resolveListen = resolve;
+				resolveGlobal = resolve;
 			}),
 		);
 
 		const cleanup = onAppEvent(() => {});
 		cleanup();
-		resolveListen(stop);
+		resolveWindow(stop);
+		resolveGlobal(stop);
 		await flush();
 
-		expect(stop).toHaveBeenCalledTimes(1);
+		expect(stop).toHaveBeenCalledTimes(2);
 	});
 
 	test("quick resubscribe delivers each chunk once", async () => {
-		const handlers = new Set<TauriHandler>();
-		listen.mockImplementation((_: unknown, handler: TauriHandler) => {
-			handlers.add(handler);
+		const windowHandlers = new Set<TauriHandler>();
+		const globalHandlers = new Set<TauriHandler>();
+		windowListen.mockImplementation((_: unknown, handler: TauriHandler) => {
+			windowHandlers.add(handler);
 			return new Promise<() => void>((resolve) => {
 				queueMicrotask(() => {
 					resolve(() => {
-						handlers.delete(handler);
+						windowHandlers.delete(handler);
+					});
+				});
+			});
+		});
+		listen.mockImplementation((_: unknown, handler: TauriHandler) => {
+			globalHandlers.add(handler);
+			return new Promise<() => void>((resolve) => {
+				queueMicrotask(() => {
+					resolve(() => {
+						globalHandlers.delete(handler);
 					});
 				});
 			});
@@ -200,8 +223,9 @@ describe("app events", () => {
 		const second = onAppEvent(handle);
 		await flush();
 
-		expect(handlers.size).toBe(1);
-		for (const handler of [...handlers]) {
+		expect(windowHandlers.size).toBe(1);
+		expect(globalHandlers.size).toBe(1);
+		for (const handler of [...windowHandlers]) {
 			handler({
 				payload: { type: "agent_text", session: testKey(), chunk: "Yes" },
 			});
@@ -210,6 +234,43 @@ describe("app events", () => {
 
 		second();
 		await flush();
-		expect(handlers.size).toBe(0);
+		expect(windowHandlers.size).toBe(0);
+		expect(globalHandlers.size).toBe(0);
+	});
+
+	test("window subscription takes session events, global takes only the broadcast", async () => {
+		const windowHandlers = new Set<TauriHandler>();
+		const globalHandlers = new Set<TauriHandler>();
+		windowListen.mockImplementation((_: unknown, handler: TauriHandler) => {
+			windowHandlers.add(handler);
+			return Promise.resolve(() => {
+				windowHandlers.delete(handler);
+			});
+		});
+		listen.mockImplementation((_: unknown, handler: TauriHandler) => {
+			globalHandlers.add(handler);
+			return Promise.resolve(() => {
+				globalHandlers.delete(handler);
+			});
+		});
+		const seen: AppEvent[] = [];
+		onAppEvent((event) => {
+			seen.push(event);
+		});
+		await flush();
+
+		const turn: AppEvent = { type: "turn_done", session: testKey() };
+		const broadcast: AppEvent = { type: "open_repos_changed", repos: [] };
+		for (const handler of [...windowHandlers]) {
+			handler({ payload: turn });
+			handler({ payload: broadcast });
+		}
+		for (const handler of [...globalHandlers]) {
+			handler({ payload: turn });
+			handler({ payload: broadcast });
+		}
+		// Session events arrive once via the window subscription; the
+		// broadcast arrives once via the global subscription.
+		expect(seen).toEqual([turn, broadcast]);
 	});
 });

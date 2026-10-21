@@ -21,7 +21,7 @@ use super::start::{
     ENSURE_LIVE_TIMEOUT, HISTORY_TIMEOUT, HistoryGuard, WARM_TIMEOUT, WarmGuard, wait_until,
 };
 use super::turns::handle_notification;
-use super::{emit_event, lock_backend, map_startup_error, set_failed};
+use super::{check_current, emit_event, incarnation, lock_backend, map_startup_error, set_failed};
 
 /// User decision for one permission card.
 #[derive(Debug, Clone)]
@@ -832,16 +832,20 @@ impl AgentManager {
             binary.display(),
             path_value
         );
+        let spawn_incarnation = incarnation(&self.state, window);
         let mut env = HashMap::from([("PATH".to_string(), path_value)]);
         env.extend(extra_env);
         let config = AcpAgentConfig::new(binary).arg("acp").envs(env);
         let agent = AcpAgent::new(config);
+        let exit_incarnation = incarnation(&self.state, window);
         let slot = Arc::clone(&self.state);
         let slot_window = window.to_string();
         let notify_state = Arc::clone(&self.state);
         let notify_window = window.to_string();
         let notify_app = self.app.clone();
         let notify_key = key.clone();
+        let notify_incarnation = spawn_incarnation.clone();
+        let ask_incarnation = spawn_incarnation.clone();
         let ask_state = Arc::clone(&self.state);
         let ask_window = window.to_string();
         let ask_app = self.app.clone();
@@ -865,8 +869,24 @@ impl AgentManager {
                         let app = notify_app.clone();
                         let window = notify_window.clone();
                         let key = notify_key.clone();
+                        let incarnation = notify_incarnation.clone();
                         async move {
-                            handle_notification(&state, &app, &window, &key, &notification);
+                            match incarnation {
+                                Some((generation, repo)) => handle_notification(
+                                    &state,
+                                    &app,
+                                    &window,
+                                    &key,
+                                    &notification,
+                                    generation,
+                                    &repo,
+                                ),
+                                None => {
+                                    log::warn!(
+                                        "dropping notification window={window}: window closed at spawn"
+                                    );
+                                }
+                            }
                             Ok(())
                         }
                     },
@@ -878,11 +898,26 @@ impl AgentManager {
                         let app = ask_app.clone();
                         let window = ask_window.clone();
                         let key = ask_key.clone();
+                        let incarnation = ask_incarnation.clone();
                         async move {
-                            handle_permission_request(
-                                &state, &app, &window, &key, request, responder,
-                            )
-                            .await;
+                            match incarnation {
+                                Some((generation, repo)) => handle_permission_request(
+                                    &state,
+                                    &app,
+                                    &window,
+                                    &key,
+                                    request,
+                                    responder,
+                                    generation,
+                                    &repo,
+                                )
+                                .await,
+                                None => {
+                                    log::warn!(
+                                        "dropping permission window={window}: window closed at spawn"
+                                    );
+                                }
+                            }
                             Ok(())
                         }
                     },
@@ -947,6 +982,14 @@ impl AgentManager {
                 .await;
             if let Err(error) = result {
                 let raw = error.to_string();
+                if let Some((exit_generation, exit_repo)) = exit_incarnation.clone()
+                    && !check_current(&slot, &exit_window, exit_generation, &exit_repo)
+                {
+                    if let Some(tx) = ready_for_error.lock().expect("ready poisoned").take() {
+                        let _ = tx.send(Err(raw));
+                    }
+                    return;
+                }
                 if let Some(tx) = ready_for_error.lock().expect("ready poisoned").take() {
                     let hint = classify_error(&raw);
                     // Startup failures land on the failed flag so the row

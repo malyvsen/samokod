@@ -8,20 +8,19 @@ pub(crate) fn window_label(window: &tauri::Window) -> String {
     window.label().to_string()
 }
 
-/// Fresh `window-N` label not in `existing`. Pure.
+/// Fresh `window-N` label above every live `window-N`. Pure and monotonic:
+/// closed labels are never reused, so a stale task for a dead window can
+/// never emit into a new window that recycled its label.
 pub(crate) fn allocate_window_label(existing: &[String]) -> String {
-    let mut taken = std::collections::HashSet::new();
+    let mut max: u64 = 0;
     for label in existing {
-        taken.insert(label.as_str());
-    }
-    let mut index = 1;
-    loop {
-        let candidate = format!("window-{index}");
-        if !taken.contains(candidate.as_str()) {
-            return candidate;
+        if let Some(suffix) = label.strip_prefix("window-")
+            && let Ok(index) = suffix.parse::<u64>()
+        {
+            max = max.max(index);
         }
-        index += 1;
     }
+    format!("window-{}", max + 1)
 }
 
 /// Shared window factory: label `window-N`, same title, size, and min size
@@ -82,19 +81,21 @@ mod tests {
     }
 
     #[test]
-    fn labels_allocate_first_free_slot() {
+    fn labels_never_reuse_closed_slots() {
         assert_eq!(allocate_window_label(&[]), "window-1");
         assert_eq!(
             allocate_window_label(&["main".to_string(), "window-1".to_string()]),
             "window-2"
         );
+        // A closed window-2 leaves a gap, but allocation moves forward so a
+        // stale task for the dead window can never hit the new one.
         assert_eq!(
             allocate_window_label(&[
                 "main".to_string(),
                 "window-1".to_string(),
                 "window-3".to_string()
             ]),
-            "window-2"
+            "window-4"
         );
     }
 }

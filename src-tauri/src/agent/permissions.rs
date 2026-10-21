@@ -76,6 +76,7 @@ pub(crate) fn cancel_pending(state: &Mutex<BackendState>, window: &str, key: &Se
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_permission_request(
     state: &Mutex<BackendState>,
     app: &AppHandle,
@@ -83,7 +84,12 @@ pub(crate) async fn handle_permission_request(
     key: &SessionKey,
     request: acp::RequestPermissionRequest,
     responder: agent_client_protocol::Responder<acp::RequestPermissionResponse>,
+    expected_generation: u64,
+    expected_repo: &Option<std::path::PathBuf>,
 ) {
+    if !super::check_current(state, window, expected_generation, expected_repo) {
+        return;
+    }
     let current = lock_backend(state).and_then(|backend| {
         backend
             .windows

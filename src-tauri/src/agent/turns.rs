@@ -18,7 +18,7 @@ use super::WindowState;
 use super::config::config_views;
 use super::permissions::cancel_pending;
 use super::plans_list::push_sorted;
-use super::{emit_event, lock_backend, set_failed, set_working};
+use super::{check_current, emit_event, incarnation, lock_backend, set_failed, set_working};
 
 impl AgentManager {
     /// Resend the last prompt. When the transport is closed, reopen the
@@ -174,6 +174,7 @@ impl AgentManager {
         // Dots go green while the turn runs; titles and order refresh when
         // it lands.
         self.push_plans(window);
+        let spawn_incarnation = incarnation(&self.state, window);
         let state = Arc::clone(&self.state);
         let window_owned = window.to_string();
         let app = self.app.clone();
@@ -183,12 +184,19 @@ impl AgentManager {
         let pump_manager = self.clone();
         let pump_window = window.to_string();
         tauri::async_runtime::spawn(async move {
+            let Some((spawn_generation, spawn_repo)) = spawn_incarnation else {
+                log::warn!("dropping turn emit window={window_owned}: window closed at spawn");
+                return;
+            };
             let prompt = acp::PromptRequest::new(
                 acp::SessionId::new(session_id),
                 vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
             );
             match connection.send_request(prompt).block_task().await {
                 Ok(_) => {
+                    if !check_current(&state, &window_owned, spawn_generation, &spawn_repo) {
+                        return;
+                    }
                     set_working(&state, &window_owned, &key, false);
                     set_failed(&state, &window_owned, &key, false);
                     log::info!(
@@ -209,6 +217,9 @@ impl AgentManager {
                     pump_manager.spawn_pump(&pump_window);
                 }
                 Err(error) => {
+                    if !check_current(&state, &window_owned, spawn_generation, &spawn_repo) {
+                        return;
+                    }
                     let raw = error.to_string();
                     let transport_gone = is_transport_error(&raw);
                     set_working(&state, &window_owned, &key, false);
@@ -337,13 +348,19 @@ impl AgentManager {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_notification(
     state: &Mutex<BackendState>,
     app: &AppHandle,
     window: &str,
     key: &SessionKey,
     notification: &acp::SessionNotification,
+    expected_generation: u64,
+    expected_repo: &Option<std::path::PathBuf>,
 ) {
+    if !super::check_current(state, window, expected_generation, expected_repo) {
+        return;
+    }
     let current = lock_backend(state).and_then(|backend| {
         backend
             .windows
@@ -432,7 +449,15 @@ pub(crate) fn handle_notification(
             // Todo-carrying calls render as a TODOS block instead of a `▸` line.
             if let Some(fresh) = todos_from_call(merged.raw_input.as_ref()) {
                 log::debug!("todo call {} todos {}", call.tool_call_id, fresh.len());
-                update_todos(state, app, window, key, fresh);
+                update_todos(
+                    state,
+                    app,
+                    window,
+                    key,
+                    fresh,
+                    expected_generation,
+                    expected_repo,
+                );
             } else {
                 let line = crate::updates::format_tool_line(&merged);
                 emit_event(
@@ -472,7 +497,15 @@ pub(crate) fn handle_notification(
                 todos_from_update(merged.raw_input.as_ref(), merged.raw_output.as_ref())
             {
                 log::debug!("todo update {} todos {}", update.tool_call_id, fresh.len());
-                update_todos(state, app, window, key, fresh);
+                update_todos(
+                    state,
+                    app,
+                    window,
+                    key,
+                    fresh,
+                    expected_generation,
+                    expected_repo,
+                );
             } else {
                 let line = crate::updates::format_tool_line(&merged);
                 emit_event(
@@ -702,7 +735,12 @@ fn update_todos(
     window: &str,
     key: &SessionKey,
     fresh: Vec<TodoView>,
+    expected_generation: u64,
+    expected_repo: &Option<std::path::PathBuf>,
 ) {
+    if !super::check_current(state, window, expected_generation, expected_repo) {
+        return;
+    }
     let Some(mut backend) = lock_backend(state) else {
         return;
     };

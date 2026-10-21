@@ -1,4 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type {
 	AppEvent,
 	ConfigOptionView,
@@ -133,22 +134,38 @@ export function newWindow(): Promise<string> {
 
 export function onAppEvent(handler: (event: AppEvent) => void): () => void {
 	let cancelled = false;
-	let unlisten: (() => void) | undefined;
+	const stops: (() => void)[] = [];
+	function track(stop: () => void) {
+		if (cancelled) {
+			stop();
+		} else {
+			stops.push(stop);
+		}
+	}
+	// Window-targeted events (`emit_to` in the backend) arrive only on the
+	// owning WebviewWindow. Listening here instead of globally keeps one
+	// window's transcript and plans list out of every other window.
+	getCurrentWebviewWindow()
+		.listen<AppEvent>("samokod://event", (event) => {
+			if (event.payload.type === "open_repos_changed") return;
+			handler(event.payload);
+		})
+		.then(track)
+		.catch((error: unknown) => {
+			console.warn("failed to subscribe to window events", error);
+		});
+	// The owned-repos broadcast (`emit` in the backend) reaches every
+	// window. This global subscription handles only that broadcast.
 	listen<AppEvent>("samokod://event", (event) => {
+		if (event.payload.type !== "open_repos_changed") return;
 		handler(event.payload);
 	})
-		.then((stop) => {
-			if (cancelled) {
-				stop();
-			} else {
-				unlisten = stop;
-			}
-		})
+		.then(track)
 		.catch((error: unknown) => {
 			console.warn("failed to subscribe to app events", error);
 		});
 	return () => {
 		cancelled = true;
-		unlisten?.();
+		for (const stop of stops) stop();
 	};
 }

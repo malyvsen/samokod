@@ -95,7 +95,9 @@ function derivesFrom(candidate: string, base: string): boolean {
 /// stealing focus: keep the current key when its plan still exists (role
 /// advances only when the entry no longer lists it), fall back to the
 /// most-recent entry when it vanished, null only when the list is empty.
-/// Pure.
+/// Cross-window pushes never reach here: the backend targets `emit_to` at
+/// the owning WebviewWindow and the frontend subscribes window-targeted,
+/// so a foreign list cannot flip the selection. Pure.
 export function repairSelection(
 	plans: PlanEntry[],
 	current: SessionKey | null,
