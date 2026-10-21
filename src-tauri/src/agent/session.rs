@@ -487,6 +487,11 @@ impl AgentManager {
     /// no past at all (a brand-new plan), so a live session starts instead
     /// and the transcript stays empty.
     pub async fn load_history(&self, window: &str, session: SessionKey) -> Result<(), AgentError> {
+        log::info!(
+            "load_history window={window} session={}::{:?}",
+            session.plan,
+            session.role
+        );
         // Serialize a racing warm: history replays wait for the connection
         // to settle instead of silently skipping and leaving the transcript
         // empty forever under the fire-once `useSessionStart`.
@@ -525,7 +530,7 @@ impl AgentManager {
                     .unwrap_or(false);
                 let snapshot_present = self.session_snapshot_for(window, &session).is_some();
                 log::warn!(
-                    "history wait timeout {} {:?} after {:?}: still_warming={} snapshot_present={}",
+                    "history wait timeout window={window} {} {:?} after {:?}: still_warming={} snapshot_present={}",
                     session.plan,
                     session.role,
                     wait_start.elapsed(),
@@ -624,6 +629,11 @@ impl AgentManager {
                         options: views,
                     },
                 );
+                log::info!(
+                    "HistoryDone window={window} session={}::{:?}",
+                    session.plan,
+                    session.role
+                );
                 emit_event(&self.app, window, AppEvent::HistoryDone { session });
                 self.push_plans(window);
                 Ok(())
@@ -669,6 +679,11 @@ impl AgentManager {
             && super::landing_queue::is_held(&repo_root, &session)
         {
             history_guard.finish();
+            log::info!(
+                "HistoryDone window={window} session={}::{:?} queued",
+                session.plan,
+                session.role
+            );
             emit_event(&self.app, window, AppEvent::HistoryDone { session });
             return Ok(());
         }
@@ -683,6 +698,11 @@ impl AgentManager {
         match result {
             Ok(_) => {
                 history_guard.finish();
+                log::info!(
+                    "HistoryDone window={window} session={}::{:?} empty",
+                    session.plan,
+                    session.role
+                );
                 emit_event(&self.app, window, AppEvent::HistoryDone { session });
                 Ok(())
             }
@@ -699,6 +719,11 @@ impl AgentManager {
     /// already settled the single-flight; the partial replay stays in the
     /// transcript and a retry clears it on `HistoryPreparing`.
     fn emit_history_failed(&self, window: &str, session: &SessionKey, raw: String) {
+        log::info!(
+            "HistoryFailed window={window} session={}::{:?} raw={raw}",
+            session.plan,
+            session.role
+        );
         let hint = classify_error(&raw);
         emit_event(
             &self.app,
@@ -747,7 +772,7 @@ impl AgentManager {
             .unwrap_or(false);
         let snapshot_present = self.session_snapshot_for(window, key).is_some();
         log::warn!(
-            "history wait timeout {} {:?} after {:?}: still_warming={} snapshot_present={}",
+            "history wait timeout window={window} {} {:?} after {:?}: still_warming={} snapshot_present={}",
             key.plan,
             key.role,
             wait_start.elapsed(),
@@ -800,7 +825,13 @@ impl AgentManager {
         }
         let binary = acp::resolve_opencode_binary()?;
         let path_value = acp::agent_path_value();
-        log::info!("spawning {} with PATH={}", binary.display(), path_value);
+        log::info!(
+            "spawning window={window} session={}::{:?} {} with PATH={}",
+            key.plan,
+            key.role,
+            binary.display(),
+            path_value
+        );
         let mut env = HashMap::from([("PATH".to_string(), path_value)]);
         env.extend(extra_env);
         let config = AcpAgentConfig::new(binary).arg("acp").envs(env);
@@ -922,6 +953,11 @@ impl AgentManager {
                     // dot turns red even before any prompt ran.
                     set_failed(&slot, &exit_window, &exit_key, true);
                     push_sorted(&slot, &exit_app, &exit_window);
+                    log::info!(
+                        "AgentExited window={exit_window} session={}::{:?} raw={raw}",
+                        exit_key.plan,
+                        exit_key.role
+                    );
                     emit_event(
                         &exit_app,
                         &exit_window,

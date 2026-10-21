@@ -15,15 +15,20 @@ impl AgentManager {
     /// a fresh session beside them. Failures log and release so the next
     /// explicit prompt retries through the existing error path.
     pub async fn warm_session(&self, window: &str, session: SessionKey) -> Result<(), AgentError> {
+        log::info!(
+            "warm_session window={window} session={}::{:?}",
+            session.plan,
+            session.role
+        );
         let repo_root = lock_backend(&self.state)
             .and_then(|backend| backend.windows.get(window)?.repo_root.clone());
         let Some(repo_root) = repo_root else {
-            log::debug!("skipping warm: no repository open");
+            log::debug!("skipping warm window={window}: no repository open");
             return Ok(());
         };
         if plans::is_finished(&repo_root, &session.plan) {
             log::debug!(
-                "skipping warm for {} {:?}: finished plan",
+                "skipping warm window={window} for {} {:?}: finished plan",
                 session.plan,
                 session.role
             );
@@ -31,7 +36,7 @@ impl AgentManager {
         }
         if super::landing_queue::is_held(&repo_root, &session) {
             log::debug!(
-                "skipping warm for {} {:?}: queued behind landing head",
+                "skipping warm window={window} for {} {:?}: queued behind landing head",
                 session.plan,
                 session.role
             );
@@ -41,7 +46,7 @@ impl AgentManager {
             && !connection.is_incoming_closed()
         {
             log::debug!(
-                "skipping warm for {} {:?}: already live",
+                "skipping warm window={window} for {} {:?}: already live",
                 session.plan,
                 session.role
             );
@@ -58,7 +63,7 @@ impl AgentManager {
             .unwrap_or(false)
         {
             log::debug!(
-                "skipping warm for {} {:?}: history started, transcript owns the key",
+                "skipping warm window={window} for {} {:?}: history started, transcript owns the key",
                 session.plan,
                 session.role
             );
@@ -66,7 +71,7 @@ impl AgentManager {
         }
         let Some(_guard) = WarmGuard::claim(&self.state, window, &session) else {
             log::debug!(
-                "skipping warm for {} {:?}: warm already in flight",
+                "skipping warm window={window} for {} {:?}: warm already in flight",
                 session.plan,
                 session.role
             );
@@ -74,7 +79,11 @@ impl AgentManager {
         };
         let result = self.ensure_live_claimed(window, &session).await;
         if let Err(error) = &result {
-            log::warn!("failed to warm session {}: {error}", session.plan);
+            log::warn!(
+                "failed to warm window={window} session={}::{:?}: {error}",
+                session.plan,
+                session.role
+            );
         }
         result.map(|_| ())
     }

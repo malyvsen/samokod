@@ -24,6 +24,11 @@ impl AgentManager {
     /// Resend the last prompt. When the transport is closed, reopen the
     /// session on the held plan first. Returns false when nothing ran.
     pub async fn retry_last(&self, window: &str, session: SessionKey) -> Result<bool, AgentError> {
+        log::info!(
+            "retry_last window={window} session={}::{:?}",
+            session.plan,
+            session.role
+        );
         self.wait_for_history(window, &session).await?;
         let Some(text) = lock_backend(&self.state).and_then(|backend| {
             backend
@@ -55,7 +60,7 @@ impl AgentManager {
         text: String,
     ) -> Result<(), AgentError> {
         log::info!(
-            "send_prompt session {}::{:?} text_len {}",
+            "send_prompt window={window} session={}::{:?} text_len {}",
             session.plan,
             session.role,
             text.len()
@@ -152,7 +157,7 @@ impl AgentManager {
             };
             if win.is_working(&key) {
                 log::warn!(
-                    "start_turn already running session {}::{:?}",
+                    "start_turn already running window={window} session={}::{:?}",
                     key.plan,
                     key.role
                 );
@@ -186,7 +191,11 @@ impl AgentManager {
                 Ok(_) => {
                     set_working(&state, &window_owned, &key, false);
                     set_failed(&state, &window_owned, &key, false);
-                    log::info!("TurnDone session {}::{:?}", key.plan, key.role);
+                    log::info!(
+                        "TurnDone window={window_owned} session={}::{:?}",
+                        key.plan,
+                        key.role
+                    );
                     emit_event(
                         &app,
                         &window_owned,
@@ -220,7 +229,11 @@ impl AgentManager {
                         }
                     }
                     let hint = classify_error(&raw);
-                    log::info!("TurnFailed session {}::{:?}", key.plan, key.role);
+                    log::info!(
+                        "TurnFailed window={window_owned} session={}::{:?}",
+                        key.plan,
+                        key.role
+                    );
                     emit_event(
                         &app,
                         &window_owned,
@@ -344,7 +357,9 @@ pub(crate) fn handle_notification(
         && notification.session_id.to_string() != current
     {
         log::debug!(
-            "dropping notification for stale session {}",
+            "dropping notification window={window} session={}::{:?} for stale session {}",
+            key.plan,
+            key.role,
             notification.session_id
         );
         return;

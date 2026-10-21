@@ -427,8 +427,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Err(error) = create_window(app) {
-                log::warn!("second instance failed to open window: {error}");
+            log::info!("single-instance second launch: opening picker window");
+            match create_window(app) {
+                Ok(label) => log::info!("single-instance opened picker window={label}"),
+                Err(error) => log::warn!("second instance failed to open window: {error}"),
             }
         }))
         .setup(|app| {

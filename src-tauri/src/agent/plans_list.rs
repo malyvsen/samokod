@@ -60,6 +60,7 @@ impl AgentManager {
         let (plans, selected) = match lock_backend(&self.state) {
             Some(backend) => {
                 let Some(state) = backend.windows.get(window) else {
+                    log::debug!("skip plans push window={window}: window closed");
                     return;
                 };
                 let (_, plans, selected) = listed(state, state.current.as_ref());
@@ -448,6 +449,7 @@ pub(crate) fn push_sorted(state: &Mutex<BackendState>, app: &AppHandle, window: 
     let (plans, selected) = match state.lock() {
         Ok(guard) => {
             let Some(win) = guard.windows.get(window) else {
+                log::debug!("skip plans push window={window}: window closed");
                 return;
             };
             let repo_root = win.repo_root.clone().unwrap_or_default();

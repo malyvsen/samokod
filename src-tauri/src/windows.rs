@@ -48,6 +48,7 @@ pub(crate) fn create_window(app: &AppHandle) -> Result<String, String> {
             log::warn!("failed to open window {label}: {error}");
             format!("failed to open window {label}: {error}")
         })?;
+    log::info!("open window {label}");
     Ok(label)
 }
 

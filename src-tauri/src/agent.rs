@@ -403,6 +403,7 @@ impl AgentManager {
         plans::ensure_structure(&repo_root)?;
         crate::worktrees::prune(&repo_root)?;
         let canonical = crate::repo::canonical_repo_path(&repo_root.to_string_lossy());
+        log::info!("open_repo window={window} path={canonical}");
         {
             let mut backend = lock_backend(&self.state).expect("state poisoned");
             // Same-repo-once gate: the canonical path is claimed under the
@@ -410,6 +411,7 @@ impl AgentManager {
             // both pass. Another live owner keeps the repo; the caller stays
             // on the picker while the owner focuses.
             if let Some(owner) = backend.owner_of(window, &canonical) {
+                log::info!("open_repo window={window} already open in {owner} path={canonical}");
                 drop(backend);
                 let _ = crate::windows::focus_window(&self.app, &owner);
                 return Err(AgentError::AlreadyOpen {
@@ -460,6 +462,11 @@ impl AgentManager {
         self.watch_branch(window, &repo_root);
         self.pump(window).await;
         let result = self.open_result(window);
+        log::info!(
+            "open_repo window={window} claimed path={canonical} selected={}::{:?}",
+            result.selected.plan,
+            result.selected.role
+        );
         self.push_open_repos();
         Ok(result)
     }
@@ -1011,6 +1018,7 @@ impl AgentManager {
             }
             None => (false, Vec::new()),
         };
+        log::info!("remove_window window={window} existed={existed}");
         if existed {
             emit_open_repos(&self.app, repos);
         }
@@ -1104,17 +1112,25 @@ fn ensure_idle(
 
 /// Emit one app event to its owning window. Emissions are fire-and-forget,
 /// but a failure desyncs the UI from the agent, so it is always logged.
+/// Every emission logs its window label plus session key or selection so
+/// the log file alone proves which window each event targeted.
 fn emit_event(app: &AppHandle, window: &str, event: AppEvent) {
+    let summary = crate::types::event_summary(&event);
     if let Err(error) = app.emit_to(window, "samokod://event", event) {
-        log::warn!("failed to emit app event to {window}: {error}");
+        log::warn!("failed to emit window={window} {summary}: {error}");
+    } else {
+        log::info!("emit window={window} {summary}");
     }
 }
 
 /// Broadcast the owned-repos list to every window so pickers refresh
 /// their already-open marks. Fire-and-forget with a warn-log.
 fn emit_open_repos(app: &AppHandle, repos: Vec<crate::types::OpenRepoEntry>) {
+    let count = repos.len();
     if let Err(error) = app.emit("samokod://event", AppEvent::OpenReposChanged { repos }) {
-        log::warn!("failed to emit open repos: {error}");
+        log::warn!("failed to emit open repos count={count}: {error}");
+    } else {
+        log::info!("emit broadcast open_repos_changed count={count}");
     }
 }
 

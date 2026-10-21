@@ -416,6 +416,88 @@ pub struct OpenRepoEntry {
     pub window: String,
 }
 
+impl AppEvent {
+    /// Stable wire name for log lines. Pure.
+    pub fn name(&self) -> &'static str {
+        match self {
+            AppEvent::AgentText { .. } => "agent_text",
+            AppEvent::AgentThought { .. } => "agent_thought",
+            AppEvent::UserText { .. } => "user_text",
+            AppEvent::ToolLine { .. } => "tool_line",
+            AppEvent::TurnDone { .. } => "turn_done",
+            AppEvent::TurnFailed { .. } => "turn_failed",
+            AppEvent::AgentExited { .. } => "agent_exited",
+            AppEvent::PermissionAsked { .. } => "permission_asked",
+            AppEvent::PermissionResolved { .. } => "permission_resolved",
+            AppEvent::ConfigOptions { .. } => "config_options",
+            AppEvent::TodosChanged { .. } => "todos_changed",
+            AppEvent::SpendTick { .. } => "spend_tick",
+            AppEvent::BranchChanged { .. } => "branch_changed",
+            AppEvent::SessionReset { .. } => "session_reset",
+            AppEvent::HistoryPreparing { .. } => "history_preparing",
+            AppEvent::HistoryBegin { .. } => "history_begin",
+            AppEvent::HistoryDone { .. } => "history_done",
+            AppEvent::HistoryFailed { .. } => "history_failed",
+            AppEvent::PlansChanged { .. } => "plans_changed",
+            AppEvent::OpenReposChanged { .. } => "open_repos_changed",
+        }
+    }
+
+    /// Session key carried by session-scoped events, if any. Pure.
+    pub fn session(&self) -> Option<&SessionKey> {
+        match self {
+            AppEvent::AgentText { session, .. }
+            | AppEvent::AgentThought { session, .. }
+            | AppEvent::UserText { session, .. }
+            | AppEvent::ToolLine { session, .. }
+            | AppEvent::TurnDone { session }
+            | AppEvent::TurnFailed { session, .. }
+            | AppEvent::AgentExited { session, .. }
+            | AppEvent::PermissionAsked { session, .. }
+            | AppEvent::PermissionResolved { session, .. }
+            | AppEvent::ConfigOptions { session, .. }
+            | AppEvent::TodosChanged { session, .. }
+            | AppEvent::SpendTick { session, .. }
+            | AppEvent::SessionReset { session }
+            | AppEvent::HistoryPreparing { session }
+            | AppEvent::HistoryBegin { session }
+            | AppEvent::HistoryDone { session }
+            | AppEvent::HistoryFailed { session, .. } => Some(session),
+            AppEvent::BranchChanged { .. }
+            | AppEvent::PlansChanged { .. }
+            | AppEvent::OpenReposChanged { .. } => None,
+        }
+    }
+}
+
+/// One-line log summary for an event: name plus session key or selection.
+/// Pure, so the log shape is unit-tested without emitting.
+pub fn event_summary(event: &AppEvent) -> String {
+    match event {
+        AppEvent::PlansChanged { selected, .. } => {
+            format!(
+                "plans_changed selected={}::{:?}",
+                selected.plan, selected.role
+            )
+        }
+        AppEvent::OpenReposChanged { repos } => {
+            format!("open_repos_changed count={}", repos.len())
+        }
+        AppEvent::BranchChanged { branch } => {
+            format!("branch_changed branch={branch}")
+        }
+        _ => match event.session() {
+            Some(session) => format!(
+                "{} session={}::{:?}",
+                event.name(),
+                session.plan,
+                session.role
+            ),
+            None => event.name().to_string(),
+        },
+    }
+}
+
 /// Local state persisted under the OS app-data directory.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Type)]
 pub struct Prefs {
@@ -457,6 +539,91 @@ mod tests {
         assert_eq!(
             value.get("chunk").and_then(|v| v.as_str()),
             Some("considering")
+        );
+    }
+
+    #[test]
+    fn event_names_cover_turn_history_and_plans() {
+        let key = SessionKey {
+            plan: "2026-10-21.10-03-18".to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert_eq!(
+            AppEvent::TurnDone {
+                session: key.clone()
+            }
+            .name(),
+            "turn_done"
+        );
+        assert_eq!(
+            AppEvent::HistoryDone {
+                session: key.clone()
+            }
+            .name(),
+            "history_done"
+        );
+        assert_eq!(
+            AppEvent::HistoryFailed {
+                session: key.clone(),
+                raw: "gone".to_string(),
+                hint: "retry".to_string(),
+                retryable: true,
+            }
+            .name(),
+            "history_failed"
+        );
+        assert_eq!(
+            AppEvent::PlansChanged {
+                plans: Vec::new(),
+                selected: key.clone(),
+            }
+            .name(),
+            "plans_changed"
+        );
+        assert_eq!(
+            AppEvent::TurnDone {
+                session: key.clone()
+            }
+            .session(),
+            Some(&key)
+        );
+        assert!(
+            AppEvent::PlansChanged {
+                plans: Vec::new(),
+                selected: key.clone(),
+            }
+            .session()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn event_summary_carries_session_or_selection() {
+        let key = SessionKey {
+            plan: "2026-10-21.10-03-18".to_string(),
+            role: SessionRole::Scoping,
+        };
+        assert_eq!(
+            event_summary(&AppEvent::TurnDone {
+                session: key.clone()
+            }),
+            "turn_done session=2026-10-21.10-03-18::Scoping"
+        );
+        assert_eq!(
+            event_summary(&AppEvent::HistoryFailed {
+                session: key.clone(),
+                raw: "gone".to_string(),
+                hint: "retry".to_string(),
+                retryable: true,
+            }),
+            "history_failed session=2026-10-21.10-03-18::Scoping"
+        );
+        assert_eq!(
+            event_summary(&AppEvent::PlansChanged {
+                plans: Vec::new(),
+                selected: key.clone(),
+            }),
+            "plans_changed selected=2026-10-21.10-03-18::Scoping"
         );
     }
 
