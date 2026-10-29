@@ -428,6 +428,7 @@ pub fn run() {
     let builder = specta_builder();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             open_picker_window(app, "single-instance second launch");
         }))
