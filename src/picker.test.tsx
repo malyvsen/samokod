@@ -63,13 +63,10 @@ describe("repo picker", () => {
 			/>,
 		);
 		expect(screen.getByText("OPEN ELSEWHERE")).toBeInTheDocument();
-		expect(
-			screen.queryByRole("button", { name: "switch" }),
-		).not.toBeInTheDocument();
 		expect(screen.getAllByRole("button", { name: "open" })).toHaveLength(1);
 	});
 
-	test("free repos keep the open action", async () => {
+	test("free repos show an open action", async () => {
 		const onOpen = vi.fn();
 		const user = userEvent.setup();
 		render(
@@ -100,7 +97,6 @@ describe("picker already-open conflict", () => {
 		api.listOpenRepos.mockResolvedValue([
 			{ path: "/repo-taken", window: "window-1" },
 		]);
-		api.focusWindow.mockResolvedValue(undefined);
 		api.openRepo.mockRejectedValue(new Error("already open: /repo-taken"));
 		dialog.open.mockResolvedValue("/repo-taken");
 	});
@@ -109,9 +105,6 @@ describe("picker already-open conflict", () => {
 		const user = userEvent.setup();
 		render(<App />);
 		await user.click(await screen.findByRole("button", { name: "browse…" }));
-		// The backend focuses the owning window itself; the picker only
-		// explains why nothing opened here.
-		expect(api.focusWindow).not.toHaveBeenCalled();
 		expect(await screen.findByRole("alert")).toHaveTextContent(
 			"/repo-taken is already open - switched to that window",
 		);

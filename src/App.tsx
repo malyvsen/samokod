@@ -275,7 +275,7 @@ export function App() {
 	useEffect(() => onAppEvent(handleEvent), [handleEvent]);
 
 	// Picker marks come from the initial list plus the global
-	// `open_repos_changed` handler above; no second subscription here.
+	// `open_repos_changed` handler above.
 	useEffect(() => {
 		if (view.kind !== "picker") return;
 		let cancelled = false;

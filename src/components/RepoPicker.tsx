@@ -31,8 +31,9 @@ export function RepoPicker({
 						key={repo.path}
 					>
 						<span className="rpath">{repo.path}</span>
-						{openElsewhere && <span className="opentag">OPEN ELSEWHERE</span>}
-						{!openElsewhere && (
+						{openElsewhere ? (
+							<span className="opentag">OPEN ELSEWHERE</span>
+						) : (
 							<button
 								className="tbtn"
 								type="button"
