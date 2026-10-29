@@ -7,7 +7,6 @@ export function RepoPicker({
 	error,
 	openPaths,
 	onOpen,
-	onFocusRepo,
 	onBrowse,
 	onDismissError,
 }: {
@@ -17,7 +16,6 @@ export function RepoPicker({
 	error: string | null;
 	openPaths: Set<string>;
 	onOpen: (path: string) => void;
-	onFocusRepo: (path: string) => void;
 	onBrowse: () => void;
 	onDismissError: () => void;
 }) {
@@ -32,17 +30,9 @@ export function RepoPicker({
 						className={openElsewhere ? "rrow open-else" : "rrow"}
 						key={repo.path}
 					>
-						<span>{repo.path}</span>
+						<span className="rpath">{repo.path}</span>
 						{openElsewhere && <span className="opentag">OPEN ELSEWHERE</span>}
-						{openElsewhere ? (
-							<button
-								className="tbtn switchbtn"
-								type="button"
-								onClick={() => onFocusRepo(repo.path)}
-							>
-								switch
-							</button>
-						) : (
+						{!openElsewhere && (
 							<button
 								className="tbtn"
 								type="button"

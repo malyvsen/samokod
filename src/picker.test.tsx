@@ -20,7 +20,7 @@ function pickerProps(overrides: {
 	recent?: RecentRepo[];
 	error?: string | null;
 	openPaths?: Set<string>;
-	onFocusRepo?: (path: string) => void;
+	onOpen?: (path: string) => void;
 }) {
 	return {
 		title: "SAMOKOD",
@@ -31,8 +31,7 @@ function pickerProps(overrides: {
 		],
 		error: overrides.error ?? null,
 		openPaths: overrides.openPaths ?? new Set<string>(),
-		onOpen: vi.fn(),
-		onFocusRepo: overrides.onFocusRepo ?? vi.fn(),
+		onOpen: overrides.onOpen ?? vi.fn(),
 		onBrowse: vi.fn(),
 		onDismissError: vi.fn(),
 	};
@@ -55,35 +54,35 @@ describe("repo picker", () => {
 		expect(screen.getByRole("alert")).toHaveTextContent("not a git repository");
 	});
 
-	test("marks repos open elsewhere with a switch action", () => {
-		const onFocusRepo = vi.fn();
+	test("marks repos open elsewhere with no action", () => {
 		render(
 			<RepoPicker
 				{...pickerProps({
 					openPaths: new Set(["~/code/samokod"]),
-					onFocusRepo,
 				})}
 			/>,
 		);
 		expect(screen.getByText("OPEN ELSEWHERE")).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "switch" })).toBeInTheDocument();
-		expect(screen.getAllByText("open")).toHaveLength(1);
+		expect(
+			screen.queryByRole("button", { name: "switch" }),
+		).not.toBeInTheDocument();
+		expect(screen.getAllByRole("button", { name: "open" })).toHaveLength(1);
 	});
 
-	test("switch focuses the owning window", async () => {
-		const onFocusRepo = vi.fn();
+	test("free repos keep the open action", async () => {
+		const onOpen = vi.fn();
 		const user = userEvent.setup();
 		render(
 			<RepoPicker
 				{...pickerProps({
 					openPaths: new Set(["~/code/samokod"]),
-					onFocusRepo,
+					onOpen,
 				})}
 			/>,
 		);
-		await user.click(screen.getByRole("button", { name: "switch" }));
-		expect(onFocusRepo).toHaveBeenCalledWith("~/code/samokod");
-		expect(onFocusRepo).toHaveBeenCalledTimes(1);
+		await user.click(screen.getByRole("button", { name: "open" }));
+		expect(onOpen).toHaveBeenCalledWith("~/code/dotfiles");
+		expect(onOpen).toHaveBeenCalledTimes(1);
 	});
 });
 

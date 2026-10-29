@@ -6,7 +6,6 @@ import {
 	cancelTurn,
 	createPlan,
 	executePlan,
-	focusWindow,
 	getPrefs,
 	listOpenRepos,
 	loadHistory,
@@ -422,18 +421,6 @@ export function App() {
 			setPickerError(error instanceof Error ? error.message : String(error));
 		}
 	}
-	async function handleFocusRepo(path: string) {
-		try {
-			const repos = await listOpenRepos();
-			setOpenRepos(repos);
-			const owner = repos.find((repo) => repo.path === path)?.window;
-			if (owner === undefined) return;
-			await focusWindow(owner);
-		} catch (error) {
-			setPickerError(error instanceof Error ? error.message : String(error));
-		}
-	}
-
 	async function handleBrowse() {
 		setPickerError(null);
 		const picked = await open({ directory: true, multiple: false });
@@ -779,7 +766,6 @@ export function App() {
 					error={pickerError}
 					openPaths={openPaths}
 					onOpen={handleOpenPath}
-					onFocusRepo={handleFocusRepo}
 					onBrowse={handleBrowse}
 					onDismissError={() => setPickerError(null)}
 				/>

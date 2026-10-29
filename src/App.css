@@ -1042,6 +1042,14 @@ button.brand:hover {
 	border-color: rgba(255, 217, 138, 0.45);
 }
 
+.rrow .rpath {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+	flex: 1 1 auto;
+}
+
 .opentag {
 	flex: none;
 	font-size: 11px;
@@ -1049,11 +1057,6 @@ button.brand:hover {
 	color: #ffd98a;
 	border: 1px solid rgba(255, 217, 138, 0.45);
 	padding: 2px 6px;
-}
-
-.rrow .switchbtn {
-	border-color: rgba(125, 255, 196, 0.5);
-	color: #7dffc4;
 }
 
 .curtag {
