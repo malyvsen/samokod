@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { ComponentProps, MouseEvent } from "react";
+import type { ComponentProps } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -14,6 +14,21 @@ export function MessageMarkdown({ text }: { text: string }) {
 	);
 }
 
+// Web links open in the default external app. Anything else (relative paths,
+// fragments, other schemes, missing href) stays inert: the click is swallowed
+// so the Tauri webview can never navigate away.
+const externalUrl = /^https?:\/\//i;
+
+function isExternalUrl(href: string | undefined): href is string {
+	return href !== undefined && externalUrl.test(href);
+}
+
+function openExternalUrl(href: string): void {
+	openUrl(href).catch((error: unknown) => {
+		console.error(`failed to open link ${href}`, error);
+	});
+}
+
 function MarkdownLink({ href, children, ...props }: ComponentProps<"a">) {
 	return (
 		<a
@@ -21,12 +36,10 @@ function MarkdownLink({ href, children, ...props }: ComponentProps<"a">) {
 			href={href}
 			target="_blank"
 			rel="noopener noreferrer"
-			onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+			onClick={(event) => {
 				event.preventDefault();
-				if (href && /^https?:\/\//i.test(href)) {
-					openUrl(href).catch((error) => {
-						console.error(`failed to open link ${href}`, error);
-					});
+				if (isExternalUrl(href)) {
+					openExternalUrl(href);
 				}
 			}}
 		>

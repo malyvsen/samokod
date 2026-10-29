@@ -1,6 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { MessageMarkdown } from "./components/MessageMarkdown";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
@@ -10,8 +10,11 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 const openUrlMock = vi.mocked(openUrl);
 
 beforeEach(() => {
-	openUrlMock.mockReset();
+	vi.clearAllMocks();
 	openUrlMock.mockResolvedValue(undefined);
+});
+
+afterEach(() => {
 	vi.restoreAllMocks();
 });
 
