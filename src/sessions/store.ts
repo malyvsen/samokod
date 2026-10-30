@@ -69,17 +69,17 @@ export function removeEntry(chats: Chats, key: SessionKey): Chats {
 export function withScopingLead(
 	chats: Chats,
 	key: SessionKey,
-	lead: string | null,
+	lead: string | null | undefined,
 ): Chats {
 	const id = sessionKeyOf(key);
 	const existing = chats[id];
 	if (existing !== undefined) {
-		if (lead === null || existing.scopingLead !== null) return chats;
+		if (lead == null || existing.scopingLead !== null) return chats;
 		return { ...chats, [id]: { ...existing, scopingLead: lead } };
 	}
 	return {
 		...chats,
-		[id]: { ...emptyChat(), scopingLead: lead },
+		[id]: { ...emptyChat(), scopingLead: lead ?? null },
 	};
 }
 

@@ -4,24 +4,24 @@ import { invoke as __TAURI_INVOKE } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	getPrefs: () => typedError<Prefs, string>(__TAURI_INVOKE("get_prefs")),
+	getPrefs: () => typedError<Prefs_Serialize, string>(__TAURI_INVOKE("get_prefs")),
 	validateRepoPath: (path: string) => typedError<RepoInfo, string>(__TAURI_INVOKE("validate_repo_path", { path })),
-	openRepo: (path: string) => typedError<OpenRepoResult, string>(__TAURI_INVOKE("open_repo", { path })),
+	openRepo: (path: string) => typedError<OpenRepoResult_Serialize, string>(__TAURI_INVOKE("open_repo", { path })),
 	refreshBranch: () => typedError<string, string>(__TAURI_INVOKE("refresh_branch")),
-	createPlan: (draft: string | null) => typedError<PlansUpdate, string>(__TAURI_INVOKE("create_plan", { draft })),
-	executePlan: (session: SessionKey) => typedError<PlansUpdate, string>(__TAURI_INVOKE("execute_plan", { session })),
-	finishLanding: (session: SessionKey) => typedError<PlansUpdate, string>(__TAURI_INVOKE("finish_landing", { session })),
-	beginLanding: (session: SessionKey) => typedError<PlansUpdate, string>(__TAURI_INVOKE("begin_landing", { session })),
-	cancelPlan: (session: SessionKey) => typedError<PlansUpdate, string>(__TAURI_INVOKE("cancel_plan", { session })),
-	selectPlan: (session: SessionKey, draft: string | null) => typedError<PlansUpdate, string>(__TAURI_INVOKE("select_plan", { session, draft })),
-	setPlanMode: (plan: string, manual: boolean) => typedError<PlansUpdate, string>(__TAURI_INVOKE("set_plan_mode", { plan, manual })),
-	setPlanEvergreen: (plan: string, evergreen: boolean) => typedError<PlansUpdate, string>(__TAURI_INVOKE("set_plan_evergreen", { plan, evergreen })),
+	createPlan: (draft: string | null) => typedError<PlansUpdate_Serialize, string>(__TAURI_INVOKE("create_plan", { draft })),
+	executePlan: (session: SessionKey) => typedError<PlansUpdate_Serialize, string>(__TAURI_INVOKE("execute_plan", { session })),
+	finishLanding: (session: SessionKey) => typedError<PlansUpdate_Serialize, string>(__TAURI_INVOKE("finish_landing", { session })),
+	beginLanding: (session: SessionKey) => typedError<PlansUpdate_Serialize, string>(__TAURI_INVOKE("begin_landing", { session })),
+	cancelPlan: (session: SessionKey) => typedError<PlansUpdate_Serialize, string>(__TAURI_INVOKE("cancel_plan", { session })),
+	selectPlan: (session: SessionKey, draft: string | null) => typedError<PlansUpdate_Serialize, string>(__TAURI_INVOKE("select_plan", { session, draft })),
+	setPlanMode: (plan: string, manual: boolean) => typedError<PlansUpdate_Serialize, string>(__TAURI_INVOKE("set_plan_mode", { plan, manual })),
+	setPlanEvergreen: (plan: string, evergreen: boolean) => typedError<PlansUpdate_Serialize, string>(__TAURI_INVOKE("set_plan_evergreen", { plan, evergreen })),
 	sendPrompt: (session: SessionKey, text: string) => typedError<null, string>(__TAURI_INVOKE("send_prompt", { session, text })),
 	planMdText: (session: SessionKey) => typedError<string | null, string>(__TAURI_INVOKE("plan_md_text", { session })),
 	retryLast: (session: SessionKey) => typedError<boolean, string>(__TAURI_INVOKE("retry_last", { session })),
 	cancelTurn: (session: SessionKey) => typedError<null, string>(__TAURI_INVOKE("cancel_turn", { session })),
 	answerPermission: (session: SessionKey, toolCallId: string, optionId: string | null) => typedError<null, string>(__TAURI_INVOKE("answer_permission", { session, toolCallId, optionId })),
-	setGlobalConfigOption: (configId: string, value: string) => typedError<ConfigOptionView[], string>(__TAURI_INVOKE("set_global_config_option", { configId, value })),
+	setGlobalConfigOption: (configId: string, value: string) => typedError<ConfigOptionView_Serialize[], string>(__TAURI_INVOKE("set_global_config_option", { configId, value })),
 	saveAttachment: (session: SessionKey, dataBase64: string) => typedError<string, string>(__TAURI_INVOKE("save_attachment", { session, dataBase64 })),
 	warmSession: (session: SessionKey) => typedError<null, string>(__TAURI_INVOKE("warm_session", { session })),
 	loadHistory: (session: SessionKey) => typedError<null, string>(__TAURI_INVOKE("load_history", { session })),
@@ -37,7 +37,15 @@ export const commands = {
  *  their owning window only; `open_repos_changed` broadcasts to every
  *  window. Every session-specific variant carries its session key.
  */
-export type AppEvent = { type: "agent_text"; session: SessionKey; chunk: string } | 
+export type AppEvent = AppEvent_Serialize | AppEvent_Deserialize;
+
+/**
+ *  Frontend event envelope. One Tauri event name carries every variant so
+ *  capabilities stay tight. Session events and `branch_changed` emit to
+ *  their owning window only; `open_repos_changed` broadcasts to every
+ *  window. Every session-specific variant carries its session key.
+ */
+export type AppEvent_Deserialize = { type: "agent_text"; session: SessionKey; chunk: string } | 
 /**
  *  Streamed thought tail. Transient only: the frontend keeps the tail
  *  in ephemeral state and stores only the frozen burst duration.
@@ -48,7 +56,7 @@ export type AppEvent = { type: "agent_text"; session: SessionKey; chunk: string 
  *  loads, plus the eager executing/landing first prompt which emits
  *  live; live scoping turns append the user bubble optimistically instead.
  */
-{ type: "user_text"; session: SessionKey; chunk: string } | { type: "tool_line"; session: SessionKey; line: ToolLineView } | { type: "turn_done"; session: SessionKey } | { type: "turn_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "agent_exited"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "permission_asked"; session: SessionKey; permission: PermissionView } | { type: "permission_resolved"; session: SessionKey; tool_call_id: string } | { type: "config_options"; session: SessionKey; options: ConfigOptionView[] } | { type: "todos_changed"; session: SessionKey; todos: TodoView[]; changes: TodoChangeView[] } | { type: "spend_tick"; session: SessionKey; cost: number | null; ctx_pct: number | null } | { type: "branch_changed"; branch: string } | { type: "session_reset"; session: SessionKey } | 
+{ type: "user_text"; session: SessionKey; chunk: string } | { type: "tool_line"; session: SessionKey; line: ToolLineView } | { type: "turn_done"; session: SessionKey } | { type: "turn_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "agent_exited"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "permission_asked"; session: SessionKey; permission: PermissionView } | { type: "permission_resolved"; session: SessionKey; tool_call_id: string } | { type: "config_options"; session: SessionKey; options: ConfigOptionView_Deserialize[] } | { type: "todos_changed"; session: SessionKey; todos: TodoView[]; changes: TodoChangeView[] } | { type: "spend_tick"; session: SessionKey; cost: number | null; ctx_pct: number | null } | { type: "branch_changed"; branch: string } | { type: "session_reset"; session: SessionKey } | 
 /**
  *  History load started for one session. Emitted immediately after the
  *  history slot is claimed, before the slow session-ID probes: the
@@ -71,7 +79,54 @@ export type AppEvent = { type: "agent_text"; session: SessionKey; chunk: string 
  *  History replay failed. `hint` renders under the raw reason and
  *  `retryable` drives the transcript retry bar.
  */
-{ type: "history_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "plans_changed"; plans: PlanEntry[]; selected: SessionKey } | 
+{ type: "history_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "plans_changed"; plans: PlanEntry_Deserialize[]; selected: SessionKey } | 
+/**
+ *  Repos owned across windows. Broadcast to every window so pickers
+ *  refresh their already-open marks.
+ */
+{ type: "open_repos_changed"; repos: OpenRepoEntry[] };
+
+/**
+ *  Frontend event envelope. One Tauri event name carries every variant so
+ *  capabilities stay tight. Session events and `branch_changed` emit to
+ *  their owning window only; `open_repos_changed` broadcasts to every
+ *  window. Every session-specific variant carries its session key.
+ */
+export type AppEvent_Serialize = { type: "agent_text"; session: SessionKey; chunk: string } | 
+/**
+ *  Streamed thought tail. Transient only: the frontend keeps the tail
+ *  in ephemeral state and stores only the frozen burst duration.
+ */
+{ type: "agent_thought"; session: SessionKey; chunk: string } | 
+/**
+ *  Replayed user message chunk. Only emitted while a session's history
+ *  loads, plus the eager executing/landing first prompt which emits
+ *  live; live scoping turns append the user bubble optimistically instead.
+ */
+{ type: "user_text"; session: SessionKey; chunk: string } | { type: "tool_line"; session: SessionKey; line: ToolLineView } | { type: "turn_done"; session: SessionKey } | { type: "turn_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "agent_exited"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "permission_asked"; session: SessionKey; permission: PermissionView } | { type: "permission_resolved"; session: SessionKey; tool_call_id: string } | { type: "config_options"; session: SessionKey; options: ConfigOptionView_Serialize[] } | { type: "todos_changed"; session: SessionKey; todos: TodoView[]; changes: TodoChangeView[] } | { type: "spend_tick"; session: SessionKey; cost: number | null; ctx_pct: number | null } | { type: "branch_changed"; branch: string } | { type: "session_reset"; session: SessionKey } | 
+/**
+ *  History load started for one session. Emitted immediately after the
+ *  history slot is claimed, before the slow session-ID probes: the
+ *  frontend shows a neutral preparing state with no replay claim.
+ */
+{ type: "history_preparing"; session: SessionKey } | 
+/**
+ *  History replay started for one session. Only emitted when past
+ *  exists and the connection is ready, just before `session/load`.
+ *  The transcript streams through the normal update events; `working`
+ *  stays false throughout.
+ */
+{ type: "history_begin"; session: SessionKey } | 
+/**
+ *  History replay finished. Configuration options arrive separately as
+ *  `ConfigOptions` alongside this event.
+ */
+{ type: "history_done"; session: SessionKey } | 
+/**
+ *  History replay failed. `hint` renders under the raw reason and
+ *  `retryable` drives the transcript retry bar.
+ */
+{ type: "history_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "plans_changed"; plans: PlanEntry_Serialize[]; selected: SessionKey } | 
 /**
  *  Repos owned across windows. Broadcast to every window so pickers
  *  refresh their already-open marks.
@@ -85,13 +140,26 @@ export type ConfigOptionValueView = {
 };
 
 /**  Session config option (ACP `ConfigOption`). */
-export type ConfigOptionView = {
+export type ConfigOptionView = ConfigOptionView_Serialize | ConfigOptionView_Deserialize;
+
+/**  Session config option (ACP `ConfigOption`). */
+export type ConfigOptionView_Deserialize = {
 	id: string,
 	name: string,
 	currentValue: string,
 	options: ConfigOptionValueView[],
 	/**  Spec `category`, absent when the agent omits it. */
 	category?: string | null,
+};
+
+/**  Session config option (ACP `ConfigOption`). */
+export type ConfigOptionView_Serialize = {
+	id: string,
+	name: string,
+	currentValue: string,
+	options: ConfigOptionValueView[],
+	/**  Spec `category`, absent when the agent omits it. */
+	category: string | null,
 };
 
 /**  One repo owned by one window: canonical path plus owner label. */
@@ -104,12 +172,31 @@ export type OpenRepoEntry = {
  *  Repository payload returned after opening a repo. No agents spawn here;
  *  every session starts lazily on its first prompt.
  */
-export type OpenRepoResult = {
+export type OpenRepoResult = OpenRepoResult_Serialize | OpenRepoResult_Deserialize;
+
+/**
+ *  Repository payload returned after opening a repo. No agents spawn here;
+ *  every session starts lazily on its first prompt.
+ */
+export type OpenRepoResult_Deserialize = {
 	repo_root: string,
 	branch: string,
-	plans: PlanEntry[],
+	plans: PlanEntry_Deserialize[],
 	selected: SessionKey,
-	config_defaults: RepoDefaults,
+	config_defaults: RepoDefaults_Deserialize,
+	scoping_preview?: string | null,
+};
+
+/**
+ *  Repository payload returned after opening a repo. No agents spawn here;
+ *  every session starts lazily on its first prompt.
+ */
+export type OpenRepoResult_Serialize = {
+	repo_root: string,
+	branch: string,
+	plans: PlanEntry_Serialize[],
+	selected: SessionKey,
+	config_defaults: RepoDefaults_Serialize,
 	scoping_preview: string | null,
 };
 
@@ -136,12 +223,15 @@ export type PermissionView = {
 export type Phase = "scoping" | "executing" | "evergreening" | "landing" | "completed" | "cancelled";
 
 /**  One plan row for the plans list. */
-export type PlanEntry = {
+export type PlanEntry = PlanEntry_Serialize | PlanEntry_Deserialize;
+
+/**  One plan row for the plans list. */
+export type PlanEntry_Deserialize = {
 	name: string,
 	phase: Phase,
 	title: string,
 	has_plan_md: boolean,
-	sessions: SessionStatusView[],
+	sessions: SessionStatusView_Deserialize[],
 	/**
 	 *  Manual mode: true holds the plan in place, false lets it advance on
 	 *  its own. The single copy lives in `PlanState`; this is its view.
@@ -163,23 +253,79 @@ export type PlanEntry = {
 	 */
 	queued?: boolean,
 	/**  Landing commit progress with ETA. `Some` for landing plans only. */
-	landing_progress?: ProgressView | null,
+	landing_progress?: ProgressView_Deserialize | null,
+};
+
+/**  One plan row for the plans list. */
+export type PlanEntry_Serialize = {
+	name: string,
+	phase: Phase,
+	title: string,
+	has_plan_md: boolean,
+	sessions: SessionStatusView_Serialize[],
+	/**
+	 *  Manual mode: true holds the plan in place, false lets it advance on
+	 *  its own. The single copy lives in `PlanState`; this is its view.
+	 */
+	manual: boolean,
+	/**
+	 *  Evergreen intent: true cleans up after executing, false lands
+	 *  straight from executing. The single copy lives in `PlanState`.
+	 */
+	evergreen: boolean,
+	/**
+	 *  Branch commits ahead of the target, oldest first. Empty when the
+	 *  plan owns no worktree.
+	 */
+	commits: string[],
+	/**
+	 *  True when the landing waits behind the head. The head runs the
+	 *  agent; queued landings hold with no live session and no idle dot.
+	 */
+	queued: boolean,
+	/**  Landing commit progress with ETA. `Some` for landing plans only. */
+	landing_progress: ProgressView_Serialize | null,
 };
 
 /**
  *  Plans list pushed after every prompt, transition, or title change,
  *  and returned by plan commands.
  */
-export type PlansUpdate = {
-	plans: PlanEntry[],
+export type PlansUpdate = PlansUpdate_Serialize | PlansUpdate_Deserialize;
+
+/**
+ *  Plans list pushed after every prompt, transition, or title change,
+ *  and returned by plan commands.
+ */
+export type PlansUpdate_Deserialize = {
+	plans: PlanEntry_Deserialize[],
 	selected: SessionKey,
-	config_defaults: RepoDefaults,
+	config_defaults: RepoDefaults_Deserialize,
+	scoping_preview?: string | null,
+};
+
+/**
+ *  Plans list pushed after every prompt, transition, or title change,
+ *  and returned by plan commands.
+ */
+export type PlansUpdate_Serialize = {
+	plans: PlanEntry_Serialize[],
+	selected: SessionKey,
+	config_defaults: RepoDefaults_Serialize,
 	scoping_preview: string | null,
 };
 
 /**  Local state persisted under the OS app-data directory. */
-export type Prefs = {
+export type Prefs = Prefs_Serialize | Prefs_Deserialize;
+
+/**  Local state persisted under the OS app-data directory. */
+export type Prefs_Deserialize = {
 	recent?: RecentRepo[],
+};
+
+/**  Local state persisted under the OS app-data directory. */
+export type Prefs_Serialize = {
+	recent: RecentRepo[],
 };
 
 /**
@@ -187,10 +333,28 @@ export type Prefs = {
  *  `eta_secs` is `None` when no ETA text shows (empty, estimating, or
  *  done). Shared by per-session todo progress and landing commit progress.
  */
-export type ProgressView = {
+export type ProgressView = ProgressView_Serialize | ProgressView_Deserialize;
+
+/**
+ *  Done/total progress with an optional ETA for the plans list.
+ *  `eta_secs` is `None` when no ETA text shows (empty, estimating, or
+ *  done). Shared by per-session todo progress and landing commit progress.
+ */
+export type ProgressView_Deserialize = {
 	done: number,
 	total: number,
 	eta_secs?: number | null,
+};
+
+/**
+ *  Done/total progress with an optional ETA for the plans list.
+ *  `eta_secs` is `None` when no ETA text shows (empty, estimating, or
+ *  done). Shared by per-session todo progress and landing commit progress.
+ */
+export type ProgressView_Serialize = {
+	done: number,
+	total: number,
+	eta_secs: number | null,
 };
 
 /**  Recent repo row for the picker: path only. */
@@ -199,9 +363,18 @@ export type RecentRepo = {
 };
 
 /**  Stored model/effort defaults for the instant disabled picker paint. */
-export type RepoDefaults = {
+export type RepoDefaults = RepoDefaults_Serialize | RepoDefaults_Deserialize;
+
+/**  Stored model/effort defaults for the instant disabled picker paint. */
+export type RepoDefaults_Deserialize = {
 	model?: string | null,
 	effort?: string | null,
+};
+
+/**  Stored model/effort defaults for the instant disabled picker paint. */
+export type RepoDefaults_Serialize = {
+	model: string | null,
+	effort: string | null,
 };
 
 /**  Branch info for a validated repository. */
@@ -229,24 +402,64 @@ export type SessionRole = "scoping" | "executing" | "evergreening" | "landing";
  *  failed red, approval amber, working green, idle active blue, the rest
  *  gray.
  */
-export type SessionStatusView = {
+export type SessionStatusView = SessionStatusView_Serialize | SessionStatusView_Deserialize;
+
+/**
+ *  Per-session status for the plans list. The frontend derives the dot:
+ * 
+ *  failed red, approval amber, working green, idle active blue, the rest
+ *  gray.
+ */
+export type SessionStatusView_Deserialize = {
 	role: SessionRole,
 	working: boolean,
 	approval: boolean,
 	failed: boolean,
 	live: boolean,
-	progress?: ProgressView | null,
-	spend?: SpendStatusView,
+	progress?: ProgressView_Deserialize | null,
+	spend?: SpendStatusView_Deserialize,
 	todos?: TodoView[],
+};
+
+/**
+ *  Per-session status for the plans list. The frontend derives the dot:
+ * 
+ *  failed red, approval amber, working green, idle active blue, the rest
+ *  gray.
+ */
+export type SessionStatusView_Serialize = {
+	role: SessionRole,
+	working: boolean,
+	approval: boolean,
+	failed: boolean,
+	live: boolean,
+	progress: ProgressView_Serialize | null,
+	spend: SpendStatusView_Serialize,
+	todos: TodoView[],
 };
 
 /**
  *  Spend totals for one session, mirrored from the latest `UsageUpdate`.
  *  `ctx_pct` matches the `SpendTick` event field name.
  */
-export type SpendStatusView = {
+export type SpendStatusView = SpendStatusView_Serialize | SpendStatusView_Deserialize;
+
+/**
+ *  Spend totals for one session, mirrored from the latest `UsageUpdate`.
+ *  `ctx_pct` matches the `SpendTick` event field name.
+ */
+export type SpendStatusView_Deserialize = {
 	cost?: number | null,
 	ctx_pct?: number | null,
+};
+
+/**
+ *  Spend totals for one session, mirrored from the latest `UsageUpdate`.
+ *  `ctx_pct` matches the `SpendTick` event field name.
+ */
+export type SpendStatusView_Serialize = {
+	cost: number | null,
+	ctx_pct: number | null,
 };
 
 /**  Changed rows since the previous list: added rows plus status changes. */
