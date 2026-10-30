@@ -67,7 +67,7 @@ This applies both to dedicated documentation files and to comments in code.
 
 ## Isolate LLM-facing types from the rest of the codebase
 
-*Why? Because you'll be optimizing their structure and you don't want to change code when you do.*
+_Why? Because you'll be optimizing their structure and you don't want to change code when you do._
 
 Keep types used for LLM I/O separate from the types you use in code, and convert between them as close to the LLM call as possible.
 
@@ -81,9 +81,9 @@ Instead of asking the LLM politely to generate dates in YYYY-MM-DD format, use a
 
 ## Make prompts situational
 
-*Why? Stops the LLM from getting distracted.*
+_Why? Stops the LLM from getting distracted._
 
-Prompts should only include information that the LLM needs to know *right now*. If the need for information is conditional, add it under that condition only.
+Prompts should only include information that the LLM needs to know _right now_. If the need for information is conditional, add it under that condition only.
 
 # Development tooling rules
 

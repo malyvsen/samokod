@@ -1,14 +1,18 @@
 # Introduction
+
 You are working in the git worktree at {{WORKTREE_PATH}}, whose branch is {{WORKTREE_BRANCH}}. The plan at {{PLAN_MD_ABS_PATH}} was just executed here against the target branch {{TARGET_BRANCH}}. The commits below, oldest first, are what a coding agent did in order to carry it out:
 {{COMMITS}}
 
 # Objective
+
 The objective is to make sure that the codebase reads as if it had been written with the current logic and features in mind from the start. This applies not only to the code, but also to tests, documentation, and anything else the codebase contains. Remove all convoluted naming, roundabout logic and pointless abstractions. Consider both the contents of files and their structure - renaming files, splitting or joining them, changing the directory structure etc. are all on the plate.
 
 # Constraints
+
 Your work should be a pure refactor - behaviour should not change, except for fixing bugs or improving performance.
 
 # What to watch for
+
 Coding agents tend to produce minimal-diff changes with backward compatibility in mind, but this is detrimental to the long-term maintainability of the codebase. For example:
 - An agent wanted to create a file called `gardening` where it would put cabbage-planting logic.
 - The agent discovered that a file with that name already existed and contained irrigation and soil-prep logic.
@@ -30,9 +34,11 @@ One more thing which coding agents notoriously do, especially when writing docum
 Note that when this prompt tells you to consider doing something, it does not necessarily mean you should do it. It is your judgement call whether this is actually beneficial to the overall maintainability of the codebase and conformance to its coding standards. To help you in your decision, you may look at the history of the codebase - what the direction seems to be, where bugs appeared historically, what was easy or difficult to change, which pieces of it seem coupled and which seem independent, etc.
 
 # Scope
+
 The scope is this worktree. The commits listed above and the plan show what was done and what was intended. Consider the edited code plus adjacent and related content.
 
 # Instructions
+
 Once you're aware of what needs to be done, use TODOs to track your work.
 
 Commit as you work - everything you do should eventually be committed.
