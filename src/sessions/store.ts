@@ -63,7 +63,7 @@ export function removeEntry(chats: Chats, key: SessionKey): Chats {
 }
 
 /// Seeds the scoping lead from a response while ensuring the chat exists,
-/// so a selected session always has an entry. The lead runs once: null
+/// so a selected session always has an entry. The lead runs once: missing
 /// never overwrites and a present lead sticks, keeping the same object
 /// when nothing changes.
 export function withScopingLead(

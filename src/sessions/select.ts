@@ -56,7 +56,7 @@ export function sideContentFor(
 	todos: TodoView[],
 ): SideContent {
 	if (entry?.phase === "landing" && selectedKey?.role === "landing") {
-		return { kind: "commits", commits: entry.commits ?? [] };
+		return { kind: "commits", commits: entry.commits };
 	}
 	return { kind: "todos", todos };
 }

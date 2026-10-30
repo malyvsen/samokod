@@ -14,7 +14,7 @@ name = "samokod_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.6.3", features = [] }
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
 agent-client-protocol = "2.2.0"
@@ -27,7 +27,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 specta = "=2.0.0-rc.26"
 specta-typescript = "0.0.13"
-tauri = { version = "2.11.6", features = [] }
+tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"

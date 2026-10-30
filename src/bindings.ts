@@ -236,22 +236,22 @@ export type PlanEntry_Deserialize = {
 	 *  Manual mode: true holds the plan in place, false lets it advance on
 	 *  its own. The single copy lives in `PlanState`; this is its view.
 	 */
-	manual?: boolean,
+	manual: boolean,
 	/**
 	 *  Evergreen intent: true cleans up after executing, false lands
 	 *  straight from executing. The single copy lives in `PlanState`.
 	 */
-	evergreen?: boolean,
+	evergreen: boolean,
 	/**
 	 *  Branch commits ahead of the target, oldest first. Empty when the
 	 *  plan owns no worktree.
 	 */
-	commits?: string[],
+	commits: string[],
 	/**
 	 *  True when the landing waits behind the head. The head runs the
 	 *  agent; queued landings hold with no live session and no idle dot.
 	 */
-	queued?: boolean,
+	queued: boolean,
 	/**  Landing commit progress with ETA. `Some` for landing plans only. */
 	landing_progress?: ProgressView_Deserialize | null,
 };
@@ -417,8 +417,8 @@ export type SessionStatusView_Deserialize = {
 	failed: boolean,
 	live: boolean,
 	progress?: ProgressView_Deserialize | null,
-	spend?: SpendStatusView_Deserialize,
-	todos?: TodoView[],
+	spend: SpendStatusView,
+	todos: TodoView[],
 };
 
 /**
@@ -434,7 +434,7 @@ export type SessionStatusView_Serialize = {
 	failed: boolean,
 	live: boolean,
 	progress: ProgressView_Serialize | null,
-	spend: SpendStatusView_Serialize,
+	spend: SpendStatusView,
 	todos: TodoView[],
 };
 
@@ -442,22 +442,7 @@ export type SessionStatusView_Serialize = {
  *  Spend totals for one session, mirrored from the latest `UsageUpdate`.
  *  `ctx_pct` matches the `SpendTick` event field name.
  */
-export type SpendStatusView = SpendStatusView_Serialize | SpendStatusView_Deserialize;
-
-/**
- *  Spend totals for one session, mirrored from the latest `UsageUpdate`.
- *  `ctx_pct` matches the `SpendTick` event field name.
- */
-export type SpendStatusView_Deserialize = {
-	cost?: number | null,
-	ctx_pct?: number | null,
-};
-
-/**
- *  Spend totals for one session, mirrored from the latest `UsageUpdate`.
- *  `ctx_pct` matches the `SpendTick` event field name.
- */
-export type SpendStatusView_Serialize = {
+export type SpendStatusView = {
 	cost: number | null,
 	ctx_pct: number | null,
 };

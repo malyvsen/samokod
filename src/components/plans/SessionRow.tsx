@@ -40,13 +40,13 @@ export function SessionRow({
 				</button>
 				<span className="sess-tip" aria-hidden="true">
 					<span className="costline">
-						<span>{formatCost(status.spend?.cost ?? 0)}</span>
-						<span>{formatContext(status.spend?.ctx_pct ?? 0)}</span>
+						<span>{formatCost(status.spend.cost ?? 0)}</span>
+						<span>{formatContext(status.spend.ctx_pct ?? 0)}</span>
 					</span>
-					{(status.todos ?? []).length === 0 ? (
+					{status.todos.length === 0 ? (
 						<span className="trow dim">No todos yet</span>
 					) : (
-						(status.todos ?? []).map((todo) => (
+						status.todos.map((todo) => (
 							<span
 								className={`trow ${todoRowClass(todo.status)}`}
 								key={todo.content}

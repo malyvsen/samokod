@@ -165,44 +165,38 @@ pub struct SessionKey {
 ///
 /// failed red, approval amber, working green, idle active blue, the rest
 /// gray.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
+#[derive(Debug, Clone, Serialize, PartialEq, Type)]
 pub struct SessionStatusView {
     pub role: SessionRole,
     pub working: bool,
     pub approval: bool,
     pub failed: bool,
     pub live: bool,
-    #[serde(default)]
     pub progress: Option<ProgressView>,
-    #[serde(default)]
     pub spend: SpendStatusView,
-    #[serde(default)]
     pub todos: Vec<TodoView>,
 }
 
 /// Spend totals for one session, mirrored from the latest `UsageUpdate`.
 /// `ctx_pct` matches the `SpendTick` event field name.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Type)]
+#[derive(Debug, Clone, Serialize, PartialEq, Default, Type)]
 pub struct SpendStatusView {
-    #[serde(default)]
     pub cost: f64,
-    #[serde(default)]
     pub ctx_pct: f64,
 }
 
 /// Done/total progress with an optional ETA for the plans list.
 /// `eta_secs` is `None` when no ETA text shows (empty, estimating, or
 /// done). Shared by per-session todo progress and landing commit progress.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Type)]
 pub struct ProgressView {
     pub done: usize,
     pub total: usize,
-    #[serde(default)]
     pub eta_secs: Option<u64>,
 }
 
 /// One plan row for the plans list.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
+#[derive(Debug, Clone, Serialize, PartialEq, Type)]
 pub struct PlanEntry {
     pub name: String,
     pub phase: crate::plans::Phase,
@@ -211,37 +205,30 @@ pub struct PlanEntry {
     pub sessions: Vec<SessionStatusView>,
     /// Manual mode: true holds the plan in place, false lets it advance on
     /// its own. The single copy lives in `PlanState`; this is its view.
-    #[serde(default)]
     pub manual: bool,
     /// Evergreen intent: true cleans up after executing, false lands
     /// straight from executing. The single copy lives in `PlanState`.
-    #[serde(default = "crate::plans::default_evergreen")]
     pub evergreen: bool,
     /// Branch commits ahead of the target, oldest first. Empty when the
     /// plan owns no worktree.
-    #[serde(default)]
     pub commits: Vec<String>,
     /// True when the landing waits behind the head. The head runs the
     /// agent; queued landings hold with no live session and no idle dot.
-    #[serde(default)]
     pub queued: bool,
     /// Landing commit progress with ETA. `Some` for landing plans only.
-    #[serde(default)]
     pub landing_progress: Option<ProgressView>,
 }
 
 /// Stored model/effort defaults for the instant disabled picker paint.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Type)]
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq, Type)]
 pub struct RepoDefaults {
-    #[serde(default)]
     pub model: Option<String>,
-    #[serde(default)]
     pub effort: Option<String>,
 }
 
 /// Plans list pushed after every prompt, transition, or title change,
 /// and returned by plan commands.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
+#[derive(Debug, Clone, Serialize, PartialEq, Type)]
 pub struct PlansUpdate {
     pub plans: Vec<PlanEntry>,
     pub selected: SessionKey,
@@ -251,7 +238,7 @@ pub struct PlansUpdate {
 
 /// Repository payload returned after opening a repo. No agents spawn here;
 /// every session starts lazily on its first prompt.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
+#[derive(Debug, Clone, Serialize, PartialEq, Type)]
 pub struct OpenRepoResult {
     pub repo_root: String,
     pub branch: String,
@@ -265,7 +252,7 @@ pub struct OpenRepoResult {
 /// capabilities stay tight. Session events and `branch_changed` emit to
 /// their owning window only; `open_repos_changed` broadcasts to every
 /// window. Every session-specific variant carries its session key.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Type)]
+#[derive(Debug, Clone, Serialize, PartialEq, Type)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AppEvent {
     AgentText {
@@ -391,7 +378,7 @@ pub struct ConfigOptionValueView {
 }
 
 /// Session config option (ACP `ConfigOption`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Type)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigOptionView {
     pub id: String,
@@ -399,7 +386,6 @@ pub struct ConfigOptionView {
     pub current_value: String,
     pub options: Vec<ConfigOptionValueView>,
     /// Spec `category`, absent when the agent omits it.
-    #[serde(default)]
     pub category: Option<String>,
 }
 
