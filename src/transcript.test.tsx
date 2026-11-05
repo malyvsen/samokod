@@ -289,7 +289,7 @@ describe("transcript thought rows", () => {
 	test("frozen bursts read as thinking seconds", () => {
 		render(
 			<Transcript
-				items={[{ kind: "thought", id: "t1", ms: 8000 }]}
+				items={[{ kind: "thought", id: "t1", ms: 8000, text: "hmm" }]}
 				start={IDLE}
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
@@ -303,8 +303,8 @@ describe("transcript thought rows", () => {
 		const { container } = render(
 			<Transcript
 				items={[
-					{ kind: "thought", id: "t1", ms: 1500 },
-					{ kind: "thought", id: "t2", ms: 1500 },
+					{ kind: "thought", id: "t1", ms: 1500, text: "first" },
+					{ kind: "thought", id: "t2", ms: 1500, text: "second" },
 				]}
 				start={IDLE}
 				repoLabel="~/repo"
@@ -321,9 +321,9 @@ describe("transcript thought rows", () => {
 		const { container } = render(
 			<Transcript
 				items={[
-					{ kind: "thought", id: "t1", ms: 8000 },
+					{ kind: "thought", id: "t1", ms: 8000, text: "first" },
 					{ kind: "agent", id: "a1", text: "hello" },
-					{ kind: "thought", id: "t2", ms: 8000 },
+					{ kind: "thought", id: "t2", ms: 8000, text: "second" },
 				]}
 				start={IDLE}
 				repoLabel="~/repo"
@@ -357,14 +357,19 @@ describe("transcript thought rows", () => {
 		const { container } = render(
 			<Transcript
 				items={[
-					{ kind: "thought", id: "t1", ms: 2000 },
-					{ kind: "thought", id: "t2", ms: 1000 },
+					{ kind: "thought", id: "t1", ms: 2000, text: "first" },
+					{ kind: "thought", id: "t2", ms: 1000, text: "second" },
 				]}
 				start={IDLE}
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
-				live={{ kind: "thinking", burstStart: 0, updatedAt: 1000 }}
+				live={{
+					kind: "thinking",
+					burstStart: 0,
+					updatedAt: 1000,
+					text: "live",
+				}}
 			/>,
 		);
 		const rows = container.querySelectorAll(".arow.thought");
@@ -383,7 +388,12 @@ describe("transcript thought rows", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
-				live={{ kind: "thinking", burstStart: 0, updatedAt: 2500 }}
+				live={{
+					kind: "thinking",
+					burstStart: 0,
+					updatedAt: 2500,
+					text: "live",
+				}}
 			/>,
 		);
 		const rows = container.querySelectorAll(".arow.thought");
@@ -395,12 +405,17 @@ describe("transcript thought rows", () => {
 	test("new chunks advance the total while freeze leaves it unchanged", () => {
 		const { container, rerender, unmount } = render(
 			<Transcript
-				items={[{ kind: "thought", id: "t1", ms: 2000 }]}
+				items={[{ kind: "thought", id: "t1", ms: 2000, text: "first" }]}
 				start={IDLE}
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
-				live={{ kind: "thinking", burstStart: 1000, updatedAt: 2000 }}
+				live={{
+					kind: "thinking",
+					burstStart: 1000,
+					updatedAt: 2000,
+					text: "live",
+				}}
 			/>,
 		);
 		expect(container.querySelector(".arow.thought")?.textContent).toBe(
@@ -408,12 +423,17 @@ describe("transcript thought rows", () => {
 		);
 		rerender(
 			<Transcript
-				items={[{ kind: "thought", id: "t1", ms: 2000 }]}
+				items={[{ kind: "thought", id: "t1", ms: 2000, text: "first" }]}
 				start={IDLE}
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
-				live={{ kind: "thinking", burstStart: 1000, updatedAt: 3500 }}
+				live={{
+					kind: "thinking",
+					burstStart: 1000,
+					updatedAt: 3500,
+					text: "live",
+				}}
 			/>,
 		);
 		expect(container.querySelector(".arow.thought")?.textContent).toBe(
@@ -423,8 +443,8 @@ describe("transcript thought rows", () => {
 		const { container: frozen } = render(
 			<Transcript
 				items={[
-					{ kind: "thought", id: "t1", ms: 2000 },
-					{ kind: "thought", id: "t2", ms: 2500 },
+					{ kind: "thought", id: "t1", ms: 2000, text: "first" },
+					{ kind: "thought", id: "t2", ms: 2500, text: "second" },
 				]}
 				start={IDLE}
 				repoLabel="~/repo"

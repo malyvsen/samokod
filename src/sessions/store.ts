@@ -176,13 +176,14 @@ export function applySessionEvent(
 		}
 		case "agent_thought": {
 			const key = event.session;
+			const chunk = event.chunk;
 			return updateEntry(chats, key, (chat) => {
 				if (chat.start.kind === "replaying") return chat;
 				return {
 					...chat,
 					working: true,
 					failed: false,
-					live: liveForThought(chat.live, now),
+					live: liveForThought(chat.live, now, chunk),
 				};
 			});
 		}

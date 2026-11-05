@@ -89,7 +89,7 @@ export function Transcript({
 }
 
 type TranscriptBlock =
-	| { kind: "thoughts"; id: string; ms: number }
+	| { kind: "thoughts"; id: string; ms: number; text: string }
 	| { kind: "item"; item: Exclude<TranscriptItem, { kind: "thought" }> };
 
 /// Adjacent thoughts read as one cumulative row. Live thinking joins a
@@ -106,9 +106,18 @@ function transcriptBlocks(
 		}
 		const last = blocks[blocks.length - 1];
 		if (last?.kind === "thoughts") {
-			blocks[blocks.length - 1] = { ...last, ms: last.ms + item.ms };
+			blocks[blocks.length - 1] = {
+				...last,
+				ms: last.ms + item.ms,
+				text: `${last.text}\n${item.text}`,
+			};
 		} else {
-			blocks.push({ kind: "thoughts", id: item.id, ms: item.ms });
+			blocks.push({
+				kind: "thoughts",
+				id: item.id,
+				ms: item.ms,
+				text: item.text,
+			});
 		}
 	}
 	if (liveMs !== null) {
@@ -116,7 +125,7 @@ function transcriptBlocks(
 		if (last?.kind === "thoughts") {
 			blocks[blocks.length - 1] = { ...last, ms: last.ms + liveMs };
 		} else {
-			blocks.push({ kind: "thoughts", id: "live", ms: liveMs });
+			blocks.push({ kind: "thoughts", id: "live", ms: liveMs, text: "" });
 		}
 	}
 	return blocks;

@@ -383,9 +383,35 @@ describe("thought bursts", () => {
 			2000,
 		);
 		const chat = chatOf(chats);
-		expect(chat.transcript[0]).toMatchObject({ kind: "thought", ms: 0 });
+		expect(chat.transcript[0]).toMatchObject({
+			kind: "thought",
+			ms: 0,
+			text: "hello",
+		});
 		expect(chat.transcript[1]).toMatchObject({ kind: "agent", text: "answer" });
 		expect(chat.live).toBeNull();
+	});
+
+	test("thought chunks accumulate into one burst text", () => {
+		let chats = applySessionEvent(
+			withChat(),
+			{ type: "agent_thought", session: testKey(), chunk: "hel" },
+			1000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{ type: "agent_thought", session: testKey(), chunk: "lo" },
+			1500,
+		);
+		chats = applySessionEvent(
+			chats,
+			{ type: "agent_text", session: testKey(), chunk: "answer" },
+			2000,
+		);
+		expect(chatOf(chats).transcript[0]).toMatchObject({
+			kind: "thought",
+			text: "hello",
+		});
 	});
 
 	test("tool activity freezes the burst without waiting", () => {
@@ -409,7 +435,11 @@ describe("thought bursts", () => {
 			2000,
 		);
 		const chat = chatOf(chats);
-		expect(chat.transcript[0]).toMatchObject({ kind: "thought", ms: 0 });
+		expect(chat.transcript[0]).toMatchObject({
+			kind: "thought",
+			ms: 0,
+			text: "hello",
+		});
 		expect(chat.transcript[1]).toMatchObject({ kind: "tool" });
 		expect(chat.live).toBeNull();
 	});
@@ -426,7 +456,11 @@ describe("thought bursts", () => {
 			9000,
 		);
 		const chat = chatOf(chats);
-		expect(chat.transcript[0]).toMatchObject({ kind: "thought", ms: 0 });
+		expect(chat.transcript[0]).toMatchObject({
+			kind: "thought",
+			ms: 0,
+			text: "hello",
+		});
 		expect(chat.live).toBeNull();
 		expect(chat.working).toBe(false);
 	});
@@ -442,7 +476,11 @@ describe("thought bursts", () => {
 			session: testKey(),
 		});
 		const chat = chatOf(chats);
-		expect(chat.transcript[0]).toMatchObject({ kind: "thought", ms: 0 });
+		expect(chat.transcript[0]).toMatchObject({
+			kind: "thought",
+			ms: 0,
+			text: "hello",
+		});
 		expect(chat.live).toBeNull();
 		expect(chat.start).toEqual({ kind: "replaying" });
 	});

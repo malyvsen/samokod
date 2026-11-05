@@ -29,13 +29,28 @@ describe("liveThinkingMs", () => {
 
 	test("live bursts read wall-clock duration with a zero floor", () => {
 		expect(
-			liveThinkingMs({ kind: "thinking", burstStart: 1000, updatedAt: 1000 }),
+			liveThinkingMs({
+				kind: "thinking",
+				burstStart: 1000,
+				updatedAt: 1000,
+				text: "",
+			}),
 		).toBe(0);
 		expect(
-			liveThinkingMs({ kind: "thinking", burstStart: 1000, updatedAt: 1400 }),
+			liveThinkingMs({
+				kind: "thinking",
+				burstStart: 1000,
+				updatedAt: 1400,
+				text: "",
+			}),
 		).toBe(400);
 		expect(
-			liveThinkingMs({ kind: "thinking", burstStart: 2000, updatedAt: 1000 }),
+			liveThinkingMs({
+				kind: "thinking",
+				burstStart: 2000,
+				updatedAt: 1000,
+				text: "",
+			}),
 		).toBe(0);
 	});
 });
@@ -55,48 +70,60 @@ describe("thinkingSeconds", () => {
 
 describe("liveForThought", () => {
 	test("starts a burst from waiting or idle", () => {
-		expect(liveForThought(null, 1000)).toEqual({
+		expect(liveForThought(null, 1000, "hmm")).toEqual({
 			kind: "thinking",
 			burstStart: 1000,
 			updatedAt: 1000,
+			text: "hmm",
 		});
-		expect(liveForThought({ kind: "waiting" }, 1000)).toEqual({
+		expect(liveForThought({ kind: "waiting" }, 1000, "hmm")).toEqual({
 			kind: "thinking",
 			burstStart: 1000,
 			updatedAt: 1000,
+			text: "hmm",
 		});
 	});
 
 	test("advances within the burst window", () => {
-		const live = liveForThought(null, 1000);
-		expect(liveForThought(live, 2500)).toEqual({
+		const live = liveForThought(null, 1000, "hel");
+		expect(liveForThought(live, 2500, "lo")).toEqual({
 			kind: "thinking",
 			burstStart: 1000,
 			updatedAt: 2500,
+			text: "hello",
 		});
 	});
 
 	test("starts fresh past burst silence", () => {
-		const live = liveForThought(null, 1000);
-		expect(liveForThought(live, 1000 + BURST_SILENCE_MS)).toEqual({
+		const live = liveForThought(null, 1000, "old");
+		expect(liveForThought(live, 1000 + BURST_SILENCE_MS, "new")).toEqual({
 			kind: "thinking",
 			burstStart: 1000 + BURST_SILENCE_MS,
 			updatedAt: 1000 + BURST_SILENCE_MS,
+			text: "new",
 		});
 	});
 });
 
 describe("freezeBurst", () => {
 	test("freezes thinking into wall-clock milliseconds", () => {
-		const transcript = freezeBurst([], liveForThought(null, 1000));
+		const transcript = freezeBurst([], liveForThought(null, 1000, "hmm"));
 		expect(transcript).toHaveLength(1);
-		expect(transcript[0]).toMatchObject({ kind: "thought", ms: 0 });
+		expect(transcript[0]).toMatchObject({
+			kind: "thought",
+			ms: 0,
+			text: "hmm",
+		});
 	});
 
 	test("stores the wall-clock burst duration", () => {
-		const live = liveForThought(liveForThought(null, 1000), 2500);
+		const live = liveForThought(liveForThought(null, 1000, "hel"), 2500, "lo");
 		const transcript = freezeBurst([], live);
-		expect(transcript[0]).toMatchObject({ kind: "thought", ms: 1500 });
+		expect(transcript[0]).toMatchObject({
+			kind: "thought",
+			ms: 1500,
+			text: "hello",
+		});
 	});
 
 	test("leaves waiting and idle untouched", () => {

@@ -5,7 +5,7 @@ import type { ChatState } from "./store";
 
 export type LiveStatus =
 	| { kind: "waiting" }
-	| { kind: "thinking"; burstStart: number; updatedAt: number };
+	| { kind: "thinking"; burstStart: number; updatedAt: number; text: string };
 
 export const BURST_SILENCE_MS = 3000;
 export const WAITING_DELAY_MS = 2000;
@@ -13,12 +13,17 @@ export const WAITING_DELAY_MS = 2000;
 export function liveForThought(
 	live: LiveStatus | null,
 	now: number,
+	chunk = "",
 ): LiveStatus {
-	const burstStart =
-		live?.kind === "thinking" && now - live.updatedAt < BURST_SILENCE_MS
-			? live.burstStart
-			: now;
-	return { kind: "thinking", burstStart, updatedAt: now };
+	if (live?.kind === "thinking" && now - live.updatedAt < BURST_SILENCE_MS) {
+		return {
+			kind: "thinking",
+			burstStart: live.burstStart,
+			updatedAt: now,
+			text: live.text + chunk,
+		};
+	}
+	return { kind: "thinking", burstStart: now, updatedAt: now, text: chunk };
 }
 
 export function freezeBurst(
@@ -33,6 +38,7 @@ export function freezeBurst(
 			kind: "thought",
 			id: crypto.randomUUID(),
 			ms: burstMs(live.burstStart, live.updatedAt),
+			text: live.text,
 			at: now,
 		},
 	];

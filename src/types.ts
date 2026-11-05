@@ -26,7 +26,7 @@ export function isWorkRole(role: SessionKey["role"]): boolean {
 export type TranscriptItem =
 	| { kind: "user"; id: string; text: string; at?: number }
 	| { kind: "agent"; id: string; text: string; at?: number }
-	| { kind: "thought"; id: string; ms: number; at?: number }
+	| { kind: "thought"; id: string; ms: number; text: string; at?: number }
 	| { kind: "tool"; id: string; line: ToolLineView; at?: number }
 	| { kind: "todos"; id: string; changes: TodoChangeView[]; at?: number }
 	| {
