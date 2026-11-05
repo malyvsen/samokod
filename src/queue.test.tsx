@@ -46,13 +46,21 @@ async function startWorking() {
 	await user.keyboard("do it{Enter}");
 	await screen.findByRole("textbox", { name: "Queue a follow-up…" });
 	expect(api.sendPrompt).toHaveBeenCalledTimes(1);
+	emitAppEvent(api, {
+		type: "tool_line",
+		session: testKey(),
+		line: { id: "t1", text: "read: a", status: "in_progress", label: "read" },
+	});
+	await screen.findByRole("button", { name: "Stop this turn" });
 	return user;
 }
 
 describe("message queue", () => {
 	test("composer stays live with queue placeholder while working", async () => {
 		await startWorking();
-		expect(screen.getByRole("button", { name: "STOP" })).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Stop this turn" }),
+		).toBeInTheDocument();
 		expect(
 			screen.getByRole("textbox", { name: "Queue a follow-up…" }),
 		).toBeInTheDocument();
@@ -116,7 +124,7 @@ describe("message queue", () => {
 	test("STOP keeps the queue and sends the head next", async () => {
 		const user = await startWorking();
 		await user.keyboard("followup{Enter}");
-		await user.click(screen.getByRole("button", { name: "STOP" }));
+		await user.click(screen.getByRole("button", { name: "Stop this turn" }));
 		await vi.waitFor(() =>
 			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "followup"),
 		);

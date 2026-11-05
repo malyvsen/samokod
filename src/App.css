@@ -373,6 +373,7 @@ button.brand:hover {
 }
 
 .repo-static {
+	margin-left: auto;
 	font-size: 11px;
 	color: #e8e6e1;
 	white-space: nowrap;
@@ -668,8 +669,16 @@ button.brand:hover {
 	font-size: 13px;
 }
 
+.work .summary-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 9px 12px;
+}
+
 .work .summary {
-	width: 100%;
+	flex: 1;
+	min-width: 0;
 	display: flex;
 	align-items: center;
 	gap: 10px;
@@ -680,10 +689,12 @@ button.brand:hover {
 	background: transparent;
 	border: 0;
 	cursor: pointer;
-	padding: 9px 12px;
+	padding: 0;
 }
 
-.work .summary:focus-visible {
+.work .summary:focus-visible,
+.stop-icon:focus-visible,
+.review-icon:focus-visible {
 	outline: 2px solid #e8e6e1;
 	outline-offset: -2px;
 }
@@ -701,6 +712,53 @@ button.brand:hover {
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+
+.stop-icon {
+	flex: none;
+	width: 14px;
+	height: 22px;
+	padding: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: transparent;
+	border: 0;
+	cursor: pointer;
+}
+
+.stop-icon:hover .sq {
+	background: #ff8f8f;
+}
+
+.stop-icon:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+.stop-icon .sq {
+	width: 9px;
+	height: 9px;
+	background: #ff6b6b;
+}
+
+.review-icon {
+	flex: none;
+	width: 14px;
+	height: 22px;
+	padding: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 13px;
+	color: #ffd98a;
+	background: transparent;
+	border: 0;
+	cursor: pointer;
+}
+
+.review-icon:hover {
+	color: #fff;
 }
 
 .work .detail {

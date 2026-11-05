@@ -793,8 +793,6 @@ export function App() {
 					<TopBar
 						repoLabel={repoLabel}
 						branch={branch}
-						chat={chat}
-						onStop={handleStop}
 						onToggleSettings={() =>
 							setSidebarMode((mode) =>
 								mode === "plans" ? "settings" : "plans",
@@ -836,6 +834,7 @@ export function App() {
 									onAnswer={handleAnswer}
 									live={chat?.live ?? null}
 									working={chat?.working ?? false}
+									onStop={readOnly ? null : handleStop}
 									onHistoryRetry={
 										chat?.start.kind === "failed" && chat.start.error.retryable
 											? handleHistoryRetry

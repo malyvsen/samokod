@@ -1,7 +1,7 @@
 import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { testDefaults, testEntry, testKey } from "./fixtures";
-import { api, openChat, stubMatchMedia } from "./testHarness";
+import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
 
 vi.mock("./api", async () => {
 	const { api } = await import("./testHarness");
@@ -43,14 +43,19 @@ async function startWorkingExecuting() {
 	api.sendPrompt.mockReturnValue(new Promise(() => {}));
 	const user = await openChat(api);
 	await user.keyboard("do it{Enter}");
-	await screen.findByRole("button", { name: "STOP" });
+	emitAppEvent(api, {
+		type: "tool_line",
+		session: { plan: name, role: "executing" },
+		line: { id: "t1", text: "read: a", status: "in_progress", label: "read" },
+	});
+	await screen.findByRole("button", { name: "Stop this turn" });
 	return user;
 }
 
 describe("stop", () => {
 	test("STOP on work plan shows manual note without separate mode call", async () => {
 		const user = await startWorkingExecuting();
-		await user.click(screen.getByRole("button", { name: "STOP" }));
+		await user.click(screen.getByRole("button", { name: "Stop this turn" }));
 		expect(api.cancelTurn).toHaveBeenCalledTimes(1);
 		expect(api.setPlanMode).not.toHaveBeenCalled();
 		expect(
@@ -72,8 +77,13 @@ describe("stop", () => {
 		api.sendPrompt.mockReturnValue(new Promise(() => {}));
 		const user = await openChat(api);
 		await user.keyboard("do it{Enter}");
-		await screen.findByRole("button", { name: "STOP" });
-		await user.click(screen.getByRole("button", { name: "STOP" }));
+		emitAppEvent(api, {
+			type: "tool_line",
+			session: testKey(),
+			line: { id: "t1", text: "read: a", status: "in_progress", label: "read" },
+		});
+		await screen.findByRole("button", { name: "Stop this turn" });
+		await user.click(screen.getByRole("button", { name: "Stop this turn" }));
 		expect(api.cancelTurn).toHaveBeenCalledTimes(1);
 		expect(api.setPlanMode).not.toHaveBeenCalled();
 		expect(

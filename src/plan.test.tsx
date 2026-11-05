@@ -626,7 +626,7 @@ describe("plan", () => {
 		).toBeInTheDocument();
 	});
 
-	test("failed turns show a red pill and retry resends", async () => {
+	test("failed turns show retry that resends", async () => {
 		api.retryLast.mockResolvedValue(true);
 		const user = await openChat(api);
 		emitAppEvent(api, {
@@ -636,7 +636,6 @@ describe("plan", () => {
 			hint: "retry the turn",
 			retryable: true,
 		});
-		expect(screen.getByText("● FAILED")).toBeInTheDocument();
 		expect(
 			screen.getByRole("textbox", { name: "Ask for a change…" }),
 		).toBeInTheDocument();

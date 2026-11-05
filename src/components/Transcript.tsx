@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useReducer, useState } from "react";
+import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
 import { assertNever } from "../assert";
 import type {
 	PermissionOptionView,
@@ -29,6 +29,7 @@ export function Transcript({
 	onHistoryRetry = null,
 	live = null,
 	working = false,
+	onStop = null,
 	children,
 }: {
 	items: TranscriptItem[];
@@ -40,6 +41,7 @@ export function Transcript({
 	onHistoryRetry?: (() => void) | null;
 	live?: LiveStatus | null;
 	working?: boolean;
+	onStop?: (() => void) | null;
 	children?: ReactNode;
 }) {
 	const _live = live;
@@ -78,6 +80,7 @@ export function Transcript({
 							onAnswer={onAnswer}
 							live={working && index === groups.length - 1}
 							now={now}
+							onStop={onStop}
 						/>
 					) : (
 						<ItemRow
@@ -178,14 +181,17 @@ function WorkBox({
 	onAnswer,
 	live = false,
 	now = Date.now(),
+	onStop = null,
 }: {
 	items: RunItem[];
 	onRetry: (() => void) | null;
 	onAnswer: (toolCallId: string, optionId: string) => void;
 	live?: boolean;
 	now?: number;
+	onStop?: (() => void) | null;
 }) {
 	const [open, setOpen] = useState(false);
+	const workRef = useRef<HTMLDivElement>(null);
 	const { counts, durationMs: frozenMs } = summarizeRun(items);
 	const ats = items
 		.map((item) => item.at)
@@ -201,18 +207,72 @@ function WorkBox({
 		duration === null
 			? `${verb} · ${counts}`
 			: `${verb} for ${duration} · ${counts}`;
+	const hasUnresolvedApproval = items.some(
+		(item) => item.kind === "approval" && !item.resolved,
+	);
+	const showReview = live && hasUnresolvedApproval;
+	const showStop = live && !hasUnresolvedApproval && onStop !== null;
+
+	function focusFirstApproval() {
+		const button = workRef.current?.querySelector(".approval button");
+		if (button instanceof HTMLElement) {
+			button.focus();
+		}
+	}
+
+	function handleReview(e: React.MouseEvent) {
+		e.stopPropagation();
+		setOpen(true);
+		window.setTimeout(focusFirstApproval, 0);
+	}
+
+	function handleStop(e: React.MouseEvent) {
+		e.stopPropagation();
+		onStop?.();
+	}
+
+	function toggle() {
+		setOpen((was) => !was);
+	}
+
 	return (
-		<div className="work">
-			<button
-				className="summary"
-				type="button"
-				aria-expanded={open}
-				title={open ? "Collapse" : "Expand"}
-				onClick={() => setOpen((was) => !was)}
-			>
-				<span className="chev">{open ? "▾" : "▸"}</span>
-				<span className="txt">{summary}</span>
-			</button>
+		<div className="work" ref={workRef}>
+			<div className="summary-row">
+				<button
+					className="summary"
+					type="button"
+					aria-expanded={open}
+					title={open ? "Collapse" : "Expand"}
+					onClick={toggle}
+				>
+					{!live && <span className="chev">{open ? "▾" : "▸"}</span>}
+					<span className="txt">{summary}</span>
+				</button>
+				{showReview && (
+					<button
+						className="review-icon"
+						data-review
+						type="button"
+						aria-label="Review the permission request"
+						title="Review the permission request"
+						onClick={handleReview}
+					>
+						?
+					</button>
+				)}
+				{showStop && (
+					<button
+						className="stop-icon"
+						data-stop
+						type="button"
+						aria-label="Stop this turn"
+						title="Stop this turn"
+						onClick={handleStop}
+					>
+						<span className="sq" aria-hidden="true" />
+					</button>
+				)}
+			</div>
 			<div className="detail" hidden={!open}>
 				{items.map((item) =>
 					item.kind === "thought" ? (

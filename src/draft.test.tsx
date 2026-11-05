@@ -487,11 +487,18 @@ describe("draft bubble in chat", () => {
 		api.sendPrompt.mockReturnValue(new Promise(() => {}));
 		await user.keyboard("do it{Enter}");
 		await screen.findByRole("textbox", { name: "Queue a follow-up…" });
-		expect(screen.getByRole("button", { name: "STOP" })).toBeInTheDocument();
+		emitAppEvent(api, {
+			type: "tool_line",
+			session: testKey(),
+			line: { id: "t1", text: "read: a", status: "in_progress", label: "read" },
+		});
+		expect(
+			screen.getByRole("button", { name: "Stop this turn" }),
+		).toBeInTheDocument();
 		emitAppEvent(api, { type: "turn_done", session: testKey() });
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		expect(
-			screen.queryByRole("button", { name: "STOP" }),
+			screen.queryByRole("button", { name: "Stop this turn" }),
 		).not.toBeInTheDocument();
 	});
 });
