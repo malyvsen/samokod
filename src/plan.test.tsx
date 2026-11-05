@@ -640,6 +640,7 @@ describe("plan", () => {
 		expect(
 			screen.getByRole("textbox", { name: "Ask for a change…" }),
 		).toBeInTheDocument();
+		await user.click(screen.getByTitle("Expand"));
 		await user.click(screen.getByRole("button", { name: "retry" }));
 		expect(api.retryLast).toHaveBeenCalledWith(testKey());
 	});

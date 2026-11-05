@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
-import { Transcript } from "./components/Transcript";
+import {
+	groupRuns,
+	type RunItem,
+	summarizeRun,
+	Transcript,
+} from "./components/Transcript";
 import type { SessionStart } from "./sessions/store";
 
 const multiline = "first line\nsecond line\n- third";
@@ -103,6 +108,7 @@ describe("transcript retry", () => {
 				onAnswer={vi.fn()}
 			/>,
 		);
+		fireEvent.click(screen.getByTitle("Expand"));
 		expect(screen.getByRole("button", { name: "retry" })).toBeInTheDocument();
 	});
 
@@ -124,6 +130,7 @@ describe("transcript retry", () => {
 				onAnswer={vi.fn()}
 			/>,
 		);
+		fireEvent.click(screen.getByTitle("Expand"));
 		expect(
 			screen.queryByRole("button", { name: "retry" }),
 		).not.toBeInTheDocument();
@@ -299,7 +306,7 @@ describe("transcript thought rows", () => {
 		expect(screen.getByText("thinking: 8s")).toBeInTheDocument();
 	});
 
-	test("adjacent thoughts render one row with summed seconds", () => {
+	test("adjacent thoughts stay as separate rows", () => {
 		const { container } = render(
 			<Transcript
 				items={[
@@ -313,8 +320,9 @@ describe("transcript thought rows", () => {
 			/>,
 		);
 		const rows = container.querySelectorAll(".arow.thought");
-		expect(rows).toHaveLength(1);
-		expect(rows[0]?.textContent).toBe("thinking: 3s");
+		expect(rows).toHaveLength(2);
+		expect(rows[0]?.textContent).toBe("thinking: 2s");
+		expect(rows[1]?.textContent).toBe("thinking: 2s");
 	});
 
 	test("separated thoughts stay separate", () => {
@@ -353,7 +361,7 @@ describe("transcript thought rows", () => {
 		);
 	});
 
-	test("live thinking merges with the trailing run into one total row", () => {
+	test("live thinking renders apart from frozen rows", () => {
 		const { container } = render(
 			<Transcript
 				items={[
@@ -373,8 +381,10 @@ describe("transcript thought rows", () => {
 			/>,
 		);
 		const rows = container.querySelectorAll(".arow.thought");
-		expect(rows).toHaveLength(1);
-		expect(rows[0]?.textContent).toBe("thinking: 4s");
+		expect(rows).toHaveLength(3);
+		expect(rows[0]?.textContent).toBe("thinking: 2s");
+		expect(rows[1]?.textContent).toBe("thinking: 1s");
+		expect(rows[2]?.textContent).toBe("thinking: 1s");
 		expect(container.querySelector(".arow.thinking")).toBeNull();
 		expect(container.querySelector(".tscroll")).toBeNull();
 		expect(container.textContent).not.toContain("checking");
@@ -402,7 +412,7 @@ describe("transcript thought rows", () => {
 		expect(container.querySelector(".arow.thinking")).toBeNull();
 	});
 
-	test("new chunks advance the total while freeze leaves it unchanged", () => {
+	test("new chunks advance the live row while frozen rows stay fixed", () => {
 		const { container, rerender, unmount } = render(
 			<Transcript
 				items={[{ kind: "thought", id: "t1", ms: 2000, text: "first" }]}
@@ -418,9 +428,10 @@ describe("transcript thought rows", () => {
 				}}
 			/>,
 		);
-		expect(container.querySelector(".arow.thought")?.textContent).toBe(
-			"thinking: 3s",
-		);
+		let rows = container.querySelectorAll(".arow.thought");
+		expect(rows).toHaveLength(2);
+		expect(rows[0]?.textContent).toBe("thinking: 2s");
+		expect(rows[1]?.textContent).toBe("thinking: 1s");
 		rerender(
 			<Transcript
 				items={[{ kind: "thought", id: "t1", ms: 2000, text: "first" }]}
@@ -436,9 +447,10 @@ describe("transcript thought rows", () => {
 				}}
 			/>,
 		);
-		expect(container.querySelector(".arow.thought")?.textContent).toBe(
-			"thinking: 5s",
-		);
+		rows = container.querySelectorAll(".arow.thought");
+		expect(rows).toHaveLength(2);
+		expect(rows[0]?.textContent).toBe("thinking: 2s");
+		expect(rows[1]?.textContent).toBe("thinking: 3s");
 		unmount();
 		const { container: frozen } = render(
 			<Transcript
@@ -452,8 +464,129 @@ describe("transcript thought rows", () => {
 				onAnswer={vi.fn()}
 			/>,
 		);
-		expect(frozen.querySelector(".arow.thought")?.textContent).toBe(
-			"thinking: 5s",
+		const frozenRows = frozen.querySelectorAll(".arow.thought");
+		expect(frozenRows).toHaveLength(2);
+		expect(frozenRows[0]?.textContent).toBe("thinking: 2s");
+		expect(frozenRows[1]?.textContent).toBe("thinking: 3s");
+	});
+});
+
+describe("transcript grouping", () => {
+	function tool(id: string, label: string, at?: number): RunItem {
+		return {
+			kind: "tool",
+			id,
+			line: { id, text: `${label}: body`, status: "completed", label },
+			...(at === undefined ? {} : { at }),
+		};
+	}
+
+	function thought(id: string, at?: number): RunItem {
+		return {
+			kind: "thought",
+			id,
+			ms: 1000,
+			text: "hmm",
+			...(at === undefined ? {} : { at }),
+		};
+	}
+
+	test("splits only on user and agent messages", () => {
+		const groups = groupRuns([
+			{ kind: "user", id: "u1", text: "hi" },
+			thought("t1"),
+			tool("l1", "read"),
+			{ kind: "agent", id: "a1", text: "done" },
+			thought("t2"),
+		]);
+		expect(groups).toHaveLength(4);
+		expect(groups[0]).toMatchObject({ kind: "message" });
+		expect(groups[1]).toMatchObject({ kind: "run" });
+		expect(groups[2]).toMatchObject({ kind: "message" });
+		expect(groups[3]).toMatchObject({ kind: "run" });
+		if (groups[1]?.kind === "run") {
+			expect(groups[1].items).toHaveLength(2);
+		}
+	});
+
+	test("single-item runs still group", () => {
+		const groups = groupRuns([
+			{ kind: "user", id: "u1", text: "hi" },
+			thought("t1"),
+			{ kind: "user", id: "u2", text: "again" },
+		]);
+		expect(groups).toHaveLength(3);
+		expect(groups[1]).toMatchObject({ kind: "run" });
+		if (groups[1]?.kind === "run") {
+			expect(groups[1].items).toHaveLength(1);
+		}
+	});
+
+	test("counts sort count-desc with alphabetical ties", () => {
+		const { counts } = summarizeRun([
+			tool("l1", "read", 1000),
+			tool("l2", "read", 2000),
+			tool("l3", "edit", 3000),
+			thought("t1", 4000),
+		]);
+		expect(counts).toBe("2x read, 1x edit, 1x think");
+	});
+
+	test("tool labels come from the label field", () => {
+		const { counts } = summarizeRun([tool("l1", "bash", 1000)]);
+		expect(counts).toBe("1x bash");
+	});
+
+	test("think items are counted", () => {
+		const { counts } = summarizeRun([thought("t1", 1000), thought("t2", 2000)]);
+		expect(counts).toBe("2x think");
+	});
+
+	test("duration hides unless every item has arrival time", () => {
+		expect(
+			summarizeRun([tool("l1", "read", 1000), tool("l2", "read", 3000)])
+				.durationMs,
+		).toBe(2000);
+		expect(
+			summarizeRun([tool("l1", "read", 1000), tool("l2", "read")]).durationMs,
+		).toBeNull();
+		expect(summarizeRun([thought("t1")]).durationMs).toBeNull();
+	});
+
+	test("collapsed box expands to today's rows", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{ kind: "user", id: "u1", text: "hi" },
+					{
+						kind: "tool",
+						id: "t1",
+						line: {
+							id: "l1",
+							text: "read: src/types.ts",
+							status: "completed",
+							label: "read",
+						},
+						at: 1000,
+					},
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		const box = container.querySelector(".work");
+		expect(box).not.toBeNull();
+		expect(box?.querySelector(".summary")?.textContent).toContain("1x read");
+		const toggle = box?.querySelector(".summary");
+		expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+		if (toggle instanceof HTMLElement) {
+			fireEvent.click(toggle);
+		}
+		expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+		expect(container.querySelector(".work .detail .tool")?.textContent).toBe(
+			"read: src/types.ts",
 		);
 	});
 });

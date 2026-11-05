@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { assertNever } from "../assert";
 import type {
 	PermissionOptionView,
@@ -47,7 +47,8 @@ export function Transcript({
 		lead !== null &&
 		!items.some((item) => item.kind === "user" && item.text === lead);
 	const status = live ?? null;
-	const blocks = transcriptBlocks(items, liveThinkingMs(status));
+	const groups = groupRuns(items);
+	const liveMs = liveThinkingMs(status);
 	return (
 		<>
 			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
@@ -60,18 +61,24 @@ export function Transcript({
 						text={lead}
 					/>
 				)}
-				{blocks.map((block) =>
-					block.kind === "thoughts" ? (
-						<ThoughtRow key={block.id} ms={block.ms} />
+				{groups.map((group) =>
+					group.kind === "run" ? (
+						<WorkBox
+							key={group.items[0]?.id ?? Math.random().toString(36)}
+							items={group.items}
+							onRetry={onRetry}
+							onAnswer={onAnswer}
+						/>
 					) : (
 						<ItemRow
-							key={block.item.id}
-							item={block.item}
+							key={group.item.id}
+							item={group.item}
 							onRetry={onRetry}
 							onAnswer={onAnswer}
 						/>
 					),
 				)}
+				{liveMs !== null && <ThoughtRow ms={liveMs} />}
 				{status?.kind === "waiting" && (
 					<div className="arow waiting">waiting</div>
 				)}
@@ -88,47 +95,122 @@ export function Transcript({
 	);
 }
 
-type TranscriptBlock =
-	| { kind: "thoughts"; id: string; ms: number; text: string }
-	| { kind: "item"; item: Exclude<TranscriptItem, { kind: "thought" }> };
+export type RunItem = Exclude<
+	TranscriptItem,
+	{ kind: "user" } | { kind: "agent" }
+>;
 
-/// Adjacent thoughts read as one cumulative row. Live thinking joins a
-/// trailing run, otherwise it opens its own row.
-function transcriptBlocks(
-	items: TranscriptItem[],
-	liveMs: number | null,
-): TranscriptBlock[] {
-	const blocks: TranscriptBlock[] = [];
+export type TranscriptGroup =
+	| {
+			kind: "message";
+			item: Extract<TranscriptItem, { kind: "user" } | { kind: "agent" }>;
+	  }
+	| { kind: "run"; items: RunItem[] };
+
+/// Maximal runs of non-message items between user and agent messages.
+/// Single-item runs get a box too. Pure.
+export function groupRuns(items: TranscriptItem[]): TranscriptGroup[] {
+	const groups: TranscriptGroup[] = [];
+	let run: RunItem[] = [];
 	for (const item of items) {
-		if (item.kind !== "thought") {
-			blocks.push({ kind: "item", item });
+		if (item.kind === "user" || item.kind === "agent") {
+			if (run.length > 0) {
+				groups.push({ kind: "run", items: run });
+				run = [];
+			}
+			groups.push({ kind: "message", item });
 			continue;
 		}
-		const last = blocks[blocks.length - 1];
-		if (last?.kind === "thoughts") {
-			blocks[blocks.length - 1] = {
-				...last,
-				ms: last.ms + item.ms,
-				text: `${last.text}\n${item.text}`,
-			};
-		} else {
-			blocks.push({
-				kind: "thoughts",
-				id: item.id,
-				ms: item.ms,
-				text: item.text,
-			});
+		run.push(item);
+	}
+	if (run.length > 0) {
+		groups.push({ kind: "run", items: run });
+	}
+	return groups;
+}
+
+export function summarizeRun(items: RunItem[]): {
+	counts: string;
+	durationMs: number | null;
+} {
+	let durationMs: number | null = null;
+	const ats = items
+		.map((item) => item.at)
+		.filter((at): at is number => at !== undefined);
+	if (ats.length === items.length && items.length > 0) {
+		durationMs = Math.max(...ats) - Math.min(...ats);
+	}
+	const toolCounts = new Map<string, number>();
+	let thinkCount = 0;
+	for (const item of items) {
+		if (item.kind === "tool") {
+			toolCounts.set(
+				item.line.label,
+				(toolCounts.get(item.line.label) ?? 0) + 1,
+			);
+		} else if (item.kind === "thought") {
+			thinkCount += 1;
 		}
 	}
-	if (liveMs !== null) {
-		const last = blocks[blocks.length - 1];
-		if (last?.kind === "thoughts") {
-			blocks[blocks.length - 1] = { ...last, ms: last.ms + liveMs };
-		} else {
-			blocks.push({ kind: "thoughts", id: "live", ms: liveMs, text: "" });
-		}
+	const entries: { label: string; count: number }[] = [];
+	for (const [label, count] of toolCounts) {
+		entries.push({ label, count });
 	}
-	return blocks;
+	if (thinkCount > 0) {
+		entries.push({ label: "think", count: thinkCount });
+	}
+	entries.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+	const counts = entries
+		.map(({ label, count }) => `${count}x ${label}`)
+		.join(", ");
+	return { counts, durationMs };
+}
+
+function WorkBox({
+	items,
+	onRetry,
+	onAnswer,
+}: {
+	items: RunItem[];
+	onRetry: (() => void) | null;
+	onAnswer: (toolCallId: string, optionId: string) => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const { counts, durationMs } = summarizeRun(items);
+	const duration =
+		durationMs === null ? null : `${(durationMs / 1000).toFixed(1)}s`;
+	const summary =
+		duration === null
+			? `Worked · ${counts}`
+			: `Worked for ${duration} · ${counts}`;
+	return (
+		<div className="work">
+			<button
+				className="summary"
+				type="button"
+				aria-expanded={open}
+				title={open ? "Collapse" : "Expand"}
+				onClick={() => setOpen((was) => !was)}
+			>
+				<span className="chev">{open ? "▾" : "▸"}</span>
+				<span className="txt">{summary}</span>
+			</button>
+			<div className="detail" hidden={!open}>
+				{items.map((item) =>
+					item.kind === "thought" ? (
+						<ThoughtRow key={item.id} ms={item.ms} />
+					) : (
+						<ItemRow
+							key={item.id}
+							item={item}
+							onRetry={onRetry}
+							onAnswer={onAnswer}
+						/>
+					),
+				)}
+			</div>
+		</div>
+	);
 }
 
 function ThoughtRow({ ms }: { ms: number }) {

@@ -660,6 +660,60 @@ button.brand:hover {
 	color: #7dffc4;
 }
 
+.work {
+	align-self: flex-start;
+	width: 100%;
+	border: 1px solid rgba(255, 255, 255, 0.14);
+	background: rgba(10, 10, 16, 0.55);
+	font-size: 13px;
+}
+
+.work .summary {
+	width: 100%;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	text-align: left;
+	font: inherit;
+	line-height: 1.5;
+	color: #9d9a92;
+	background: transparent;
+	border: 0;
+	cursor: pointer;
+	padding: 9px 12px;
+}
+
+.work .summary:focus-visible {
+	outline: 2px solid #e8e6e1;
+	outline-offset: -2px;
+}
+
+.work .summary .chev {
+	flex: none;
+	width: 14px;
+	text-align: center;
+	color: #7dffc4;
+}
+
+.work .summary .txt {
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.work .detail {
+	border-top: 1px solid rgba(255, 255, 255, 0.12);
+	padding: 10px 12px 12px;
+	max-height: 300px;
+	overflow-y: auto;
+}
+
+.work .detail[hidden] {
+	display: none;
+}
+
 .tool[data-full]:hover::after,
 .approval h3[data-full]:hover::after,
 .erow span[data-full]:hover::after {
