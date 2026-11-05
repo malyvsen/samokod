@@ -31,30 +31,42 @@ export async function fileToBase64(file: File): Promise<string> {
 	return btoa(binary);
 }
 
-// Caret context for space padding: text immediately before/after the
-// caret in the selection range. Element boundaries count as whitespace,
-// so empty drafts get no padding. Pure except reading the selection.
-function caretPadding(node: HTMLElement): { prefix: string; suffix: string } {
-	const selection = window.getSelection();
-	if (selection === null || selection.rangeCount === 0)
-		return { prefix: "", suffix: "" };
-	const range = selection.getRangeAt(0);
-	if (!node.contains(range.commonAncestorContainer))
-		return { prefix: "", suffix: "" };
-	let before: string | undefined;
-	let after: string | undefined;
-	if (range.startContainer.nodeType === Node.TEXT_NODE) {
-		const data = (range.startContainer as Text).data;
-		before = data[range.startOffset - 1];
-	}
-	if (range.endContainer.nodeType === Node.TEXT_NODE) {
-		const data = (range.endContainer as Text).data;
-		after = data[range.endOffset];
-	}
+// Attachment ref as the agent sees it: backticked repo-relative path.
+// Backticks keep even a fallback absolute path from reading as a slash
+// command. Pure.
+export function attachmentRef(path: string): string {
+	return `\`${path}\``;
+}
+
+// Separating spaces around a ref: exactly one where the neighbor holds
+// non-whitespace, none where it holds whitespace or nothing (element
+// boundary). Pure.
+export function spacePadding(
+	before: string | undefined,
+	after: string | undefined,
+): { prefix: string; suffix: string } {
 	return {
 		prefix: before !== undefined && !/\s/.test(before) ? " " : "",
 		suffix: after !== undefined && !/\s/.test(after) ? " " : "",
 	};
+}
+
+// Text immediately before/after the caret for space padding. The insert
+// guards against carets outside the node, so no containment check here.
+function caretPadding(): { prefix: string; suffix: string } {
+	const selection = window.getSelection();
+	if (selection === null || selection.rangeCount === 0)
+		return spacePadding(undefined, undefined);
+	const range = selection.getRangeAt(0);
+	let before: string | undefined;
+	let after: string | undefined;
+	if (range.startContainer.nodeType === Node.TEXT_NODE) {
+		before = (range.startContainer as Text).data[range.startOffset - 1];
+	}
+	if (range.endContainer.nodeType === Node.TEXT_NODE) {
+		after = (range.endContainer as Text).data[range.endOffset];
+	}
+	return spacePadding(before, after);
 }
 
 async function handleImageFiles(
@@ -80,8 +92,11 @@ async function handleImageFiles(
 		try {
 			const base64 = await fileToBase64(file);
 			const relativePath = await saveAttachment(session, base64);
-			const { prefix, suffix } = caretPadding(node);
-			insertTextAtCaret(node, `${prefix}\`${relativePath}\`${suffix}`);
+			const { prefix, suffix } = caretPadding();
+			insertTextAtCaret(
+				node,
+				`${prefix}${attachmentRef(relativePath)}${suffix}`,
+			);
 			options.onInput?.(extractText(node));
 		} catch (error) {
 			options.onError(error instanceof Error ? error.message : String(error));

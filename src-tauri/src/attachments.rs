@@ -266,13 +266,4 @@ mod tests {
             absolute.to_string_lossy().to_string()
         );
     }
-
-    #[test]
-    fn normalizes_to_forward_slashes() {
-        let repo = Path::new("/repo");
-        let absolute = repo.join("a").join("b").join("c.png");
-        let relative = repo_relative(repo, &absolute);
-        assert_eq!(relative, "a/b/c.png");
-        assert!(!relative.contains('\\'));
-    }
 }

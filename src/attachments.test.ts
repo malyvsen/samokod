@@ -1,11 +1,31 @@
 import { describe, expect, test } from "vitest";
 import {
+	attachmentRef,
 	fileToBase64,
 	isSupportedImageFile,
 	MAX_BYTES,
+	spacePadding,
 } from "./components/attachments";
 
 describe("attachments", () => {
+	test("ref wraps the path in backticks", () => {
+		expect(
+			attachmentRef(".samokod/plans/scoping/test/attachments/image-1-0.png"),
+		).toBe("`.samokod/plans/scoping/test/attachments/image-1-0.png`");
+	});
+
+	test("padding separates only from non-whitespace", () => {
+		expect(spacePadding("o", "w")).toEqual({ prefix: " ", suffix: " " });
+		expect(spacePadding(" ", " ")).toEqual({ prefix: "", suffix: "" });
+		expect(spacePadding(" ", "w")).toEqual({ prefix: "", suffix: " " });
+		expect(spacePadding("o", " ")).toEqual({ prefix: " ", suffix: "" });
+		expect(spacePadding(undefined, undefined)).toEqual({
+			prefix: "",
+			suffix: "",
+		});
+		expect(spacePadding("\n", "\t")).toEqual({ prefix: "", suffix: "" });
+	});
+
 	test("filters by allowlist and size", () => {
 		for (const type of ["image/png", "image/jpeg", "image/webp", "image/gif"]) {
 			expect(isSupportedImageFile(type, 100)).toBe(true);

@@ -77,7 +77,22 @@ function setCaretAtOffset(area: HTMLElement, offset: number): void {
 	selection?.addRange(range);
 }
 
-const REL = ".samokod/plans/scoping/test/attachments/image-1-0.png";
+const attachmentPath = ".samokod/plans/scoping/test/attachments/image-1-0.png";
+
+function pasteFiles(area: HTMLElement, files: File[]): void {
+	fireEvent.paste(area, {
+		clipboardData: {
+			getData: () => "",
+			files,
+			items: [],
+		},
+	});
+}
+
+function pasteImage(area: HTMLElement): void {
+	vi.mocked(saveAttachment).mockResolvedValue(attachmentPath);
+	pasteFiles(area, [pngFile()]);
+}
 
 describe("draft bubble", () => {
 	test("autofocuses on mount", () => {
@@ -134,15 +149,8 @@ describe("draft bubble", () => {
 		const onInput = vi.fn();
 		const { area } = bubble({ onInput });
 		setCaretAtEnd(area);
-		vi.mocked(saveAttachment).mockResolvedValue(REL);
-		fireEvent.paste(area, {
-			clipboardData: {
-				getData: () => "",
-				files: [pngFile()],
-				items: [],
-			},
-		});
-		await waitFor(() => expect(area.textContent).toBe(`\`${REL}\``));
+		pasteImage(area);
+		await waitFor(() => expect(area.textContent).toBe(`\`${attachmentPath}\``));
 		expect(area.textContent).not.toContain("\n");
 		expect(vi.mocked(saveAttachment)).toHaveBeenCalledTimes(1);
 		expect(onInput).toHaveBeenCalled();
@@ -152,16 +160,9 @@ describe("draft bubble", () => {
 		const { area } = bubble();
 		typeLines(area, "helloworld");
 		setCaretAtOffset(area, 5);
-		vi.mocked(saveAttachment).mockResolvedValue(REL);
-		fireEvent.paste(area, {
-			clipboardData: {
-				getData: () => "",
-				files: [pngFile()],
-				items: [],
-			},
-		});
+		pasteImage(area);
 		await waitFor(() =>
-			expect(area.textContent).toBe(`hello \`${REL}\` world`),
+			expect(area.textContent).toBe(`hello \`${attachmentPath}\` world`),
 		);
 		expect(area.textContent).not.toContain("\n");
 	});
@@ -170,15 +171,10 @@ describe("draft bubble", () => {
 		const { area } = bubble();
 		typeLines(area, "word ");
 		setCaretAtEnd(area);
-		vi.mocked(saveAttachment).mockResolvedValue(REL);
-		fireEvent.paste(area, {
-			clipboardData: {
-				getData: () => "",
-				files: [pngFile()],
-				items: [],
-			},
-		});
-		await waitFor(() => expect(area.textContent).toBe(`word \`${REL}\``));
+		pasteImage(area);
+		await waitFor(() =>
+			expect(area.textContent).toBe(`word \`${attachmentPath}\``),
+		);
 		expect(area.textContent).not.toContain("  ");
 		expect(area.textContent).not.toContain("\n");
 	});
@@ -187,15 +183,10 @@ describe("draft bubble", () => {
 		const { area } = bubble();
 		typeLines(area, " word");
 		setCaretAtOffset(area, 0);
-		vi.mocked(saveAttachment).mockResolvedValue(REL);
-		fireEvent.paste(area, {
-			clipboardData: {
-				getData: () => "",
-				files: [pngFile()],
-				items: [],
-			},
-		});
-		await waitFor(() => expect(area.textContent).toBe(`\`${REL}\` word`));
+		pasteImage(area);
+		await waitFor(() =>
+			expect(area.textContent).toBe(`\`${attachmentPath}\` word`),
+		);
 		expect(area.textContent).not.toContain("  ");
 		expect(area.textContent).not.toContain("\n");
 	});
@@ -207,12 +198,8 @@ describe("draft bubble", () => {
 		const badType = new File(["<svg/>"], "vec.svg", { type: "image/svg+xml" });
 		const big = pngFile("big.png");
 		Object.defineProperty(big, "size", { value: MAX_BYTES + 1 });
-		fireEvent.paste(area, {
-			clipboardData: { getData: () => "", files: [badType], items: [] },
-		});
-		fireEvent.paste(area, {
-			clipboardData: { getData: () => "", files: [big], items: [] },
-		});
+		pasteFiles(area, [badType]);
+		pasteFiles(area, [big]);
 		await waitFor(() => expect(onAttachmentError).toHaveBeenCalledTimes(2));
 		expect(vi.mocked(saveAttachment)).not.toHaveBeenCalled();
 		expect(area.textContent).toBe("");
@@ -223,13 +210,7 @@ describe("draft bubble", () => {
 		const { area } = bubble({ onAttachmentError });
 		setCaretAtEnd(area);
 		vi.mocked(saveAttachment).mockRejectedValue(new Error("boom"));
-		fireEvent.paste(area, {
-			clipboardData: {
-				getData: () => "",
-				files: [pngFile()],
-				items: [],
-			},
-		});
+		pasteFiles(area, [pngFile()]);
 		await waitFor(() => expect(onAttachmentError).toHaveBeenCalledWith("boom"));
 		expect(area.textContent).toBe("");
 	});
