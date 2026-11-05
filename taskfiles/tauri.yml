@@ -11,10 +11,16 @@ tasks:
 
   deploy:
     desc: Put the release app in /Applications
-    deps: [build]
+    deps: [build, link-cli]
     platforms: [darwin]
     cmds:
       - node scripts/tauri/install-macos.mjs "{{.ARTIFACT_DIR}}" /Applications
+
+  link-cli:
+    desc: Link the release binary onto PATH
+    platforms: [darwin]
+    cmds:
+      - mkdir -p ~/.local/bin && ln -sf /Applications/samokod.app/Contents/MacOS/samokod ~/.local/bin/samokod
 
   bump:
     desc: Raise the app's version (patch, minor, or major)
