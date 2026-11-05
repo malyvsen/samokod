@@ -24,16 +24,17 @@ export function isWorkRole(role: SessionKey["role"]): boolean {
 }
 
 export type TranscriptItem =
-	| { kind: "user"; id: string; text: string }
-	| { kind: "agent"; id: string; text: string }
-	| { kind: "thought"; id: string; ms: number }
-	| { kind: "tool"; id: string; line: ToolLineView }
-	| { kind: "todos"; id: string; changes: TodoChangeView[] }
+	| { kind: "user"; id: string; text: string; at?: number }
+	| { kind: "agent"; id: string; text: string; at?: number }
+	| { kind: "thought"; id: string; ms: number; at?: number }
+	| { kind: "tool"; id: string; line: ToolLineView; at?: number }
+	| { kind: "todos"; id: string; changes: TodoChangeView[]; at?: number }
 	| {
 			kind: "approval";
 			id: string;
 			permission: PermissionView;
 			resolved: boolean;
+			at?: number;
 	  }
 	| {
 			kind: "error";
@@ -41,6 +42,7 @@ export type TranscriptItem =
 			raw: string;
 			hint: string;
 			retryable: boolean;
+			at?: number;
 	  };
 
 export type AgentStatus = "idle" | "working" | "approval" | "failed";

@@ -87,13 +87,22 @@ export function errorItem(
 	raw: string,
 	hint: string,
 	retryable: boolean,
+	at?: number,
 ): TranscriptItem {
-	return { kind: "error", id: crypto.randomUUID(), raw, hint, retryable };
+	return {
+		kind: "error",
+		id: crypto.randomUUID(),
+		raw,
+		hint,
+		retryable,
+		...(at === undefined ? {} : { at }),
+	};
 }
 
 function appendText(
 	transcript: TranscriptItem[],
 	chunk: string,
+	at?: number,
 ): TranscriptItem[] {
 	const last = transcript[transcript.length - 1];
 	if (last !== undefined && last.kind === "agent") {
@@ -101,7 +110,12 @@ function appendText(
 	}
 	return [
 		...transcript,
-		{ kind: "agent", id: crypto.randomUUID(), text: chunk },
+		{
+			kind: "agent",
+			id: crypto.randomUUID(),
+			text: chunk,
+			...(at === undefined ? {} : { at }),
+		},
 	];
 }
 
@@ -146,9 +160,14 @@ export function applySessionEvent(
 			const key = event.session;
 			const chunk = event.chunk;
 			return updateEntry(chats, key, (chat) => {
-				const frozen = freezeBurst(chat.transcript, chat.live);
-				const transcript = appendText(frozen, chunk);
-				if (chat.start.kind === "replaying") return { ...chat, transcript };
+				const replaying = chat.start.kind === "replaying";
+				const frozen = freezeBurst(chat.transcript, chat.live, now);
+				const transcript = appendText(
+					frozen,
+					chunk,
+					replaying ? undefined : now,
+				);
+				if (replaying) return { ...chat, transcript };
 				return {
 					...withTranscript(chat, transcript),
 					live: null,
@@ -175,7 +194,12 @@ export function applySessionEvent(
 				...chat,
 				transcript: [
 					...chat.transcript,
-					{ kind: "user", id: crypto.randomUUID(), text: chunk },
+					{
+						kind: "user",
+						id: crypto.randomUUID(),
+						text: chunk,
+						...(chat.start.kind === "replaying" ? {} : { at: now }),
+					},
 				],
 			}));
 		}
@@ -183,7 +207,8 @@ export function applySessionEvent(
 			const key = event.session;
 			const line = event.line;
 			return updateEntry(chats, key, (chat) => {
-				const frozen = freezeBurst(chat.transcript, chat.live);
+				const replaying = chat.start.kind === "replaying";
+				const frozen = freezeBurst(chat.transcript, chat.live, now);
 				const index = frozen.findIndex(
 					(item) => item.kind === "tool" && item.line.id === line.id,
 				);
@@ -194,8 +219,16 @@ export function applySessionEvent(
 									? { ...item, line }
 									: item,
 							)
-						: [...frozen, { kind: "tool", id: crypto.randomUUID(), line }];
-				if (chat.start.kind === "replaying") return { ...chat, transcript };
+						: [
+								...frozen,
+								{
+									kind: "tool",
+									id: crypto.randomUUID(),
+									line,
+									...(replaying ? {} : { at: now }),
+								},
+							];
+				if (replaying) return { ...chat, transcript };
 				return {
 					...withTranscript(chat, transcript),
 					live: null,
@@ -208,7 +241,7 @@ export function applySessionEvent(
 				working: false,
 				approval: false,
 				failed: false,
-				transcript: freezeBurst(chat.transcript, chat.live),
+				transcript: freezeBurst(chat.transcript, chat.live, now),
 				live: null,
 			}));
 		case "turn_failed":
@@ -219,8 +252,13 @@ export function applySessionEvent(
 				approval: false,
 				failed: true,
 				transcript: [
-					...freezeBurst(chat.transcript, chat.live),
-					errorItem(event.raw, event.hint, event.retryable),
+					...freezeBurst(chat.transcript, chat.live, now),
+					errorItem(
+						event.raw,
+						event.hint,
+						event.retryable,
+						chat.start.kind === "replaying" ? undefined : now,
+					),
 				],
 				live: null,
 			}));
@@ -230,12 +268,13 @@ export function applySessionEvent(
 				// resolved without pausing for input.
 				const replaying = chat.start.kind === "replaying";
 				const transcript: TranscriptItem[] = [
-					...freezeBurst(chat.transcript, chat.live),
+					...freezeBurst(chat.transcript, chat.live, now),
 					{
 						kind: "approval",
 						id: crypto.randomUUID(),
 						permission: event.permission,
 						resolved: replaying,
+						...(replaying ? {} : { at: now }),
 					},
 				];
 				return {
@@ -267,11 +306,12 @@ export function applySessionEvent(
 				}
 				const replaying = chat.start.kind === "replaying";
 				const transcript: TranscriptItem[] = [
-					...freezeBurst(chat.transcript, chat.live),
+					...freezeBurst(chat.transcript, chat.live, now),
 					{
 						kind: "todos",
 						id: crypto.randomUUID(),
 						changes: event.changes,
+						...(replaying ? {} : { at: now }),
 					},
 				];
 				return {
@@ -300,7 +340,7 @@ export function applySessionEvent(
 				...beginStart(
 					{
 						...chat,
-						transcript: freezeBurst(chat.transcript, chat.live),
+						transcript: freezeBurst(chat.transcript, chat.live, now),
 					},
 					{ kind: "replaying" },
 				),

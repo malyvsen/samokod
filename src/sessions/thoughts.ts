@@ -24,6 +24,7 @@ export function liveForThought(
 export function freezeBurst(
 	transcript: TranscriptItem[],
 	live: LiveStatus | null,
+	now: number = Date.now(),
 ): TranscriptItem[] {
 	if (live?.kind !== "thinking") return transcript;
 	return [
@@ -32,6 +33,7 @@ export function freezeBurst(
 			kind: "thought",
 			id: crypto.randomUUID(),
 			ms: burstMs(live.burstStart, live.updatedAt),
+			at: now,
 		},
 	];
 }

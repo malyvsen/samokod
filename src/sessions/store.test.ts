@@ -447,3 +447,181 @@ describe("thought bursts", () => {
 		expect(chat.start).toEqual({ kind: "replaying" });
 	});
 });
+
+describe("arrival timestamps", () => {
+	function replaying(): Chats {
+		let chats = eventFor({ type: "history_preparing", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
+		return chats;
+	}
+
+	test("live agent and tool items carry arrival time", () => {
+		let chats = applySessionEvent(
+			withChat(),
+			{ type: "agent_text", session: testKey(), chunk: "hello" },
+			5000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{
+				type: "tool_line",
+				session: testKey(),
+				line: {
+					id: "t1",
+					text: "edit file.md",
+					status: "completed",
+					label: "edit",
+				},
+			},
+			6000,
+		);
+		const chat = chatOf(chats);
+		expect(chat.transcript[0]).toMatchObject({ kind: "agent", at: 5000 });
+		expect(chat.transcript[1]).toMatchObject({ kind: "tool", at: 6000 });
+	});
+
+	test("live thought, todos, approval, and error items carry arrival time", () => {
+		let chats = applySessionEvent(
+			withChat(),
+			{ type: "agent_thought", session: testKey(), chunk: "hmm" },
+			1000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{ type: "agent_text", session: testKey(), chunk: "answer" },
+			2000,
+		);
+		expect(chatOf(chats).transcript[0]).toMatchObject({
+			kind: "thought",
+			at: 2000,
+		});
+
+		chats = applySessionEvent(
+			chats,
+			{
+				type: "todos_changed",
+				session: testKey(),
+				todos: [],
+				changes: [{ content: "do it", status: "pending" }],
+			},
+			3000,
+		);
+		expect(chatOf(chats).transcript.at(-1)).toMatchObject({
+			kind: "todos",
+			at: 3000,
+		});
+
+		chats = applySessionEvent(
+			chats,
+			{
+				type: "permission_asked",
+				session: testKey(),
+				permission: {
+					tool_call_id: "tc1",
+					title: "run this action?",
+					tool: "bash",
+					options: [{ id: "a", kind: "allow" }],
+					rule_hint: "hint",
+				},
+			},
+			4000,
+		);
+		expect(chatOf(chats).transcript.at(-1)).toMatchObject({
+			kind: "approval",
+			at: 4000,
+		});
+
+		chats = applySessionEvent(
+			chats,
+			{
+				type: "turn_failed",
+				session: testKey(),
+				raw: "boom",
+				hint: "retry the turn",
+				retryable: true,
+			},
+			5000,
+		);
+		expect(chatOf(chats).transcript.at(-1)).toMatchObject({
+			kind: "error",
+			at: 5000,
+		});
+	});
+
+	test("replayed events leave items timestamp-less", () => {
+		let chats = replaying();
+		chats = applySessionEvent(
+			chats,
+			{ type: "user_text", session: testKey(), chunk: "hello" },
+			7000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{ type: "agent_text", session: testKey(), chunk: "answer" },
+			7000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{
+				type: "tool_line",
+				session: testKey(),
+				line: {
+					id: "t1",
+					text: "edit file.md",
+					status: "completed",
+					label: "edit",
+				},
+			},
+			7000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{
+				type: "todos_changed",
+				session: testKey(),
+				todos: [],
+				changes: [{ content: "do it", status: "pending" }],
+			},
+			7000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{
+				type: "permission_asked",
+				session: testKey(),
+				permission: {
+					tool_call_id: "tc1",
+					title: "run this action?",
+					tool: "bash",
+					options: [{ id: "a", kind: "allow" }],
+					rule_hint: "hint",
+				},
+			},
+			7000,
+		);
+		const chat = chatOf(chats);
+		expect(chat.transcript).toHaveLength(5);
+		for (const item of chat.transcript) {
+			expect(item.at).toBeUndefined();
+		}
+	});
+
+	test("duration hides unless every item in a run carries arrival time", () => {
+		const stamped = [
+			{ kind: "tool", id: "t1", at: 1000 },
+			{ kind: "tool", id: "t2", at: 2000 },
+		] as const;
+		const mixed = [
+			{ kind: "tool", id: "t1", at: 1000 },
+			{ kind: "tool", id: "t2" },
+		] as unknown as typeof stamped;
+		const hasDuration = (run: readonly { at?: number }[]) =>
+			run.every((item) => item.at !== undefined);
+		expect(hasDuration(stamped)).toBe(true);
+		expect(hasDuration(mixed)).toBe(false);
+		expect(hasDuration([])).toBe(true);
+	});
+});
