@@ -4,6 +4,7 @@ mod agent;
 mod attachments;
 mod awake;
 mod branch;
+mod cli;
 mod error_hint;
 mod git;
 mod menu;
@@ -425,6 +426,22 @@ fn prefs_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Some(raw) = cli::parse_os_args(std::env::args_os()) {
+        let cwd = match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(error) => {
+                eprintln!("samokod: cannot resolve path: {error}");
+                std::process::exit(1);
+            }
+        };
+        match cli::resolve_and_validate(&raw, &cwd) {
+            Ok(root) => cli::remember_initial_root(root),
+            Err(error) => {
+                eprintln!("samokod: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     let builder = specta_builder();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
