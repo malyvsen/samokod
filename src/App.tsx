@@ -18,6 +18,7 @@ import {
 	setGlobalConfigOption,
 	setPlanEvergreen,
 	setPlanMode,
+	takePendingRepo,
 	validateRepo,
 } from "./api";
 import { reducedMotion, useAuroraMotion } from "./auroraMotion";
@@ -427,6 +428,26 @@ export function App() {
 		if (picked === null || Array.isArray(picked)) return;
 		await handleOpenPath(picked);
 	}
+
+	const handleOpenPathRef = useRef(handleOpenPath);
+	handleOpenPathRef.current = handleOpenPath;
+	const pendingClaimed = useRef(false);
+	useEffect(() => {
+		if (pendingClaimed.current) return;
+		pendingClaimed.current = true;
+		let cancelled = false;
+		takePendingRepo()
+			.then((pending) => {
+				if (cancelled || pending === null) return;
+				void handleOpenPathRef.current(pending);
+			})
+			.catch((error: unknown) => {
+				console.warn("failed to take pending repo", error);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	function appendError(
 		key: SessionKey,

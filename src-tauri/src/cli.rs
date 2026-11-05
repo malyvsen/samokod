@@ -1,24 +1,38 @@
 // CLI path handoff: parse `samokod <path>`, resolve it against the
 // invoking cwd, and fail fast before Tauri starts.
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
-/// Validated repo root from the launching invocation. Remembered in `run`
-/// before the Tauri builder starts; later steps act on it.
-static INITIAL_ROOT: OnceLock<PathBuf> = OnceLock::new();
+/// Pending repo roots by window label. `run` inserts the validated CLI root
+/// under `main` before the builder starts, so the insert strictly precedes
+/// any frontend load and the handoff is race-free.
+static PENDING: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
 
-/// Remember the validated root for later steps. First write wins so a
-/// second launch cannot clobber the first window's pending path.
-pub fn remember_initial_root(root: PathBuf) {
-    let _ = INITIAL_ROOT.set(root);
+fn pending_map() -> &'static Mutex<HashMap<String, PathBuf>> {
+    PENDING.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Validated root from the launching invocation, when a CLI path was given.
-/// Unread until step 2 wires the pending-path handoff.
-#[allow(dead_code)]
-pub fn initial_root() -> Option<PathBuf> {
-    INITIAL_ROOT.get().cloned()
+/// Remember a validated root for one window label. Insert-before-build keeps
+/// the handoff race-free.
+pub fn insert_pending(label: &str, root: PathBuf) {
+    let Some(mut pending) = pending_map().lock().ok() else {
+        return;
+    };
+    pending.insert(label.to_string(), root);
+}
+
+/// Pop the pending root for the caller's window label, if any.
+pub fn take_pending(label: &str) -> Option<PathBuf> {
+    let mut pending = pending_map().lock().ok()?;
+    pending.remove(label)
+}
+
+/// Remember the validated root for the first window. Runs before the Tauri
+/// builder starts, so the insert strictly precedes any frontend load.
+pub fn remember_initial_root(root: PathBuf) {
+    insert_pending("main", root);
 }
 
 /// First positional after `argv[0]`, lossy like the single-instance plugin
@@ -146,5 +160,36 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let error = resolve_and_validate(dir.path(), Path::new("/")).expect_err("must reject");
         assert!(error.contains("not a git repository"));
+    }
+
+    #[test]
+    fn pending_pops_once_per_window() {
+        let suffix = rand_suffix();
+        let label = format!("test-main-{suffix}");
+        let other = format!("test-other-{suffix}");
+        assert_eq!(take_pending(&label), None);
+        insert_pending(&label, PathBuf::from("/repo-a"));
+        insert_pending(&other, PathBuf::from("/repo-b"));
+        assert_eq!(take_pending(&label), Some(PathBuf::from("/repo-a")));
+        assert_eq!(take_pending(&label), None);
+        assert_eq!(take_pending(&other), Some(PathBuf::from("/repo-b")));
+    }
+
+    #[test]
+    fn initial_root_targets_main() {
+        let label = "main";
+        let _ = take_pending(label);
+        remember_initial_root(PathBuf::from("/repo-main"));
+        assert_eq!(take_pending(label), Some(PathBuf::from("/repo-main")));
+        assert_eq!(take_pending(label), None);
+    }
+
+    fn rand_suffix() -> String {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        format!("{}-{}", std::process::id(), nanos)
     }
 }

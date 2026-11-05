@@ -66,7 +66,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             load_history,
             new_window,
             focus_window,
-            list_open_repos
+            list_open_repos,
+            take_pending_repo
         ])
         .typ::<AppEvent>()
 }
@@ -400,6 +401,13 @@ fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
 #[specta::specta]
 fn list_open_repos(state: State<'_, AgentManager>) -> Vec<crate::types::OpenRepoEntry> {
     state.list_open_repos()
+}
+
+#[tauri::command]
+#[specta::specta]
+fn take_pending_repo(window: Window) -> Option<String> {
+    let label = window_label(&window);
+    crate::cli::take_pending(&label).map(|path| path.to_string_lossy().to_string())
 }
 
 fn log_level() -> log::LevelFilter {

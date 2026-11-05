@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "./App";
 import type { RecentRepo } from "./bindings";
 import { RepoPicker } from "./components/RepoPicker";
+import { testDefaults, testEntry, testKey } from "./fixtures";
 import { api, dialog, stubMatchMedia } from "./testHarness";
 
 vi.mock("./api", async () => {
@@ -98,6 +99,7 @@ describe("picker already-open conflict", () => {
 			{ path: "/repo-taken", window: "window-1" },
 		]);
 		api.openRepo.mockRejectedValue(new Error("already open: /repo-taken"));
+		api.takePendingRepo.mockResolvedValue(null);
 		dialog.open.mockResolvedValue("/repo-taken");
 	});
 
@@ -110,5 +112,50 @@ describe("picker already-open conflict", () => {
 		);
 		expect(screen.getByRole("button", { name: "browse…" })).toBeInTheDocument();
 		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+	});
+});
+
+describe("cli pending path", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		stubMatchMedia();
+		api.getPrefs.mockResolvedValue({ recent: [] });
+		api.listOpenRepos.mockResolvedValue([]);
+		api.validateRepo.mockImplementation(async (path: string) => ({
+			root: path,
+			branch: "main",
+		}));
+		api.takePendingRepo.mockResolvedValue(null);
+		api.warmSession.mockResolvedValue(undefined);
+		api.loadHistory.mockResolvedValue(undefined);
+		api.planMdText.mockResolvedValue(null);
+	});
+
+	test("no pending path stays on the picker", async () => {
+		render(<App />);
+		expect(
+			await screen.findByRole("button", { name: "browse…" }),
+		).toBeInTheDocument();
+		expect(api.openRepo).not.toHaveBeenCalled();
+		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+	});
+
+	test("pending path opens directly in chat", async () => {
+		api.takePendingRepo.mockResolvedValue("/repo-cli");
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo-cli",
+			branch: "main",
+			plans: [testEntry()],
+			selected: testKey(),
+			config_defaults: testDefaults(),
+			scoping_preview: "TEMPLATE",
+		});
+		render(<App />);
+		await screen.findByRole("textbox", { name: "Ask for a change…" });
+		expect(api.validateRepo).toHaveBeenCalledWith("/repo-cli");
+		expect(api.openRepo).toHaveBeenCalledWith("/repo-cli");
+		expect(
+			screen.queryByRole("button", { name: "browse…" }),
+		).not.toBeInTheDocument();
 	});
 });

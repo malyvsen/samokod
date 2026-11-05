@@ -124,6 +124,10 @@ export function listOpenRepos(): Promise<OpenRepoEntry[]> {
 	return commands.listOpenRepos();
 }
 
+export function takePendingRepo(): Promise<string | null> {
+	return commands.takePendingRepo();
+}
+
 export async function focusWindow(label: string): Promise<void> {
 	await unwrap(commands.focusWindow(label));
 }
