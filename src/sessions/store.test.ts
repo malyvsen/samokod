@@ -353,7 +353,7 @@ describe("global events", () => {
 	});
 });
 
-describe("thought bursts", () => {
+describe("live thoughts", () => {
 	test("thoughts stay silent while replaying", () => {
 		let chats = eventFor({ type: "history_preparing", session: testKey() });
 		chats = applySessionEvent(chats, {
@@ -371,7 +371,7 @@ describe("thought bursts", () => {
 		expect(chat.working).toBe(false);
 	});
 
-	test("content freezes the burst ahead with milliseconds", () => {
+	test("content freezes the thought ahead with milliseconds", () => {
 		let chats = applySessionEvent(
 			withChat(),
 			{ type: "agent_thought", session: testKey(), chunk: "hello" },
@@ -392,7 +392,7 @@ describe("thought bursts", () => {
 		expect(chat.live).toBeNull();
 	});
 
-	test("thought chunks accumulate into one burst text", () => {
+	test("thought chunks accumulate into one text", () => {
 		let chats = applySessionEvent(
 			withChat(),
 			{ type: "agent_thought", session: testKey(), chunk: "hel" },
@@ -414,7 +414,7 @@ describe("thought bursts", () => {
 		});
 	});
 
-	test("tool activity freezes the burst without waiting", () => {
+	test("tool activity freezes the thought without waiting", () => {
 		let chats = applySessionEvent(
 			withChat(),
 			{ type: "agent_thought", session: testKey(), chunk: "hello" },
@@ -444,7 +444,7 @@ describe("thought bursts", () => {
 		expect(chat.live).toBeNull();
 	});
 
-	test("turn end freezes the burst and clears live", () => {
+	test("turn end freezes the thought and clears live", () => {
 		let chats = applySessionEvent(
 			withChat(),
 			{ type: "agent_thought", session: testKey(), chunk: "hello" },
@@ -465,7 +465,7 @@ describe("thought bursts", () => {
 		expect(chat.working).toBe(false);
 	});
 
-	test("history begin freezes the burst and stays silent", () => {
+	test("history begin freezes the thought and stays silent", () => {
 		let chats = applySessionEvent(
 			withChat(),
 			{ type: "agent_thought", session: testKey(), chunk: "hello" },

@@ -8,7 +8,7 @@ import type {
 } from "../bindings";
 import type { TranscriptItem } from "../types";
 import { sessionKeyOf } from "../types";
-import { freezeBurst, type LiveStatus, liveForThought } from "./thoughts";
+import { accumulateThought, freezeThought, type LiveThought } from "./thoughts";
 
 export type SessionStart =
 	| { kind: "idle" }
@@ -28,7 +28,7 @@ export interface ChatState {
 	failed: boolean;
 	start: SessionStart;
 	scopingLead: string | null;
-	live: LiveStatus | null;
+	live: LiveThought | null;
 }
 
 export type Chats = Record<string, ChatState>;
@@ -81,6 +81,18 @@ export function withScopingLead(
 		...chats,
 		[id]: { ...emptyChat(), scopingLead: lead ?? null },
 	};
+}
+
+/// Arrival time for items created by live events. Replayed history stays
+/// timestamp-less so runs without wall-clock read as timeless.
+function arrival(replaying: boolean, now: number): { at?: number } {
+	return replaying ? {} : { at: now };
+}
+
+/// The transcript with any pending live thought frozen ahead of the next
+/// content event.
+function frozen(chat: ChatState, now: number): TranscriptItem[] {
+	return freezeThought(chat.transcript, chat.live, now);
 }
 
 export function errorItem(
@@ -161,9 +173,8 @@ export function applySessionEvent(
 			const chunk = event.chunk;
 			return updateEntry(chats, key, (chat) => {
 				const replaying = chat.start.kind === "replaying";
-				const frozen = freezeBurst(chat.transcript, chat.live, now);
 				const transcript = appendText(
-					frozen,
+					frozen(chat, now),
 					chunk,
 					replaying ? undefined : now,
 				);
@@ -183,7 +194,7 @@ export function applySessionEvent(
 					...chat,
 					working: true,
 					failed: false,
-					live: liveForThought(chat.live, now, chunk),
+					live: accumulateThought(chat.live, now, chunk),
 				};
 			});
 		}
@@ -199,7 +210,7 @@ export function applySessionEvent(
 						kind: "user",
 						id: crypto.randomUUID(),
 						text: chunk,
-						...(chat.start.kind === "replaying" ? {} : { at: now }),
+						...arrival(chat.start.kind === "replaying", now),
 					},
 				],
 			}));
@@ -209,24 +220,24 @@ export function applySessionEvent(
 			const line = event.line;
 			return updateEntry(chats, key, (chat) => {
 				const replaying = chat.start.kind === "replaying";
-				const frozen = freezeBurst(chat.transcript, chat.live, now);
-				const index = frozen.findIndex(
+				const settled = frozen(chat, now);
+				const index = settled.findIndex(
 					(item) => item.kind === "tool" && item.line.id === line.id,
 				);
 				const transcript: TranscriptItem[] =
 					index >= 0
-						? frozen.map((item, current) =>
+						? settled.map((item, current) =>
 								current === index && item.kind === "tool"
 									? { ...item, line }
 									: item,
 							)
 						: [
-								...frozen,
+								...settled,
 								{
 									kind: "tool",
 									id: crypto.randomUUID(),
 									line,
-									...(replaying ? {} : { at: now }),
+									...arrival(replaying, now),
 								},
 							];
 				if (replaying) return { ...chat, transcript };
@@ -242,7 +253,7 @@ export function applySessionEvent(
 				working: false,
 				approval: false,
 				failed: false,
-				transcript: freezeBurst(chat.transcript, chat.live, now),
+				transcript: frozen(chat, now),
 				live: null,
 			}));
 		case "turn_failed":
@@ -253,7 +264,7 @@ export function applySessionEvent(
 				approval: false,
 				failed: true,
 				transcript: [
-					...freezeBurst(chat.transcript, chat.live, now),
+					...frozen(chat, now),
 					errorItem(
 						event.raw,
 						event.hint,
@@ -269,13 +280,13 @@ export function applySessionEvent(
 				// resolved without pausing for input.
 				const replaying = chat.start.kind === "replaying";
 				const transcript: TranscriptItem[] = [
-					...freezeBurst(chat.transcript, chat.live, now),
+					...frozen(chat, now),
 					{
 						kind: "approval",
 						id: crypto.randomUUID(),
 						permission: event.permission,
 						resolved: replaying,
-						...(replaying ? {} : { at: now }),
+						...arrival(replaying, now),
 					},
 				];
 				return {
@@ -307,12 +318,12 @@ export function applySessionEvent(
 				}
 				const replaying = chat.start.kind === "replaying";
 				const transcript: TranscriptItem[] = [
-					...freezeBurst(chat.transcript, chat.live, now),
+					...frozen(chat, now),
 					{
 						kind: "todos",
 						id: crypto.randomUUID(),
 						changes: event.changes,
-						...(replaying ? {} : { at: now }),
+						...arrival(replaying, now),
 					},
 				];
 				return {
@@ -341,7 +352,7 @@ export function applySessionEvent(
 				...beginStart(
 					{
 						...chat,
-						transcript: freezeBurst(chat.transcript, chat.live, now),
+						transcript: frozen(chat, now),
 					},
 					{ kind: "replaying" },
 				),

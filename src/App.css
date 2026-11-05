@@ -584,17 +584,22 @@ button.brand:hover {
 	outline-offset: 2px;
 }
 
+.tool,
+.arow,
+.drow {
+	padding-left: 4px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
 .tool {
 	position: relative;
 	font: inherit;
 	color: #9d9a92;
-	padding-left: 4px;
 	align-self: flex-start;
 	width: 100%;
 	max-width: 880px;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
 	background: none;
 	border: 0;
 	cursor: pointer;
@@ -612,10 +617,6 @@ button.brand:hover {
 	color: #7dffc4;
 }
 
-.tool.dim::before {
-	color: #8f8c85;
-}
-
 .tool[data-status="failed"],
 .tool[data-status="failed"]::before {
 	color: #ff6b6b;
@@ -625,10 +626,6 @@ button.brand:hover {
 	position: relative;
 	align-self: flex-start;
 	font-size: 13px;
-	padding-left: 4px;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
 	max-width: 880px;
 	width: 100%;
 }
@@ -723,6 +720,10 @@ button.arow {
 	text-overflow: ellipsis;
 }
 
+.work .summary .txt .failed {
+	color: #ff6b6b;
+}
+
 .stop-icon {
 	flex: none;
 	width: 14px;
@@ -744,11 +745,6 @@ button.arow {
 
 .stop-icon:hover .sq {
 	background: #ff8f8f;
-}
-
-.stop-icon:disabled {
-	opacity: 0.45;
-	cursor: default;
 }
 
 .review-icon {
@@ -793,10 +789,6 @@ button.arow {
 	font-size: 13px;
 	line-height: 1.5;
 	color: #9d9a92;
-	padding-left: 4px;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
 }
 
 .drow::before {

@@ -16,7 +16,7 @@ export function isSessionBusy(chat: ChatState | null): boolean {
 	return chat.working || chat.approval || chat.start.kind === "replaying";
 }
 
-/// The pill reflects live turn state only; every start phase maps to idle.
+/// Live turn state for the aurora and queue gating; every start phase maps to idle.
 export function agentStatusOf(chat: ChatState | null): AgentStatus {
 	if (chat === null) return "idle";
 	if (chat.approval) return "approval";

@@ -1,32 +1,30 @@
 import type { TranscriptItem } from "../types";
 
-export type LiveStatus = {
-	kind: "thinking";
-	burstStart: number;
+export type LiveThought = {
+	startedAt: number;
 	updatedAt: number;
 	text: string;
 };
 
-export function liveForThought(
-	live: LiveStatus | null,
+export function accumulateThought(
+	live: LiveThought | null,
 	now: number,
 	chunk = "",
-): LiveStatus {
+): LiveThought {
 	if (live !== null) {
 		return {
-			kind: "thinking",
-			burstStart: live.burstStart,
+			startedAt: live.startedAt,
 			updatedAt: now,
 			text: live.text + chunk,
 		};
 	}
-	return { kind: "thinking", burstStart: now, updatedAt: now, text: chunk };
+	return { startedAt: now, updatedAt: now, text: chunk };
 }
 
-export function freezeBurst(
+export function freezeThought(
 	transcript: TranscriptItem[],
-	live: LiveStatus | null,
-	now: number = Date.now(),
+	live: LiveThought | null,
+	now: number,
 ): TranscriptItem[] {
 	if (live === null) return transcript;
 	return [
@@ -34,7 +32,7 @@ export function freezeBurst(
 		{
 			kind: "thought",
 			id: crypto.randomUUID(),
-			ms: burstMs(live.burstStart, live.updatedAt),
+			ms: thoughtMs(live.startedAt, live.updatedAt),
 			text: live.text,
 			at: now,
 		},
@@ -45,6 +43,6 @@ export function thinkingSeconds(totalMs: number): number {
 	return Math.max(1, Math.round(totalMs / 1000));
 }
 
-function burstMs(burstStart: number, updatedAt: number): number {
-	return Math.max(0, updatedAt - burstStart);
+function thoughtMs(startedAt: number, updatedAt: number): number {
+	return Math.max(0, updatedAt - startedAt);
 }

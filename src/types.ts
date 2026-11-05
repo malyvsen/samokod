@@ -23,26 +23,37 @@ export function isWorkRole(role: SessionKey["role"]): boolean {
 	return role === "executing" || role === "evergreening" || role === "landing";
 }
 
+type ItemBase = {
+	id: string;
+	at?: number;
+};
+
 export type TranscriptItem =
-	| { kind: "user"; id: string; text: string; at?: number }
-	| { kind: "agent"; id: string; text: string; at?: number }
-	| { kind: "thought"; id: string; ms: number; text: string; at?: number }
-	| { kind: "tool"; id: string; line: ToolLineView; at?: number }
-	| { kind: "todos"; id: string; changes: TodoChangeView[]; at?: number }
-	| {
+	| ({ kind: "user"; text: string } & ItemBase)
+	| ({ kind: "agent"; text: string } & ItemBase)
+	| ({ kind: "thought"; ms: number; text: string } & ItemBase)
+	| ({ kind: "tool"; line: ToolLineView } & ItemBase)
+	| ({ kind: "todos"; changes: TodoChangeView[] } & ItemBase)
+	| ({
 			kind: "approval";
-			id: string;
 			permission: PermissionView;
 			resolved: boolean;
-			at?: number;
-	  }
-	| {
+	  } & ItemBase)
+	| ({
 			kind: "error";
-			id: string;
 			raw: string;
 			hint: string;
 			retryable: boolean;
-			at?: number;
-	  };
+	  } & ItemBase);
+
+export type MessageItem = Extract<
+	TranscriptItem,
+	{ kind: "user" } | { kind: "agent" }
+>;
+
+export type RunItem = Exclude<
+	TranscriptItem,
+	{ kind: "user" } | { kind: "agent" }
+>;
 
 export type AgentStatus = "idle" | "working" | "approval" | "failed";

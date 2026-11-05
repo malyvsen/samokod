@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useReducer, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { assertNever } from "../assert";
 import type {
 	PermissionOptionView,
@@ -8,7 +8,7 @@ import type {
 } from "../bindings";
 import type { SessionStart } from "../sessions/store";
 import { thinkingSeconds } from "../sessions/thoughts";
-import type { TranscriptItem } from "../types";
+import type { RunItem, TranscriptItem } from "../types";
 import {
 	CollapseControl,
 	type CollapsibleKind,
@@ -16,6 +16,7 @@ import {
 	useCollapsed,
 } from "./collapsible";
 import { MessageMarkdown } from "./MessageMarkdown";
+import { groupRuns, summarizeRun, todoKindLabel } from "./workGroups";
 
 export function Transcript({
 	items,
@@ -44,15 +45,7 @@ export function Transcript({
 		lead !== null &&
 		!items.some((item) => item.kind === "user" && item.text === lead);
 	const groups = groupRuns(items);
-	const [, force] = useReducer((x: number) => x + 1, 0);
-	useEffect(() => {
-		if (!working) return;
-		const id = setInterval(force, 1000);
-		return () => {
-			clearInterval(id);
-		};
-	}, [working]);
-	const now = Date.now();
+	const now = useNow(working);
 	return (
 		<>
 			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
@@ -68,11 +61,11 @@ export function Transcript({
 				{groups.map((group, index) =>
 					group.kind === "run" ? (
 						<WorkBox
-							key={group.items[0]?.id ?? Math.random().toString(36)}
+							key={group.items[0].id}
 							items={group.items}
 							onRetry={onRetry}
 							onAnswer={onAnswer}
-							live={working && index === groups.length - 1}
+							isLive={working && index === groups.length - 1}
 							now={now}
 							onStop={onStop}
 						/>
@@ -98,188 +91,87 @@ export function Transcript({
 	);
 }
 
-export type RunItem = Exclude<
-	TranscriptItem,
-	{ kind: "user" } | { kind: "agent" }
->;
-
-export type TranscriptGroup =
-	| {
-			kind: "message";
-			item: Extract<TranscriptItem, { kind: "user" } | { kind: "agent" }>;
-	  }
-	| { kind: "run"; items: RunItem[] };
-
-/// Maximal runs of non-message items between user and agent messages.
-/// Single-item runs get a box too. Pure.
-export function groupRuns(items: TranscriptItem[]): TranscriptGroup[] {
-	const groups: TranscriptGroup[] = [];
-	let run: RunItem[] = [];
-	for (const item of items) {
-		if (item.kind === "user" || item.kind === "agent") {
-			if (run.length > 0) {
-				groups.push({ kind: "run", items: run });
-				run = [];
-			}
-			groups.push({ kind: "message", item });
-			continue;
-		}
-		run.push(item);
-	}
-	if (run.length > 0) {
-		groups.push({ kind: "run", items: run });
-	}
-	return groups;
-}
-
-export function summarizeRun(items: RunItem[]): {
-	counts: string;
-	durationMs: number | null;
-	hasFailed: boolean;
-} {
-	let durationMs: number | null = null;
-	const ats = items
-		.map((item) => item.at)
-		.filter((at): at is number => at !== undefined);
-	if (ats.length === items.length && items.length > 0) {
-		durationMs = Math.max(...ats) - Math.min(...ats);
-	}
-	const toolCounts = new Map<string, number>();
-	let thinkCount = 0;
-	const todoCounts = new Map<string, number>();
-	let approvalCount = 0;
-	let failedCount = 0;
-	for (const item of items) {
-		if (item.kind === "tool") {
-			toolCounts.set(
-				item.line.label,
-				(toolCounts.get(item.line.label) ?? 0) + 1,
-			);
-			if (item.line.status === "failed") {
-				failedCount += 1;
-			}
-		} else if (item.kind === "thought") {
-			thinkCount += 1;
-		} else if (item.kind === "todos") {
-			for (const change of item.changes) {
-				const label =
-					change.status === "pending"
-						? "new todo"
-						: change.status === "in_progress"
-							? "active todo"
-							: "done todo";
-				todoCounts.set(label, (todoCounts.get(label) ?? 0) + 1);
-			}
-		} else if (item.kind === "approval") {
-			approvalCount += 1;
-		} else if (item.kind === "error") {
-			failedCount += 1;
-		}
-	}
-	const entries: { label: string; count: number }[] = [];
-	for (const [label, count] of toolCounts) {
-		entries.push({ label, count });
-	}
-	if (thinkCount > 0) {
-		entries.push({ label: "think", count: thinkCount });
-	}
-	for (const [label, count] of todoCounts) {
-		entries.push({ label, count });
-	}
-	if (approvalCount > 0) {
-		entries.push({ label: "approval", count: approvalCount });
-	}
-	if (failedCount > 0) {
-		entries.push({ label: "failed", count: failedCount });
-	}
-	entries.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-	const counts = entries
-		.map(({ label, count }) => `${count}x ${label}`)
-		.join(", ");
-	return { counts, durationMs, hasFailed: failedCount > 0 };
+/// Wall-clock for the live work box, ticking once per second while active.
+function useNow(active: boolean): number {
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (!active) return;
+		setNow(Date.now());
+		const id = setInterval(() => setNow(Date.now()), 1000);
+		return () => {
+			clearInterval(id);
+		};
+	}, [active]);
+	return now;
 }
 
 function WorkBox({
 	items,
 	onRetry,
 	onAnswer,
-	live = false,
+	isLive = false,
 	now = Date.now(),
 	onStop = null,
 }: {
 	items: RunItem[];
 	onRetry: (() => void) | null;
 	onAnswer: (toolCallId: string, optionId: string) => void;
-	live?: boolean;
+	isLive?: boolean;
 	now?: number;
 	onStop?: (() => void) | null;
 }) {
 	const [open, setOpen] = useState(false);
 	const workRef = useRef<HTMLDivElement>(null);
-	const { counts, durationMs: frozenMs, hasFailed } = summarizeRun(items);
-	const ats = items
-		.map((item) => item.at)
-		.filter((at): at is number => at !== undefined);
-	const allStamped = ats.length === items.length && items.length > 0;
-	const minAt = allStamped ? Math.min(...ats) : null;
-	const durationMs =
-		live && minAt !== null ? now - minAt : allStamped ? frozenMs : null;
+	const summary = summarizeRun(items, isLive ? now : undefined);
 	const duration =
-		durationMs === null ? null : `${(durationMs / 1000).toFixed(1)}s`;
-	const verb = live ? "Working" : "Worked";
+		summary.durationMs === null
+			? null
+			: `${(summary.durationMs / 1000).toFixed(1)}s`;
+	const verb = isLive ? "Working" : "Worked";
 	const prefix =
 		duration === null ? `${verb} · ` : `${verb} for ${duration} · `;
-	const countParts = counts === "" ? [] : counts.split(", ");
 	const hasUnresolvedApproval = items.some(
 		(item) => item.kind === "approval" && !item.resolved,
 	);
-	const showReview = live && hasUnresolvedApproval;
-	const showStop = live && !hasUnresolvedApproval && onStop !== null;
+	const showReview = isLive && hasUnresolvedApproval;
+	const showStop = isLive && !hasUnresolvedApproval && onStop !== null;
 
 	function focusFirstApproval() {
-		const button = workRef.current?.querySelector(
-			".drow.appr button, .approval button",
-		);
+		const button = workRef.current?.querySelector(".drow.appr button");
 		if (button instanceof HTMLElement) {
 			button.focus();
 		}
 	}
 
-	function handleReview(e: React.MouseEvent) {
-		e.stopPropagation();
+	function handleReview() {
 		setOpen(true);
 		window.setTimeout(focusFirstApproval, 0);
 	}
 
-	function handleStop(e: React.MouseEvent) {
-		e.stopPropagation();
+	function handleStop() {
 		onStop?.();
 	}
 
-	function toggle() {
-		setOpen((was) => !was);
-	}
-
 	return (
-		<div className={hasFailed ? "work failed" : "work"} ref={workRef}>
+		<div className={summary.hasFailed ? "work failed" : "work"} ref={workRef}>
 			<div className="summary-row">
 				<button
 					className="summary"
 					type="button"
 					aria-expanded={open}
 					title={open ? "Collapse" : "Expand"}
-					onClick={toggle}
+					onClick={() => setOpen((was) => !was)}
 				>
-					{!live && <span className="chev">{open ? "▾" : "▸"}</span>}
+					{!isLive && <span className="chev">{open ? "▾" : "▸"}</span>}
 					<span className="txt">
 						{prefix}
-						{countParts.map((part, index) => (
-							<span key={part}>
+						{summary.entries.map((entry, index) => (
+							<span key={entry.label}>
 								{index > 0 && ", "}
-								{part.includes("failed") ? (
-									<span style={{ color: "#ff6b6b" }}>{part}</span>
+								{entry.label === "failed" ? (
+									<span className="failed">{`${entry.count}x ${entry.label}`}</span>
 								) : (
-									part
+									`${entry.count}x ${entry.label}`
 								)}
 							</span>
 						))}
@@ -317,7 +209,7 @@ function WorkBox({
 							key={item.id}
 							ms={item.ms}
 							text={item.text}
-							{...(item.at === undefined ? {} : { at: item.at })}
+							at={item.at}
 						/>
 					) : (
 						<ItemRow
@@ -346,7 +238,7 @@ function ThoughtRow({
 }: {
 	ms: number;
 	text: string;
-	at?: number;
+	at: number | undefined;
 }) {
 	const [open, setOpen] = useState(false);
 	return (
@@ -396,35 +288,22 @@ function ItemRow({
 				/>
 			);
 		case "tool":
-			return (
-				<ToolRow
-					line={item.line}
-					{...(item.at === undefined ? {} : { at: item.at })}
-				/>
-			);
+			return <ToolRow line={item.line} at={item.at} />;
 		case "todos":
 			return (
 				<>
-					{item.changes.map((change) => {
-						const label =
-							change.status === "pending"
-								? "new"
-								: change.status === "in_progress"
-									? "active"
-									: "done";
-						return (
-							<div
-								className="drow"
-								data-full={change.content}
-								key={change.content}
-							>
-								{item.at !== undefined && (
-									<span className="ts">{formatClock(item.at)} </span>
-								)}
-								{`todo ${label}: ${change.content}`}
-							</div>
-						);
-					})}
+					{item.changes.map((change) => (
+						<div
+							className="drow"
+							data-full={change.content}
+							key={change.content}
+						>
+							{item.at !== undefined && (
+								<span className="ts">{formatClock(item.at)} </span>
+							)}
+							{`todo ${todoKindLabel(change.status)}: ${change.content}`}
+						</div>
+					))}
 				</>
 			);
 		case "approval": {
@@ -574,7 +453,7 @@ function ErrorBar({
 	);
 }
 
-function ToolRow({ line, at }: { line: ToolLineView; at?: number }) {
+function ToolRow({ line, at }: { line: ToolLineView; at: number | undefined }) {
 	const [open, setOpen] = useState(false);
 	const status: ToolStatus = line.status;
 	switch (status) {

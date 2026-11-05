@@ -1,13 +1,10 @@
 import { readFileSync } from "node:fs";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
-import {
-	groupRuns,
-	type RunItem,
-	summarizeRun,
-	Transcript,
-} from "./components/Transcript";
+import { Transcript } from "./components/Transcript";
+import { groupRuns, summarizeRun } from "./components/workGroups";
 import type { SessionStart } from "./sessions/store";
+import type { RunItem } from "./types";
 
 const multiline = "first line\nsecond line\n- third";
 const IDLE: SessionStart = { kind: "idle" };
@@ -293,7 +290,7 @@ describe("transcript agent tables", () => {
 });
 
 describe("transcript thought rows", () => {
-	test("frozen bursts read as thinking seconds", () => {
+	test("frozen thoughts read as thinking seconds", () => {
 		render(
 			<Transcript
 				items={[{ kind: "thought", id: "t1", ms: 8000, text: "hmm" }]}
@@ -434,7 +431,7 @@ describe("transcript thought rows", () => {
 		).toContain("Worked for 1.0s");
 	});
 
-	test("bursts split only on intervening content", () => {
+	test("thoughts split only on intervening content", () => {
 		const { container } = render(
 			<Transcript
 				items={[
