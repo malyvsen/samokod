@@ -1,59 +1,5 @@
-import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { SessionKey } from "../bindings";
-import { testKey } from "../fixtures";
-import type { TranscriptItem } from "../types";
-import { type ChatState, emptyChat } from "./store";
-import {
-	BURST_SILENCE_MS,
-	freezeBurst,
-	hasRunningTools,
-	liveForThought,
-	liveThinkingMs,
-	thinkingSeconds,
-	useThoughtTimers,
-	WAITING_DELAY_MS,
-} from "./thoughts";
-
-describe("thought timeouts", () => {
-	test("burst window outlasts the waiting delay", () => {
-		expect(BURST_SILENCE_MS).toBeGreaterThan(WAITING_DELAY_MS);
-	});
-});
-
-describe("liveThinkingMs", () => {
-	test("idle and waiting have no live thinking time", () => {
-		expect(liveThinkingMs(null)).toBeNull();
-		expect(liveThinkingMs({ kind: "waiting" })).toBeNull();
-	});
-
-	test("live bursts read wall-clock duration with a zero floor", () => {
-		expect(
-			liveThinkingMs({
-				kind: "thinking",
-				burstStart: 1000,
-				updatedAt: 1000,
-				text: "",
-			}),
-		).toBe(0);
-		expect(
-			liveThinkingMs({
-				kind: "thinking",
-				burstStart: 1000,
-				updatedAt: 1400,
-				text: "",
-			}),
-		).toBe(400);
-		expect(
-			liveThinkingMs({
-				kind: "thinking",
-				burstStart: 2000,
-				updatedAt: 1000,
-				text: "",
-			}),
-		).toBe(0);
-	});
-});
+import { describe, expect, test } from "vitest";
+import { freezeBurst, liveForThought, thinkingSeconds } from "./thoughts";
 
 describe("thinkingSeconds", () => {
 	test("single-chunk bursts read one second", () => {
@@ -69,14 +15,8 @@ describe("thinkingSeconds", () => {
 });
 
 describe("liveForThought", () => {
-	test("starts a burst from waiting or idle", () => {
+	test("starts a burst from idle", () => {
 		expect(liveForThought(null, 1000, "hmm")).toEqual({
-			kind: "thinking",
-			burstStart: 1000,
-			updatedAt: 1000,
-			text: "hmm",
-		});
-		expect(liveForThought({ kind: "waiting" }, 1000, "hmm")).toEqual({
 			kind: "thinking",
 			burstStart: 1000,
 			updatedAt: 1000,
@@ -84,7 +24,7 @@ describe("liveForThought", () => {
 		});
 	});
 
-	test("advances within the burst window", () => {
+	test("accumulates chunks into one burst text", () => {
 		const live = liveForThought(null, 1000, "hel");
 		expect(liveForThought(live, 2500, "lo")).toEqual({
 			kind: "thinking",
@@ -93,20 +33,10 @@ describe("liveForThought", () => {
 			text: "hello",
 		});
 	});
-
-	test("starts fresh past burst silence", () => {
-		const live = liveForThought(null, 1000, "old");
-		expect(liveForThought(live, 1000 + BURST_SILENCE_MS, "new")).toEqual({
-			kind: "thinking",
-			burstStart: 1000 + BURST_SILENCE_MS,
-			updatedAt: 1000 + BURST_SILENCE_MS,
-			text: "new",
-		});
-	});
 });
 
 describe("freezeBurst", () => {
-	test("freezes thinking into wall-clock milliseconds", () => {
+	test("freezes thinking with text", () => {
 		const transcript = freezeBurst([], liveForThought(null, 1000, "hmm"));
 		expect(transcript).toHaveLength(1);
 		expect(transcript[0]).toMatchObject({
@@ -116,7 +46,7 @@ describe("freezeBurst", () => {
 		});
 	});
 
-	test("stores the wall-clock burst duration", () => {
+	test("stores accumulated text", () => {
 		const live = liveForThought(liveForThought(null, 1000, "hel"), 2500, "lo");
 		const transcript = freezeBurst([], live);
 		expect(transcript[0]).toMatchObject({
@@ -126,122 +56,7 @@ describe("freezeBurst", () => {
 		});
 	});
 
-	test("leaves waiting and idle untouched", () => {
+	test("leaves idle untouched", () => {
 		expect(freezeBurst([], null)).toEqual([]);
-		expect(freezeBurst([], { kind: "waiting" })).toEqual([]);
-	});
-});
-
-describe("hasRunningTools", () => {
-	test("empty transcript has nothing running", () => {
-		expect(hasRunningTools([])).toBe(false);
-	});
-
-	test("pending and in-progress tools count as running", () => {
-		const pending: TranscriptItem[] = [
-			{
-				kind: "tool",
-				id: "t1",
-				line: { id: "l1", text: "edit", status: "pending", label: "edit" },
-			},
-		];
-		const running: TranscriptItem[] = [
-			{
-				kind: "tool",
-				id: "t1",
-				line: { id: "l1", text: "edit", status: "in_progress", label: "edit" },
-			},
-		];
-		expect(hasRunningTools(pending)).toBe(true);
-		expect(hasRunningTools(running)).toBe(true);
-	});
-
-	test("completed mix with no running tools reads idle", () => {
-		const transcript: TranscriptItem[] = [
-			{
-				kind: "tool",
-				id: "t1",
-				line: { id: "l1", text: "edit", status: "completed", label: "edit" },
-			},
-			{ kind: "agent", id: "a1", text: "done" },
-		];
-		expect(hasRunningTools(transcript)).toBe(false);
-	});
-
-	test("failed only reads idle", () => {
-		const transcript: TranscriptItem[] = [
-			{
-				kind: "tool",
-				id: "t1",
-				line: { id: "l1", text: "edit", status: "failed", label: "edit" },
-			},
-		];
-		expect(hasRunningTools(transcript)).toBe(false);
-	});
-});
-
-describe("useThoughtTimers waiting gate", () => {
-	beforeEach(() => {
-		vi.useFakeTimers();
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
-	function runWaitingTimer(chat: ChatState) {
-		const updateChat = vi.fn(
-			(_key: SessionKey, _next: (current: ChatState) => ChatState) => {},
-		);
-		const hook = renderHook(
-			({ current }: { current: ChatState }) =>
-				useThoughtTimers(testKey(), current, updateChat),
-			{ initialProps: { current: chat } },
-		);
-		act(() => {
-			vi.advanceTimersByTime(WAITING_DELAY_MS);
-		});
-		const updater = updateChat.mock.calls[0]?.[1] as
-			| ((current: ChatState) => ChatState)
-			| undefined;
-		const next = updater?.(chat) ?? chat;
-		hook.unmount();
-		return next;
-	}
-
-	test("quiet working turn flips to waiting", () => {
-		const chat: ChatState = { ...emptyChat(), working: true, live: null };
-		expect(runWaitingTimer(chat).live).toEqual({ kind: "waiting" });
-	});
-
-	test("running tool stays quiet past the delay", () => {
-		const chat: ChatState = {
-			...emptyChat(),
-			working: true,
-			live: null,
-			transcript: [
-				{
-					kind: "tool",
-					id: "t1",
-					line: {
-						id: "l1",
-						text: "edit",
-						status: "in_progress",
-						label: "edit",
-					},
-				},
-			],
-		};
-		expect(runWaitingTimer(chat).live).toBeNull();
-	});
-
-	test("pending approval never flips to waiting", () => {
-		const chat: ChatState = {
-			...emptyChat(),
-			working: true,
-			approval: true,
-			live: null,
-		};
-		expect(runWaitingTimer(chat).live).toBeNull();
 	});
 });

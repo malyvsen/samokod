@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import {
 	groupRuns,
@@ -345,118 +345,83 @@ describe("transcript thought rows", () => {
 		expect(rows[1]?.textContent).toBe("thinking: 8s");
 	});
 
-	test("waiting shows a static row", () => {
-		const { container } = render(
-			<Transcript
-				items={[{ kind: "user", id: "u1", text: "hello" }]}
-				start={IDLE}
-				repoLabel="~/repo"
-				onRetry={vi.fn()}
-				onAnswer={vi.fn()}
-				live={{ kind: "waiting" }}
-			/>,
-		);
-		expect(container.querySelector(".arow.waiting")?.textContent).toBe(
-			"waiting",
-		);
+	test("trailing box of a working session ticks wall-clock", () => {
+		vi.useFakeTimers();
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(5000);
+		try {
+			const { container } = render(
+				<Transcript
+					items={[
+						{
+							kind: "tool",
+							id: "t1",
+							line: {
+								id: "l1",
+								text: "read: a",
+								status: "completed",
+								label: "read",
+							},
+							at: 1000,
+						},
+						{
+							kind: "tool",
+							id: "t2",
+							line: {
+								id: "l2",
+								text: "read: b",
+								status: "completed",
+								label: "read",
+							},
+							at: 2000,
+						},
+					]}
+					start={IDLE}
+					repoLabel="~/repo"
+					onRetry={vi.fn()}
+					onAnswer={vi.fn()}
+					working
+				/>,
+			);
+			const summary = () =>
+				container.querySelector(".work .summary .txt")?.textContent ?? "";
+			expect(summary()).toContain("Working for 4.0s");
+			nowSpy.mockReturnValue(6000);
+			act(() => {
+				vi.advanceTimersByTime(1000);
+			});
+			expect(summary()).toContain("Working for 5.0s");
+		} finally {
+			nowSpy.mockRestore();
+			vi.useRealTimers();
+		}
 	});
 
-	test("live thinking renders apart from frozen rows", () => {
+	test("frozen box shows static wall-clock", () => {
 		const { container } = render(
 			<Transcript
 				items={[
-					{ kind: "thought", id: "t1", ms: 2000, text: "first" },
-					{ kind: "thought", id: "t2", ms: 1000, text: "second" },
-				]}
-				start={IDLE}
-				repoLabel="~/repo"
-				onRetry={vi.fn()}
-				onAnswer={vi.fn()}
-				live={{
-					kind: "thinking",
-					burstStart: 0,
-					updatedAt: 1000,
-					text: "live",
-				}}
-			/>,
-		);
-		const rows = container.querySelectorAll(".arow.thought");
-		expect(rows).toHaveLength(3);
-		expect(rows[0]?.textContent).toBe("thinking: 2s");
-		expect(rows[1]?.textContent).toBe("thinking: 1s");
-		expect(rows[2]?.textContent).toBe("thinking: 1s");
-		expect(container.querySelector(".arow.thinking")).toBeNull();
-		expect(container.querySelector(".tscroll")).toBeNull();
-		expect(container.textContent).not.toContain("checking");
-	});
-
-	test("live thinking without preceding thoughts renders the live total", () => {
-		const { container } = render(
-			<Transcript
-				items={[{ kind: "user", id: "u1", text: "hello" }]}
-				start={IDLE}
-				repoLabel="~/repo"
-				onRetry={vi.fn()}
-				onAnswer={vi.fn()}
-				live={{
-					kind: "thinking",
-					burstStart: 0,
-					updatedAt: 2500,
-					text: "live",
-				}}
-			/>,
-		);
-		const rows = container.querySelectorAll(".arow.thought");
-		expect(rows).toHaveLength(1);
-		expect(rows[0]?.textContent).toBe("thinking: 3s");
-		expect(container.querySelector(".arow.thinking")).toBeNull();
-	});
-
-	test("new chunks advance the live row while frozen rows stay fixed", () => {
-		const { container, rerender, unmount } = render(
-			<Transcript
-				items={[{ kind: "thought", id: "t1", ms: 2000, text: "first" }]}
-				start={IDLE}
-				repoLabel="~/repo"
-				onRetry={vi.fn()}
-				onAnswer={vi.fn()}
-				live={{
-					kind: "thinking",
-					burstStart: 1000,
-					updatedAt: 2000,
-					text: "live",
-				}}
-			/>,
-		);
-		let rows = container.querySelectorAll(".arow.thought");
-		expect(rows).toHaveLength(2);
-		expect(rows[0]?.textContent).toBe("thinking: 2s");
-		expect(rows[1]?.textContent).toBe("thinking: 1s");
-		rerender(
-			<Transcript
-				items={[{ kind: "thought", id: "t1", ms: 2000, text: "first" }]}
-				start={IDLE}
-				repoLabel="~/repo"
-				onRetry={vi.fn()}
-				onAnswer={vi.fn()}
-				live={{
-					kind: "thinking",
-					burstStart: 1000,
-					updatedAt: 3500,
-					text: "live",
-				}}
-			/>,
-		);
-		rows = container.querySelectorAll(".arow.thought");
-		expect(rows).toHaveLength(2);
-		expect(rows[0]?.textContent).toBe("thinking: 2s");
-		expect(rows[1]?.textContent).toBe("thinking: 3s");
-		unmount();
-		const { container: frozen } = render(
-			<Transcript
-				items={[
-					{ kind: "thought", id: "t1", ms: 2000, text: "first" },
-					{ kind: "thought", id: "t2", ms: 2500, text: "second" },
+					{
+						kind: "tool",
+						id: "t1",
+						line: {
+							id: "l1",
+							text: "read: a",
+							status: "completed",
+							label: "read",
+						},
+						at: 1000,
+					},
+					{
+						kind: "tool",
+						id: "t2",
+						line: {
+							id: "l2",
+							text: "read: b",
+							status: "completed",
+							label: "read",
+						},
+						at: 2000,
+					},
 				]}
 				start={IDLE}
 				repoLabel="~/repo"
@@ -464,10 +429,40 @@ describe("transcript thought rows", () => {
 				onAnswer={vi.fn()}
 			/>,
 		);
-		const frozenRows = frozen.querySelectorAll(".arow.thought");
-		expect(frozenRows).toHaveLength(2);
-		expect(frozenRows[0]?.textContent).toBe("thinking: 2s");
-		expect(frozenRows[1]?.textContent).toBe("thinking: 3s");
+		expect(
+			container.querySelector(".work .summary .txt")?.textContent,
+		).toContain("Worked for 1.0s");
+	});
+
+	test("bursts split only on intervening content", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{ kind: "thought", id: "t1", ms: 2000, text: "first", at: 1000 },
+					{
+						kind: "tool",
+						id: "tool1",
+						line: {
+							id: "l1",
+							text: "read: a",
+							status: "completed",
+							label: "read",
+						},
+						at: 2000,
+					},
+					{ kind: "thought", id: "t2", ms: 1000, text: "second", at: 3000 },
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		expect(container.querySelectorAll(".work")).toHaveLength(1);
+		const rows = container.querySelectorAll(".arow.thought");
+		expect(rows).toHaveLength(2);
+		expect(rows[0]?.textContent).toBe("thinking: 2s");
+		expect(rows[1]?.textContent).toBe("thinking: 1s");
 	});
 });
 

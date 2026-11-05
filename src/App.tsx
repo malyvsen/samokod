@@ -74,7 +74,6 @@ import {
 	updateEntry,
 	withScopingLead,
 } from "./sessions/store";
-import { useThoughtTimers } from "./sessions/thoughts";
 import type { AgentStatus, TranscriptItem } from "./types";
 import { isWorkRole, sameSession, sessionKeyOf } from "./types";
 import "./App.css";
@@ -157,7 +156,6 @@ export function App() {
 	const entry = selectedEntry(plans, selectedKey);
 	const readOnly = isReadOnly(entry);
 	useSessionStart(selectedKey, chats, readOnly);
-	useThoughtTimers(selectedKey, chat, updateChat);
 	const planMd = usePlanMd(selectedKey, chat?.working ?? false);
 	const isScoping = selectedKey?.role === "scoping";
 	const side = sideContentFor(entry, selectedKey, chat?.todos ?? []);
@@ -837,6 +835,7 @@ export function App() {
 									onRetry={readOnly ? null : handleRetry}
 									onAnswer={handleAnswer}
 									live={chat?.live ?? null}
+									working={chat?.working ?? false}
 									onHistoryRetry={
 										chat?.start.kind === "failed" && chat.start.error.retryable
 											? handleHistoryRetry

@@ -15,7 +15,7 @@ export function liveForThought(
 	now: number,
 	chunk = "",
 ): LiveStatus {
-	if (live?.kind === "thinking" && now - live.updatedAt < BURST_SILENCE_MS) {
+	if (live?.kind === "thinking") {
 		return {
 			kind: "thinking",
 			burstStart: live.burstStart,

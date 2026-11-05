@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useReducer, useState } from "react";
 import { assertNever } from "../assert";
 import type {
 	PermissionOptionView,
@@ -7,11 +7,8 @@ import type {
 	ToolStatus,
 } from "../bindings";
 import type { SessionStart } from "../sessions/store";
-import {
-	type LiveStatus,
-	liveThinkingMs,
-	thinkingSeconds,
-} from "../sessions/thoughts";
+import type { LiveStatus } from "../sessions/thoughts";
+import { thinkingSeconds } from "../sessions/thoughts";
 import { todoMark, todoRowClass } from "../todos";
 import type { TranscriptItem } from "../types";
 import {
@@ -31,6 +28,7 @@ export function Transcript({
 	onAnswer,
 	onHistoryRetry = null,
 	live = null,
+	working = false,
 	children,
 }: {
 	items: TranscriptItem[];
@@ -41,14 +39,24 @@ export function Transcript({
 	onAnswer: (toolCallId: string, optionId: string) => void;
 	onHistoryRetry?: (() => void) | null;
 	live?: LiveStatus | null;
+	working?: boolean;
 	children?: ReactNode;
 }) {
+	const _live = live;
+	void _live;
 	const showLead =
 		lead !== null &&
 		!items.some((item) => item.kind === "user" && item.text === lead);
-	const status = live ?? null;
 	const groups = groupRuns(items);
-	const liveMs = liveThinkingMs(status);
+	const [, force] = useReducer((x: number) => x + 1, 0);
+	useEffect(() => {
+		if (!working) return;
+		const id = setInterval(force, 1000);
+		return () => {
+			clearInterval(id);
+		};
+	}, [working]);
+	const now = Date.now();
 	return (
 		<>
 			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
@@ -61,13 +69,15 @@ export function Transcript({
 						text={lead}
 					/>
 				)}
-				{groups.map((group) =>
+				{groups.map((group, index) =>
 					group.kind === "run" ? (
 						<WorkBox
 							key={group.items[0]?.id ?? Math.random().toString(36)}
 							items={group.items}
 							onRetry={onRetry}
 							onAnswer={onAnswer}
+							live={working && index === groups.length - 1}
+							now={now}
 						/>
 					) : (
 						<ItemRow
@@ -77,10 +87,6 @@ export function Transcript({
 							onAnswer={onAnswer}
 						/>
 					),
-				)}
-				{liveMs !== null && <ThoughtRow ms={liveMs} />}
-				{status?.kind === "waiting" && (
-					<div className="arow waiting">waiting</div>
 				)}
 				{start?.kind === "failed" && (
 					<ErrorBar
@@ -170,19 +176,31 @@ function WorkBox({
 	items,
 	onRetry,
 	onAnswer,
+	live = false,
+	now = Date.now(),
 }: {
 	items: RunItem[];
 	onRetry: (() => void) | null;
 	onAnswer: (toolCallId: string, optionId: string) => void;
+	live?: boolean;
+	now?: number;
 }) {
 	const [open, setOpen] = useState(false);
-	const { counts, durationMs } = summarizeRun(items);
+	const { counts, durationMs: frozenMs } = summarizeRun(items);
+	const ats = items
+		.map((item) => item.at)
+		.filter((at): at is number => at !== undefined);
+	const allStamped = ats.length === items.length && items.length > 0;
+	const minAt = allStamped ? Math.min(...ats) : null;
+	const durationMs =
+		live && minAt !== null ? now - minAt : allStamped ? frozenMs : null;
 	const duration =
 		durationMs === null ? null : `${(durationMs / 1000).toFixed(1)}s`;
+	const verb = live ? "Working" : "Worked";
 	const summary =
 		duration === null
-			? `Worked · ${counts}`
-			: `Worked for ${duration} · ${counts}`;
+			? `${verb} · ${counts}`
+			: `${verb} for ${duration} · ${counts}`;
 	return (
 		<div className="work">
 			<button
