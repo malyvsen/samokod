@@ -50,8 +50,6 @@ pub fn parse_os_args(args: impl IntoIterator<Item = OsString>) -> Option<PathBuf
 
 /// Same as `parse_os_args` for the already-lossy forwarded args
 /// (`Vec<String>`) the single-instance plugin hands to its callback.
-/// Used from step 3's second-instance callback.
-#[allow(dead_code)]
 pub fn parse_forwarded_args(args: &[String]) -> Option<PathBuf> {
     let raw = args.get(1)?;
     if raw.is_empty() {

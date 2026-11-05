@@ -1071,6 +1071,30 @@ impl AgentManager {
             .unwrap_or_default()
     }
 
+    /// Open a CLI path in a window: focus the owner when the repo is already
+    /// open, else open a new window with the pending path. Insert-before-build
+    /// keeps the handoff race-free: the new window's mount effect pops the
+    /// pending path and opens it directly. A check-then-open race falls
+    /// through to the `AlreadyOpen` path in `open_repo` unchanged.
+    pub fn open_path_in_window(&self, repo_root: PathBuf) -> Result<String, String> {
+        let canonical = crate::repo::canonical_repo_path(&repo_root.to_string_lossy());
+        let owner = lock_backend(&self.state).and_then(|backend| backend.owner_of("", &canonical));
+        if let Some(owner) = owner {
+            log::info!("open_path_in_window already open in {owner} path={canonical}");
+            crate::windows::focus_window(&self.app, &owner)?;
+            return Ok(owner);
+        }
+        let existing: Vec<String> = tauri::Manager::webview_windows(&self.app)
+            .keys()
+            .cloned()
+            .collect();
+        let label = crate::windows::allocate_window_label(&existing);
+        crate::cli::insert_pending(&label, PathBuf::from(&canonical));
+        log::info!("open_path_in_window new window={label} path={canonical}");
+        crate::windows::create_window_with_label(&self.app, &label)?;
+        Ok(label)
+    }
+
     /// Drop one window's state, killing its live sessions. Broadcasts the
     /// refreshed owned-repos list when the window existed.
     pub fn remove_window(&self, window: &str) {

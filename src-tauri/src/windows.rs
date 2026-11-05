@@ -29,6 +29,12 @@ pub(crate) fn allocate_window_label(existing: &[String]) -> String {
 pub(crate) fn create_window(app: &AppHandle) -> Result<String, String> {
     let existing: Vec<String> = app.webview_windows().keys().cloned().collect();
     let label = allocate_window_label(&existing);
+    create_window_with_label(app, &label)
+}
+
+/// Build a window with a pre-allocated label. The caller inserts any pending
+/// CLI path beforehand so the new window's mount effect opens it race-free.
+pub(crate) fn create_window_with_label(app: &AppHandle, label: &str) -> Result<String, String> {
     let mut config = app
         .config()
         .app
@@ -36,7 +42,7 @@ pub(crate) fn create_window(app: &AppHandle) -> Result<String, String> {
         .first()
         .cloned()
         .ok_or_else(|| "no window config".to_string())?;
-    config.label = label.clone();
+    config.label = label.to_string();
     WebviewWindowBuilder::from_config(app, &config)
         .map_err(|error| {
             log::warn!("failed to build window={label}: {error}");
@@ -48,7 +54,7 @@ pub(crate) fn create_window(app: &AppHandle) -> Result<String, String> {
             format!("failed to open window {label}: {error}")
         })?;
     log::info!("open window={label}");
-    Ok(label)
+    Ok(label.to_string())
 }
 
 /// Focus one window by label, unminimizing first. Used for the New Window

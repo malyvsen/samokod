@@ -454,8 +454,33 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            open_picker_window(app, "single-instance second launch");
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            let Some(raw) = cli::parse_forwarded_args(&args) else {
+                open_picker_window(app, "single-instance second launch");
+                return;
+            };
+            let resolved = cli::resolve_path(&raw, &PathBuf::from(&cwd));
+            match crate::repo::validate_repo(&resolved) {
+                Ok(info) => {
+                    let root = PathBuf::from(info.root);
+                    let handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let Some(manager) = handle.try_state::<AgentManager>() else {
+                            log::warn!("second-instance path with no manager");
+                            return;
+                        };
+                        if let Err(error) = manager.open_path_in_window(root) {
+                            log::warn!("second-instance open failed: {error}");
+                        }
+                    });
+                }
+                Err(error) => {
+                    log::warn!(
+                        "second-instance ignoring invalid path {}: {error}",
+                        resolved.display()
+                    );
+                }
+            }
         }))
         .setup(|app| {
             app.manage(AgentManager::new(app.handle().clone()));
