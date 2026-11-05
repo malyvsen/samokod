@@ -13,7 +13,8 @@ pub const MAX_FILES: usize = 20;
 impl AgentManager {
     /// Save one base64 image for a session's plan, materializing a pending
     /// scoping directory first. The pending entry stays until `send_prompt`
-    /// clears it. Returns the absolute file path.
+    /// clears it. Returns the path relative to the repo root, falling back
+    /// to absolute only when relativization fails.
     pub fn save_attachment(
         &self,
         window: &str,
@@ -28,7 +29,21 @@ impl AgentManager {
         let materialize =
             session.role == SessionRole::Scoping && self.is_pending_scoping(window, &session.plan);
         let path = save_plan_attachment(&repo_root, &session.plan, materialize, &data_base64)?;
-        Ok(path.to_string_lossy().to_string())
+        Ok(repo_relative(&repo_root, &path))
+    }
+}
+
+/// Path of an attachment relative to the repo root with forward slashes,
+/// falling back to absolute when outside the repo (e.g. symlinked `/tmp`
+/// vs `/private/tmp`). Pure.
+pub(crate) fn repo_relative(repo_root: &Path, absolute: &Path) -> String {
+    match absolute.strip_prefix(repo_root) {
+        Ok(relative) => relative
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/"),
+        Err(_) => absolute.to_string_lossy().to_string(),
     }
 }
 
@@ -222,5 +237,42 @@ mod tests {
         crate::plans::materialize_scoping(dir.path(), name).expect("materialize");
         let failed = save_plan_attachment(dir.path(), name, false, "!!!not-base64!!!");
         assert!(matches!(failed, Err(AgentError::RequestFailed { .. })));
+    }
+
+    #[test]
+    fn relativizes_nested_plan_dir() {
+        let repo = tempfile::tempdir().expect("tempdir");
+        let absolute = repo
+            .path()
+            .join(".samokod")
+            .join("plans")
+            .join("scoping")
+            .join("name")
+            .join(ATTACHMENTS_DIR)
+            .join("image-1-0.png");
+        assert_eq!(
+            repo_relative(repo.path(), &absolute),
+            ".samokod/plans/scoping/name/attachments/image-1-0.png"
+        );
+    }
+
+    #[test]
+    fn falls_back_outside_repo() {
+        let repo = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("tempdir");
+        let absolute = outside.path().join("image-1-0.png");
+        assert_eq!(
+            repo_relative(repo.path(), &absolute),
+            absolute.to_string_lossy().to_string()
+        );
+    }
+
+    #[test]
+    fn normalizes_to_forward_slashes() {
+        let repo = Path::new("/repo");
+        let absolute = repo.join("a").join("b").join("c.png");
+        let relative = repo_relative(repo, &absolute);
+        assert_eq!(relative, "a/b/c.png");
+        assert!(!relative.contains('\\'));
     }
 }
