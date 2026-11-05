@@ -321,6 +321,7 @@ function WorkBox({
 						<ThoughtRow
 							key={item.id}
 							ms={item.ms}
+							text={item.text}
 							{...(item.at === undefined ? {} : { at: item.at })}
 						/>
 					) : (
@@ -343,12 +344,31 @@ function formatClock(at: number): string {
 	return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-function ThoughtRow({ ms, at }: { ms: number; at?: number }) {
+function ThoughtRow({
+	ms,
+	text,
+	at,
+}: {
+	ms: number;
+	text: string;
+	at?: number;
+}) {
+	const [open, setOpen] = useState(false);
 	return (
-		<div className="arow thought">
-			{at !== undefined && <span className="ts">{formatClock(at)} </span>}
-			{`thinking: ${thinkingSeconds(ms)}s`}
-		</div>
+		<>
+			<button
+				className="arow thought"
+				type="button"
+				title={open ? "Hide full thought" : "Show full thought"}
+				onClick={() => setOpen((was) => !was)}
+			>
+				{at !== undefined && <span className="ts">{formatClock(at)} </span>}
+				{`thinking: ${thinkingSeconds(ms)}s`}
+			</button>
+			<div className="thinkfull" hidden={!open}>
+				{text}
+			</div>
+		</>
 	);
 }
 
@@ -560,6 +580,7 @@ function ErrorBar({
 }
 
 function ToolRow({ line, at }: { line: ToolLineView; at?: number }) {
+	const [open, setOpen] = useState(false);
 	const status: ToolStatus = line.status;
 	switch (status) {
 		case "pending":
@@ -571,9 +592,16 @@ function ToolRow({ line, at }: { line: ToolLineView; at?: number }) {
 			assertNever(status);
 	}
 	return (
-		<div className="tool" data-status={line.status} data-full={line.text}>
+		<button
+			className={open ? "tool open" : "tool"}
+			data-status={line.status}
+			data-full={line.text}
+			type="button"
+			title={open ? "Collapse" : "Show full command"}
+			onClick={() => setOpen((was) => !was)}
+		>
 			{at !== undefined && <span className="ts">{formatClock(at)} </span>}
 			{line.text}
-		</div>
+		</button>
 	);
 }

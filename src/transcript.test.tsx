@@ -738,6 +738,118 @@ describe("transcript grouping", () => {
 	});
 });
 
+describe("transcript row expansion", () => {
+	test("think rows toggle full text with titles", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{
+						kind: "thought",
+						id: "t1",
+						ms: 2000,
+						text: "first line\nsecond line",
+						at: 1000,
+					},
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		fireEvent.click(screen.getByTitle("Expand"));
+		const thinkButton = screen.getByTitle("Show full thought");
+		expect(thinkButton.textContent).toContain("thinking: 2s");
+		const full = container.querySelector(".thinkfull");
+		expect(full?.getAttribute("hidden")).not.toBeNull();
+		fireEvent.click(thinkButton);
+		expect(screen.getByTitle("Hide full thought")).toBeInTheDocument();
+		expect(
+			container.querySelector(".thinkfull")?.getAttribute("hidden"),
+		).toBeNull();
+		expect(container.querySelector(".thinkfull")?.textContent).toContain(
+			"first line",
+		);
+		fireEvent.click(screen.getByTitle("Hide full thought"));
+		expect(screen.getByTitle("Show full thought")).toBeInTheDocument();
+	});
+
+	test("tool rows toggle unwrap with titles", () => {
+		const longCommand =
+			"bash: git log --oneline --decorate --all -30 -- src/components/Transcript.tsx";
+		const { container } = render(
+			<Transcript
+				items={[
+					{
+						kind: "tool",
+						id: "t1",
+						line: {
+							id: "l1",
+							text: longCommand,
+							status: "completed",
+							label: "bash",
+						},
+						at: 1000,
+					},
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		fireEvent.click(screen.getByTitle("Expand"));
+		const toolButton = screen.getByTitle("Show full command");
+		expect(toolButton.textContent).toContain(longCommand);
+		expect(toolButton.classList.contains("open")).toBe(false);
+		fireEvent.click(toolButton);
+		expect(toolButton.getAttribute("title")).toBe("Collapse");
+		expect(container.querySelector(".tool.open")).not.toBeNull();
+		fireEvent.click(toolButton);
+		expect(toolButton.getAttribute("title")).toBe("Show full command");
+	});
+
+	test("box expand keeps working alongside row toggles", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{
+						kind: "thought",
+						id: "t1",
+						ms: 2000,
+						text: "full thought",
+						at: 1000,
+					},
+					{
+						kind: "tool",
+						id: "t2",
+						line: {
+							id: "l2",
+							text: "read: a",
+							status: "completed",
+							label: "read",
+						},
+						at: 2000,
+					},
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		const boxToggle = screen.getByTitle("Expand");
+		fireEvent.click(boxToggle);
+		expect(screen.getByTitle("Show full thought")).toBeInTheDocument();
+		fireEvent.click(screen.getByTitle("Show full thought"));
+		expect(screen.getByTitle("Hide full thought")).toBeInTheDocument();
+		fireEvent.click(screen.getByTitle("Collapse"));
+		expect(
+			container.querySelector(".work .summary")?.getAttribute("aria-expanded"),
+		).toBe("false");
+	});
+});
+
 describe("transcript tool lines", () => {
 	test("renders tool line text as-is", () => {
 		render(

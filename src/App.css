@@ -613,7 +613,7 @@ button.brand:hover {
 
 .tool {
 	position: relative;
-	font-size: 13px;
+	font: inherit;
 	color: #9d9a92;
 	padding-left: 4px;
 	align-self: flex-start;
@@ -622,6 +622,16 @@ button.brand:hover {
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	background: none;
+	border: 0;
+	cursor: pointer;
+	text-align: left;
+	display: block;
+}
+
+.tool.open {
+	white-space: normal;
+	overflow: visible;
 }
 
 .tool::before {
@@ -650,9 +660,37 @@ button.brand:hover {
 	width: 100%;
 }
 
+button.arow {
+	display: block;
+	background: none;
+	border: 0;
+	font: inherit;
+	cursor: pointer;
+	text-align: left;
+	padding-top: 0;
+	padding-bottom: 0;
+	padding-right: 0;
+}
+
 .arow.waiting,
 .arow.thought {
 	color: #8f8c85;
+}
+
+.thinkfull {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-size: 12.5px;
+	line-height: 1.5;
+	color: #d8d5cf;
+	background: rgba(0, 0, 0, 0.35);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	padding: 8px 10px;
+	margin-left: 18px;
+}
+
+.thinkfull[hidden] {
+	display: none;
 }
 
 .arow.waiting::before,
