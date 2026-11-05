@@ -269,7 +269,12 @@ describe("replayed updates", () => {
 		chats = applySessionEvent(chats, {
 			type: "tool_line",
 			session: testKey(),
-			line: { id: "t1", text: "edit file.md", status: "completed" },
+			line: {
+				id: "t1",
+				text: "edit file.md",
+				status: "completed",
+				label: "edit",
+			},
 		});
 		const chat = chatOf(chats);
 		expect(chat.transcript).toHaveLength(2);
@@ -394,7 +399,12 @@ describe("thought bursts", () => {
 			{
 				type: "tool_line",
 				session: testKey(),
-				line: { id: "t1", text: "edit file.md", status: "in_progress" },
+				line: {
+					id: "t1",
+					text: "edit file.md",
+					status: "in_progress",
+					label: "edit",
+				},
 			},
 			2000,
 		);

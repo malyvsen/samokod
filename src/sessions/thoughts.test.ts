@@ -115,14 +115,14 @@ describe("hasRunningTools", () => {
 			{
 				kind: "tool",
 				id: "t1",
-				line: { id: "l1", text: "edit", status: "pending" },
+				line: { id: "l1", text: "edit", status: "pending", label: "edit" },
 			},
 		];
 		const running: TranscriptItem[] = [
 			{
 				kind: "tool",
 				id: "t1",
-				line: { id: "l1", text: "edit", status: "in_progress" },
+				line: { id: "l1", text: "edit", status: "in_progress", label: "edit" },
 			},
 		];
 		expect(hasRunningTools(pending)).toBe(true);
@@ -134,7 +134,7 @@ describe("hasRunningTools", () => {
 			{
 				kind: "tool",
 				id: "t1",
-				line: { id: "l1", text: "edit", status: "completed" },
+				line: { id: "l1", text: "edit", status: "completed", label: "edit" },
 			},
 			{ kind: "agent", id: "a1", text: "done" },
 		];
@@ -146,7 +146,7 @@ describe("hasRunningTools", () => {
 			{
 				kind: "tool",
 				id: "t1",
-				line: { id: "l1", text: "edit", status: "failed" },
+				line: { id: "l1", text: "edit", status: "failed", label: "edit" },
 			},
 		];
 		expect(hasRunningTools(transcript)).toBe(false);
@@ -196,7 +196,12 @@ describe("useThoughtTimers waiting gate", () => {
 				{
 					kind: "tool",
 					id: "t1",
-					line: { id: "l1", text: "edit", status: "in_progress" },
+					line: {
+						id: "l1",
+						text: "edit",
+						status: "in_progress",
+						label: "edit",
+					},
 				},
 			],
 		};

@@ -71,7 +71,12 @@ describe("transcript scroll wiring", () => {
 		emitAppEvent(api, {
 			type: "tool_line",
 			session: testKey(),
-			line: { id: "t1", text: "edit file.md", status: "completed" },
+			line: {
+				id: "t1",
+				text: "edit file.md",
+				status: "completed",
+				label: "edit",
+			},
 		});
 		expect(node.scrollTop).toBe(1000);
 	});
@@ -90,7 +95,12 @@ describe("transcript scroll wiring", () => {
 		emitAppEvent(api, {
 			type: "tool_line",
 			session: testKey(),
-			line: { id: "t1", text: "edit file.md", status: "completed" },
+			line: {
+				id: "t1",
+				text: "edit file.md",
+				status: "completed",
+				label: "edit",
+			},
 		});
 		expect(node.scrollTop).toBe(0);
 	});

@@ -91,6 +91,7 @@ pub fn with_update(existing: Option<ToolCall>, update: &ToolCallUpdate) -> ToolC
 /// label; ongoing statuses append ` …`. Pure.
 pub fn format_tool_line(call: &ToolCall) -> ToolLineView {
     let status = to_tool_status(call.status);
+    let label = tool_label(call.name.as_deref(), Some(call.kind));
     ToolLineView {
         id: call.tool_call_id.to_string(),
         text: line_text(
@@ -101,6 +102,7 @@ pub fn format_tool_line(call: &ToolCall) -> ToolLineView {
             status,
         ),
         status,
+        label,
     }
 }
 

@@ -109,6 +109,7 @@ pub struct ToolLineView {
     pub id: String,
     pub text: String,
     pub status: ToolStatus,
+    pub label: String,
 }
 
 /// One one-shot permission option (`allow` or `reject`). `always` variants

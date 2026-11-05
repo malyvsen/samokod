@@ -468,6 +468,7 @@ export type ToolLineView = {
 	id: string,
 	text: string,
 	status: ToolStatus,
+	label: string,
 };
 
 /**

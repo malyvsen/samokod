@@ -446,7 +446,12 @@ describe("transcript tool lines", () => {
 					{
 						kind: "tool",
 						id: "t1",
-						line: { id: "t1", text: "edit: edit file.md", status: "completed" },
+						line: {
+							id: "t1",
+							text: "edit: edit file.md",
+							status: "completed",
+							label: "edit",
+						},
 					},
 				]}
 				start={IDLE}
@@ -470,6 +475,7 @@ describe("transcript tool lines", () => {
 							id: "t1",
 							text: "write: /var/tool-demo.txt",
 							status: "failed",
+							label: "write",
 						},
 					},
 				]}
