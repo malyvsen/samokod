@@ -1,21 +1,18 @@
-import { useEffect } from "react";
-import type { SessionKey } from "../bindings";
 import type { TranscriptItem } from "../types";
-import type { ChatState } from "./store";
 
-export type LiveStatus =
-	| { kind: "waiting" }
-	| { kind: "thinking"; burstStart: number; updatedAt: number; text: string };
-
-export const BURST_SILENCE_MS = 3000;
-export const WAITING_DELAY_MS = 2000;
+export type LiveStatus = {
+	kind: "thinking";
+	burstStart: number;
+	updatedAt: number;
+	text: string;
+};
 
 export function liveForThought(
 	live: LiveStatus | null,
 	now: number,
 	chunk = "",
 ): LiveStatus {
-	if (live?.kind === "thinking") {
+	if (live !== null) {
 		return {
 			kind: "thinking",
 			burstStart: live.burstStart,
@@ -31,7 +28,7 @@ export function freezeBurst(
 	live: LiveStatus | null,
 	now: number = Date.now(),
 ): TranscriptItem[] {
-	if (live?.kind !== "thinking") return transcript;
+	if (live === null) return transcript;
 	return [
 		...transcript,
 		{
@@ -44,95 +41,10 @@ export function freezeBurst(
 	];
 }
 
-export function liveThinkingMs(live: LiveStatus | null): number | null {
-	if (live?.kind !== "thinking") return null;
-	return burstMs(live.burstStart, live.updatedAt);
-}
-
 export function thinkingSeconds(totalMs: number): number {
 	return Math.max(1, Math.round(totalMs / 1000));
 }
 
 function burstMs(burstStart: number, updatedAt: number): number {
 	return Math.max(0, updatedAt - burstStart);
-}
-
-export function hasRunningTools(transcript: TranscriptItem[]): boolean {
-	return transcript.some(
-		(item) =>
-			item.kind === "tool" &&
-			(item.line.status === "pending" || item.line.status === "in_progress"),
-	);
-}
-
-export function useThoughtTimers(
-	selectedKey: SessionKey | null,
-	chat: ChatState | null,
-	updateChat: (key: SessionKey, next: (chat: ChatState) => ChatState) => void,
-): void {
-	const live = chat?.live ?? null;
-	const working = chat?.working ?? false;
-	const transcript = chat?.transcript;
-	const approval = chat?.approval ?? false;
-	// biome-ignore lint/correctness/useExhaustiveDependencies: transcript and approval re-arm the quiet gap; values come from current inside the timeout.
-	useEffect(() => {
-		if (selectedKey === null) return;
-		const key = selectedKey;
-		if (live !== null && !working) {
-			updateChat(key, (current) => {
-				if (current.live === null) return current;
-				return {
-					...current,
-					transcript: freezeBurst(current.transcript, current.live),
-					live: null,
-				};
-			});
-			return;
-		}
-		if (live !== null && live.kind === "thinking") {
-			const updatedAt = live.updatedAt;
-			const timer = setTimeout(() => {
-				const now = Date.now();
-				updateChat(key, (current) => {
-					const currentLive = current.live;
-					if (
-						currentLive === null ||
-						currentLive.kind !== "thinking" ||
-						currentLive.updatedAt !== updatedAt
-					) {
-						return current;
-					}
-					if (now - updatedAt < BURST_SILENCE_MS) return current;
-					const nextTranscript = freezeBurst(current.transcript, currentLive);
-					const waiting =
-						current.working &&
-						!current.approval &&
-						!hasRunningTools(current.transcript);
-					return {
-						...current,
-						transcript: nextTranscript,
-						live: waiting ? { kind: "waiting" } : null,
-					};
-				});
-			}, BURST_SILENCE_MS);
-			return () => {
-				clearTimeout(timer);
-			};
-		}
-		if (live === null && working) {
-			const timer = setTimeout(() => {
-				updateChat(key, (current) => {
-					if (current.live !== null || !current.working) return current;
-					if (current.approval || hasRunningTools(current.transcript)) {
-						return current;
-					}
-					return { ...current, live: { kind: "waiting" } };
-				});
-			}, WAITING_DELAY_MS);
-			return () => {
-				clearTimeout(timer);
-			};
-		}
-		return;
-	}, [selectedKey, live, working, transcript, approval, updateChat]);
 }

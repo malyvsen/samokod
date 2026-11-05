@@ -7,7 +7,6 @@ import type {
 	ToolStatus,
 } from "../bindings";
 import type { SessionStart } from "../sessions/store";
-import type { LiveStatus } from "../sessions/thoughts";
 import { thinkingSeconds } from "../sessions/thoughts";
 import type { TranscriptItem } from "../types";
 import {
@@ -26,7 +25,6 @@ export function Transcript({
 	onRetry,
 	onAnswer,
 	onHistoryRetry = null,
-	live = null,
 	working = false,
 	onStop = null,
 	children,
@@ -38,13 +36,10 @@ export function Transcript({
 	onRetry: (() => void) | null;
 	onAnswer: (toolCallId: string, optionId: string) => void;
 	onHistoryRetry?: (() => void) | null;
-	live?: LiveStatus | null;
 	working?: boolean;
 	onStop?: (() => void) | null;
 	children?: ReactNode;
 }) {
-	const _live = live;
-	void _live;
 	const showLead =
 		lead !== null &&
 		!items.some((item) => item.kind === "user" && item.text === lead);

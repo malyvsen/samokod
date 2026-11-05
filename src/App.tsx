@@ -832,7 +832,6 @@ export function App() {
 									repoLabel={repoLabel}
 									onRetry={readOnly ? null : handleRetry}
 									onAnswer={handleAnswer}
-									live={chat?.live ?? null}
 									working={chat?.working ?? false}
 									onStop={readOnly ? null : handleStop}
 									onHistoryRetry={

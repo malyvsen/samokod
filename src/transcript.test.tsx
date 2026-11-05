@@ -992,8 +992,8 @@ describe("transcript width", () => {
 		const css = readFileSync("src/App.css", "utf8");
 		const msgRule = /\.msg\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 		expect(msgRule).toMatch(/max-width:\s*min\(880px,\s*100%\)/);
-		const approvalRule = /\.approval\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
-		expect(approvalRule).toMatch(/max-width:\s*min\(880px,\s*100%\)/);
+		const workRule = /\.work\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+		expect(workRule).toContain("width: 100%");
 	});
 
 	test("transcript centering stays overflow-safe", () => {
