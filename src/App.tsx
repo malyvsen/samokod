@@ -398,30 +398,33 @@ export function App() {
 		};
 	}, []);
 
-	async function handleOpenPath(path: string) {
-		setPickerError(null);
-		let attempted = path;
-		try {
-			const info = await validateRepo(path);
-			attempted = info.root;
-			const opened = await openRepo(info.root);
-			setRepoRoot(opened.repo_root);
-			setBranch(opened.branch);
-			applyChats(() => ({}));
-			applyPlans(opened);
-			setView({ kind: "chat" });
+	const handleOpenPath = useCallback(
+		async (path: string) => {
 			setPickerError(null);
-			setRecent((await getPrefs()).recent ?? []);
-		} catch (error) {
-			if (isAlreadyOpenError(error)) {
-				setPickerError(
-					`${attempted} is already open - switched to that window`,
-				);
-				return;
+			let attempted = path;
+			try {
+				const info = await validateRepo(path);
+				attempted = info.root;
+				const opened = await openRepo(info.root);
+				setRepoRoot(opened.repo_root);
+				setBranch(opened.branch);
+				applyChats(() => ({}));
+				applyPlans(opened);
+				setView({ kind: "chat" });
+				setPickerError(null);
+				setRecent((await getPrefs()).recent ?? []);
+			} catch (error) {
+				if (isAlreadyOpenError(error)) {
+					setPickerError(
+						`${attempted} is already open - switched to that window`,
+					);
+					return;
+				}
+				setPickerError(error instanceof Error ? error.message : String(error));
 			}
-			setPickerError(error instanceof Error ? error.message : String(error));
-		}
-	}
+		},
+		[applyChats, applyPlans],
+	);
 	async function handleBrowse() {
 		setPickerError(null);
 		const picked = await open({ directory: true, multiple: false });
@@ -429,25 +432,22 @@ export function App() {
 		await handleOpenPath(picked);
 	}
 
-	const handleOpenPathRef = useRef(handleOpenPath);
-	handleOpenPathRef.current = handleOpenPath;
+	// CLI launch: the backend staged `samokod <path>` for this window before
+	// it was built. Claimed once across StrictMode remounts; the pop is
+	// destructive, so the result is never dropped on cleanup.
 	const pendingClaimed = useRef(false);
 	useEffect(() => {
 		if (pendingClaimed.current) return;
 		pendingClaimed.current = true;
-		let cancelled = false;
 		takePendingRepo()
 			.then((pending) => {
-				if (cancelled || pending === null) return;
-				void handleOpenPathRef.current(pending);
+				if (pending === null) return;
+				void handleOpenPath(pending);
 			})
 			.catch((error: unknown) => {
 				console.warn("failed to take pending repo", error);
 			});
-		return () => {
-			cancelled = true;
-		};
-	}, []);
+	}, [handleOpenPath]);
 
 	function appendError(
 		key: SessionKey,

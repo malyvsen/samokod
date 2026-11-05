@@ -5,7 +5,7 @@ import { App } from "./App";
 import type { RecentRepo } from "./bindings";
 import { RepoPicker } from "./components/RepoPicker";
 import { testDefaults, testEntry, testKey } from "./fixtures";
-import { api, dialog, stubMatchMedia } from "./testHarness";
+import { api, dialog, stubAppDefaults, stubMatchMedia } from "./testHarness";
 
 vi.mock("./api", async () => {
 	const { api } = await import("./testHarness");
@@ -88,18 +88,14 @@ describe("picker already-open conflict", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		stubMatchMedia();
+		stubAppDefaults();
 		api.getPrefs.mockResolvedValue({
 			recent: [{ path: "/repo-taken" }, { path: "/repo-free" }],
 		});
-		api.validateRepo.mockImplementation(async (path: string) => ({
-			root: path,
-			branch: "main",
-		}));
 		api.listOpenRepos.mockResolvedValue([
 			{ path: "/repo-taken", window: "window-1" },
 		]);
 		api.openRepo.mockRejectedValue(new Error("already open: /repo-taken"));
-		api.takePendingRepo.mockResolvedValue(null);
 		dialog.open.mockResolvedValue("/repo-taken");
 	});
 
@@ -115,23 +111,14 @@ describe("picker already-open conflict", () => {
 	});
 });
 
-describe("cli pending path", () => {
+describe("cli launch", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		stubMatchMedia();
-		api.getPrefs.mockResolvedValue({ recent: [] });
-		api.listOpenRepos.mockResolvedValue([]);
-		api.validateRepo.mockImplementation(async (path: string) => ({
-			root: path,
-			branch: "main",
-		}));
-		api.takePendingRepo.mockResolvedValue(null);
-		api.warmSession.mockResolvedValue(undefined);
-		api.loadHistory.mockResolvedValue(undefined);
-		api.planMdText.mockResolvedValue(null);
+		stubAppDefaults();
 	});
 
-	test("no pending path stays on the picker", async () => {
+	test("bare launch stays on the picker", async () => {
 		render(<App />);
 		expect(
 			await screen.findByRole("button", { name: "browse…" }),
@@ -140,7 +127,7 @@ describe("cli pending path", () => {
 		expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 	});
 
-	test("pending path opens directly in chat", async () => {
+	test("launch with a path opens it directly in chat", async () => {
 		api.takePendingRepo.mockResolvedValue("/repo-cli");
 		api.openRepo.mockResolvedValue({
 			repo_root: "/repo-cli",

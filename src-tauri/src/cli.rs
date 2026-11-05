@@ -1,61 +1,63 @@
-// CLI path handoff: parse `samokod <path>`, resolve it against the
-// invoking cwd, and fail fast before Tauri starts.
+// CLI launch path: `samokod <path>` opens the repo directly in a window.
+// The validated root is staged before the window is built, so the new
+// window's mount claim cannot race the frontend load.
 use std::collections::HashMap;
-use std::ffi::OsString;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-/// Pending repo roots by window label. `run` inserts the validated CLI root
-/// under `main` before the builder starts, so the insert strictly precedes
-/// any frontend load and the handoff is race-free.
-static PENDING: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
-
-fn pending_map() -> &'static Mutex<HashMap<String, PathBuf>> {
-    PENDING.get_or_init(|| Mutex::new(HashMap::new()))
+/// Repo roots staged for window labels, each claimed once on mount.
+#[derive(Debug, Default)]
+pub struct PendingRepos {
+    inner: Mutex<HashMap<String, PathBuf>>,
 }
 
-/// Remember a validated root for one window label. Insert-before-build keeps
-/// the handoff race-free.
+impl PendingRepos {
+    /// Stage a validated root for a window label.
+    pub fn insert(&self, label: &str, root: PathBuf) {
+        if let Ok(mut pending) = self.inner.lock() {
+            pending.insert(label.to_string(), root);
+        }
+    }
+
+    /// Claim the staged root for a window label, if any.
+    pub fn take(&self, label: &str) -> Option<PathBuf> {
+        self.inner.lock().ok()?.remove(label)
+    }
+}
+
+static PENDING: OnceLock<PendingRepos> = OnceLock::new();
+
+fn pending() -> &'static PendingRepos {
+    PENDING.get_or_init(PendingRepos::default)
+}
+
+/// Stage a validated root for a window label.
 pub fn insert_pending(label: &str, root: PathBuf) {
-    let Some(mut pending) = pending_map().lock().ok() else {
-        return;
-    };
-    pending.insert(label.to_string(), root);
+    pending().insert(label, root);
 }
 
-/// Pop the pending root for the caller's window label, if any.
+/// Claim the staged root for the caller's window label, if any.
 pub fn take_pending(label: &str) -> Option<PathBuf> {
-    let mut pending = pending_map().lock().ok()?;
-    pending.remove(label)
+    pending().take(label)
 }
 
-/// Remember the validated root for the first window. Runs before the Tauri
-/// builder starts, so the insert strictly precedes any frontend load.
-pub fn remember_initial_root(root: PathBuf) {
-    insert_pending("main", root);
-}
-
-/// First positional after `argv[0]`, lossy like the single-instance plugin
-/// itself. `None` when absent (or empty); everything after it is ignored.
-pub fn parse_os_args(args: impl IntoIterator<Item = OsString>) -> Option<PathBuf> {
+/// First positional after `argv[0]`. `None` when absent or empty; everything
+/// after it is ignored. Generic over `OsString` (local process) and `String`
+/// (already-lossy args forwarded by the single-instance plugin).
+pub fn first_positional<I, S>(args: I) -> Option<PathBuf>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     let mut iter = args.into_iter();
     iter.next()?;
     let raw = iter.next()?;
-    let text = raw.to_string_lossy();
+    let text = raw.as_ref().to_string_lossy();
     if text.is_empty() {
         return None;
     }
     Some(PathBuf::from(text.into_owned()))
-}
-
-/// Same as `parse_os_args` for the already-lossy forwarded args
-/// (`Vec<String>`) the single-instance plugin hands to its callback.
-pub fn parse_forwarded_args(args: &[String]) -> Option<PathBuf> {
-    let raw = args.get(1)?;
-    if raw.is_empty() {
-        return None;
-    }
-    Some(PathBuf::from(raw))
 }
 
 /// Join a relative CLI path onto the invoking cwd; absolute paths pass
@@ -79,32 +81,38 @@ pub fn resolve_and_validate(raw: &Path, cwd: &Path) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn args_os(args: &[&str]) -> Vec<OsString> {
-        args.iter().map(OsString::from).collect()
-    }
+    use std::ffi::OsString;
 
     #[test]
     fn parses_first_positional_only() {
-        assert_eq!(parse_os_args(args_os(&["samokod"])), None);
+        let args: Vec<OsString> = vec![];
+        assert_eq!(first_positional(args), None);
+        assert_eq!(first_positional(vec![OsString::from("samokod")]), None);
         assert_eq!(
-            parse_os_args(args_os(&["samokod", "/repo"])),
+            first_positional(vec![OsString::from("samokod"), OsString::from("/repo")]),
             Some(PathBuf::from("/repo"))
         );
         assert_eq!(
-            parse_os_args(args_os(&["samokod", "/a", "/b"])),
+            first_positional(vec![
+                OsString::from("samokod"),
+                OsString::from("/a"),
+                OsString::from("/b"),
+            ]),
             Some(PathBuf::from("/a"))
         );
-        assert_eq!(parse_os_args(args_os(&["samokod", ""])), None);
+        assert_eq!(
+            first_positional(vec![OsString::from("samokod"), OsString::from("")]),
+            None
+        );
     }
 
     #[test]
-    fn parses_forwarded_args_like_plugin() {
-        let args = vec!["samokod".to_string(), "/repo".to_string()];
-        assert_eq!(parse_forwarded_args(&args), Some(PathBuf::from("/repo")));
-        assert_eq!(parse_forwarded_args(&["samokod".to_string()]), None);
+    fn parses_forwarded_string_args() {
+        let args = ["samokod".to_string(), "/repo".to_string()];
+        assert_eq!(first_positional(args.iter()), Some(PathBuf::from("/repo")));
+        assert_eq!(first_positional(["samokod".to_string()].iter()), None);
         assert_eq!(
-            parse_forwarded_args(&["samokod".to_string(), String::new()]),
+            first_positional(["samokod".to_string(), String::new()].iter()),
             None
         );
     }
@@ -123,21 +131,22 @@ mod tests {
         );
     }
 
-    #[test]
-    fn validates_subdirectory_to_root() {
-        let dir = tempfile::tempdir().expect("tempdir");
+    fn init_repo(path: &Path) {
         for args in [
             vec!["init"],
             vec!["config", "user.email", "test@example.com"],
             vec!["config", "user.name", "test"],
             vec!["commit", "--allow-empty", "-m", "init"],
         ] {
-            let status = crate::git::command(dir.path())
-                .args(&args)
-                .output()
-                .expect("git");
+            let status = crate::git::command(path).args(&args).output().expect("git");
             assert!(status.status.success(), "{args:?}");
         }
+    }
+
+    #[test]
+    fn validates_subdirectory_to_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        init_repo(dir.path());
         let sub = dir.path().join("sub");
         std::fs::create_dir(&sub).expect("mkdir sub");
         let root =
@@ -161,33 +170,13 @@ mod tests {
     }
 
     #[test]
-    fn pending_pops_once_per_window() {
-        let suffix = rand_suffix();
-        let label = format!("test-main-{suffix}");
-        let other = format!("test-other-{suffix}");
-        assert_eq!(take_pending(&label), None);
-        insert_pending(&label, PathBuf::from("/repo-a"));
-        insert_pending(&other, PathBuf::from("/repo-b"));
-        assert_eq!(take_pending(&label), Some(PathBuf::from("/repo-a")));
-        assert_eq!(take_pending(&label), None);
-        assert_eq!(take_pending(&other), Some(PathBuf::from("/repo-b")));
-    }
-
-    #[test]
-    fn initial_root_targets_main() {
-        let label = "main";
-        let _ = take_pending(label);
-        remember_initial_root(PathBuf::from("/repo-main"));
-        assert_eq!(take_pending(label), Some(PathBuf::from("/repo-main")));
-        assert_eq!(take_pending(label), None);
-    }
-
-    fn rand_suffix() -> String {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
-        format!("{}-{}", std::process::id(), nanos)
+    fn pending_claims_once_per_window() {
+        let pending = PendingRepos::default();
+        assert_eq!(pending.take("a"), None);
+        pending.insert("a", PathBuf::from("/repo-a"));
+        pending.insert("b", PathBuf::from("/repo-b"));
+        assert_eq!(pending.take("a"), Some(PathBuf::from("/repo-a")));
+        assert_eq!(pending.take("a"), None);
+        assert_eq!(pending.take("b"), Some(PathBuf::from("/repo-b")));
     }
 }

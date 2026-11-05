@@ -181,12 +181,13 @@ impl BackendState {
         existed
     }
 
-    /// Owner of a canonical repo path excluding the caller. Reads the
-    /// filesystem: every stored root is canonicalized for comparison so
-    /// symlinks and trailing slashes cannot bypass the single-owner gate.
-    pub(crate) fn owner_of(&self, caller: &str, canonical: &str) -> Option<String> {
+    /// Owner of a canonical repo path, optionally excluding one window.
+    /// Reads the filesystem: every stored root is canonicalized for
+    /// comparison so symlinks and trailing slashes cannot bypass the
+    /// single-owner gate.
+    pub(crate) fn owner_of(&self, caller: Option<&str>, canonical: &str) -> Option<String> {
         for (label, window) in &self.windows {
-            if label == caller {
+            if Some(label.as_str()) == caller {
                 continue;
             }
             let Some(root) = window.repo_root.as_ref() else {
@@ -475,7 +476,7 @@ impl AgentManager {
             // same lock that guards window state, so concurrent opens cannot
             // both pass. Another live owner keeps the repo; the caller stays
             // on the picker while the owner focuses.
-            if let Some(owner) = backend.owner_of(window, &canonical) {
+            if let Some(owner) = backend.owner_of(Some(window), &canonical) {
                 log::info!("open_repo window={window} already open in {owner} path={canonical}");
                 drop(backend);
                 let _ = crate::windows::focus_window(&self.app, &owner);
@@ -1072,27 +1073,18 @@ impl AgentManager {
     }
 
     /// Open a CLI path in a window: focus the owner when the repo is already
-    /// open, else open a new window with the pending path. Insert-before-build
-    /// keeps the handoff race-free: the new window's mount effect pops the
-    /// pending path and opens it directly. A check-then-open race falls
-    /// through to the `AlreadyOpen` path in `open_repo` unchanged.
+    /// open, else open a new window staged with the path. A check-then-open
+    /// race falls through to the `AlreadyOpen` path in `open_repo` unchanged.
     pub fn open_path_in_window(&self, repo_root: PathBuf) -> Result<String, String> {
         let canonical = crate::repo::canonical_repo_path(&repo_root.to_string_lossy());
-        let owner = lock_backend(&self.state).and_then(|backend| backend.owner_of("", &canonical));
+        let owner =
+            lock_backend(&self.state).and_then(|backend| backend.owner_of(None, &canonical));
         if let Some(owner) = owner {
             log::info!("open_path_in_window already open in {owner} path={canonical}");
             crate::windows::focus_window(&self.app, &owner)?;
             return Ok(owner);
         }
-        let existing: Vec<String> = tauri::Manager::webview_windows(&self.app)
-            .keys()
-            .cloned()
-            .collect();
-        let label = crate::windows::allocate_window_label(&existing);
-        crate::cli::insert_pending(&label, PathBuf::from(&canonical));
-        log::info!("open_path_in_window new window={label} path={canonical}");
-        crate::windows::create_window_with_label(&self.app, &label)?;
-        Ok(label)
+        crate::windows::create_pending_window(&self.app, PathBuf::from(&canonical))
     }
 
     /// Drop one window's state, killing its live sessions. Broadcasts the
@@ -1774,14 +1766,14 @@ mod tests {
         let mut backend = BackendState::default();
         backend.ensure_window("window-1").repo_root = Some(PathBuf::from("/repo"));
         assert_eq!(
-            backend.owner_of("window-2", "/repo"),
+            backend.owner_of(Some("window-2"), "/repo"),
             Some("window-1".to_string())
         );
         // Same window never owns against itself.
-        assert_eq!(backend.owner_of("window-1", "/repo"), None);
+        assert_eq!(backend.owner_of(Some("window-1"), "/repo"), None);
         // Empty windows own nothing.
         assert_eq!(
-            backend.owner_of("window-3", "/repo"),
+            backend.owner_of(Some("window-3"), "/repo"),
             Some("window-1".to_string())
         );
     }
@@ -1791,10 +1783,10 @@ mod tests {
         let mut backend = BackendState::default();
         backend.ensure_window("window-1").repo_root = Some(PathBuf::from("/repo"));
         assert!(backend.remove_window("window-1"));
-        assert_eq!(backend.owner_of("window-2", "/repo"), None);
+        assert_eq!(backend.owner_of(Some("window-2"), "/repo"), None);
         backend.ensure_window("window-2").repo_root = Some(PathBuf::from("/repo"));
         assert_eq!(
-            backend.owner_of("window-1", "/repo"),
+            backend.owner_of(Some("window-1"), "/repo"),
             Some("window-2".to_string())
         );
     }
@@ -1805,7 +1797,7 @@ mod tests {
         backend.ensure_window("window-1").repo_root = Some(PathBuf::from("/repo"));
         let canonical = crate::repo::canonical_repo_path("/repo/");
         assert_eq!(
-            backend.owner_of("window-2", &canonical),
+            backend.owner_of(Some("window-2"), &canonical),
             Some("window-1".to_string())
         );
     }

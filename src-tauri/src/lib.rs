@@ -432,55 +432,60 @@ fn prefs_dir(app: &AppHandle) -> Result<PathBuf, String> {
     })
 }
 
+/// Validated repo root when invoked as `samokod <path>`. Exits 1 with a
+/// stderr diagnostic on failure before any window exists: the
+/// single-instance plugin would otherwise swallow the failure in the
+/// already-running process.
+fn cli_launch_root() -> Option<PathBuf> {
+    let raw = cli::first_positional(std::env::args_os())?;
+    let cwd = std::env::current_dir().unwrap_or_else(|error| {
+        eprintln!("samokod: cannot resolve path: {error}");
+        std::process::exit(1);
+    });
+    match cli::resolve_and_validate(&raw, &cwd) {
+        Ok(root) => Some(root),
+        Err(error) => {
+            eprintln!("samokod: {error}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Second-process launch: open the forwarded path in this process, or a
+/// fresh picker when no path was given. Invalid paths stay silent: the
+/// invoking process already failed fast with the diagnostic.
+fn handle_second_launch(app: &AppHandle, args: &[String], cwd: String) {
+    let Some(raw) = cli::first_positional(args.iter()) else {
+        open_picker_window(app, "single-instance second launch");
+        return;
+    };
+    let root = match cli::resolve_and_validate(&raw, std::path::Path::new(&cwd)) {
+        Ok(root) => root,
+        Err(error) => {
+            log::warn!("second-instance ignoring invalid path: {error}");
+            return;
+        }
+    };
+    let Some(manager) = app.try_state::<AgentManager>() else {
+        log::warn!("second-instance path with no manager");
+        return;
+    };
+    if let Err(error) = manager.open_path_in_window(root) {
+        log::warn!("second-instance open failed: {error}");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    if let Some(raw) = cli::parse_os_args(std::env::args_os()) {
-        let cwd = match std::env::current_dir() {
-            Ok(cwd) => cwd,
-            Err(error) => {
-                eprintln!("samokod: cannot resolve path: {error}");
-                std::process::exit(1);
-            }
-        };
-        match cli::resolve_and_validate(&raw, &cwd) {
-            Ok(root) => cli::remember_initial_root(root),
-            Err(error) => {
-                eprintln!("samokod: {error}");
-                std::process::exit(1);
-            }
-        }
+    if let Some(root) = cli_launch_root() {
+        cli::insert_pending(windows::FIRST_WINDOW_LABEL, root);
     }
     let builder = specta_builder();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
-            let Some(raw) = cli::parse_forwarded_args(&args) else {
-                open_picker_window(app, "single-instance second launch");
-                return;
-            };
-            let resolved = cli::resolve_path(&raw, &PathBuf::from(&cwd));
-            match crate::repo::validate_repo(&resolved) {
-                Ok(info) => {
-                    let root = PathBuf::from(info.root);
-                    let handle = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let Some(manager) = handle.try_state::<AgentManager>() else {
-                            log::warn!("second-instance path with no manager");
-                            return;
-                        };
-                        if let Err(error) = manager.open_path_in_window(root) {
-                            log::warn!("second-instance open failed: {error}");
-                        }
-                    });
-                }
-                Err(error) => {
-                    log::warn!(
-                        "second-instance ignoring invalid path {}: {error}",
-                        resolved.display()
-                    );
-                }
-            }
+            handle_second_launch(app, &args, cwd);
         }))
         .setup(|app| {
             app.manage(AgentManager::new(app.handle().clone()));

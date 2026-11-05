@@ -75,6 +75,19 @@ export function emitAppEvents(apiMock: typeof api, events: AppEvent[]): void {
 	});
 }
 
+export function stubAppDefaults(): void {
+	api.getPrefs.mockResolvedValue({ recent: [] });
+	api.listOpenRepos.mockResolvedValue([]);
+	api.validateRepo.mockImplementation(async (path: string) => ({
+		root: path,
+		branch: "main",
+	}));
+	api.takePendingRepo.mockResolvedValue(null);
+	api.warmSession.mockResolvedValue(undefined);
+	api.loadHistory.mockResolvedValue(undefined);
+	api.planMdText.mockResolvedValue(null);
+}
+
 export function stubMatchMedia(): void {
 	Object.defineProperty(window, "matchMedia", {
 		configurable: true,

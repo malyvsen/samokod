@@ -1,7 +1,13 @@
 // Window identity and factory: labels, lookup, and creation.
 // Every window owns one repo; labels are `main` for the first window and
 // `window-N` for the rest.
+use std::path::PathBuf;
+
 use tauri::{AppHandle, Manager, WebviewWindowBuilder};
+
+/// Label of the first window: Tauri defaults the single unlabeled entry in
+/// `tauri.conf.json` to `main`.
+pub(crate) const FIRST_WINDOW_LABEL: &str = "main";
 
 /// Label for a Tauri window. Pure.
 pub(crate) fn window_label(window: &tauri::Window) -> String {
@@ -32,8 +38,7 @@ pub(crate) fn create_window(app: &AppHandle) -> Result<String, String> {
     create_window_with_label(app, &label)
 }
 
-/// Build a window with a pre-allocated label. The caller inserts any pending
-/// CLI path beforehand so the new window's mount effect opens it race-free.
+/// Build a window with a pre-allocated label.
 pub(crate) fn create_window_with_label(app: &AppHandle, label: &str) -> Result<String, String> {
     let mut config = app
         .config()
@@ -55,6 +60,18 @@ pub(crate) fn create_window_with_label(app: &AppHandle, label: &str) -> Result<S
         })?;
     log::info!("open window={label}");
     Ok(label.to_string())
+}
+
+/// Allocate the next label, stage `root` for it, then build the window.
+/// Staging precedes the build so the new window's mount claim cannot race
+/// the frontend load.
+pub(crate) fn create_pending_window(app: &AppHandle, root: PathBuf) -> Result<String, String> {
+    let existing: Vec<String> = app.webview_windows().keys().cloned().collect();
+    let label = allocate_window_label(&existing);
+    crate::cli::insert_pending(&label, root);
+    let label = create_window_with_label(app, &label)?;
+    log::info!("open window={label} with staged repo");
+    Ok(label)
 }
 
 /// Focus one window by label, unminimizing first. Used for the New Window
