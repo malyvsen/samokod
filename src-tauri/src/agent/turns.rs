@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use tauri::AppHandle;
 
 use crate::acp::{self, Agent, ConnectionTo};
-use crate::error_hint::{ErrorHint, classify_error, is_transport_error};
+use crate::error_hint::{classify_error, is_transport_error};
 use crate::opencode;
 use crate::plans;
 use crate::spend::context_pct;
@@ -178,9 +178,6 @@ impl AgentManager {
         let state = Arc::clone(&self.state);
         let window_owned = window.to_string();
         let app = self.app.clone();
-        let push_state = Arc::clone(&self.state);
-        let push_window = window.to_string();
-        let push_app = self.app.clone();
         let pump_manager = self.clone();
         let pump_window = window.to_string();
         tauri::async_runtime::spawn(async move {
@@ -194,62 +191,39 @@ impl AgentManager {
             );
             match connection.send_request(prompt).block_task().await {
                 Ok(response) => {
-                    let stop_reason = response.stop_reason;
                     if !check_current(&state, &window_owned, &spawn) {
                         return;
                     }
-                    match stop_failure_reason(&stop_reason) {
-                        None => {
-                            set_working(&state, &window_owned, &key, false);
-                            set_failed(&state, &window_owned, &key, false);
-                            log::info!(
-                                "TurnDone window={window_owned} session={}::{:?} stop_reason={stop_reason:?}",
-                                key.plan,
-                                key.role
-                            );
-                            emit_event(
-                                &app,
-                                &window_owned,
-                                AppEvent::TurnDone {
-                                    session: key.clone(),
-                                },
-                            );
-                            push_sorted(&push_state, &push_app, &push_window);
-                            // Automatic plans advance once the turn ends clean.
-                            drop(connection);
-                            pump_manager.spawn_pump(&pump_window);
-                        }
-                        Some((raw, hint, retryable)) => {
-                            set_working(&state, &window_owned, &key, false);
-                            set_failed(&state, &window_owned, &key, true);
-                            log::info!(
-                                "TurnFailed window={window_owned} session={}::{:?} stop_reason={stop_reason:?}",
-                                key.plan,
-                                key.role
-                            );
-                            emit_event(
-                                &app,
-                                &window_owned,
-                                AppEvent::TurnFailed {
-                                    session: key.clone(),
-                                    raw,
-                                    hint: hint.text,
-                                    retryable,
-                                },
-                            );
-                            push_sorted(&push_state, &push_app, &push_window);
-                        }
+                    if let Some(raw) = stop_failure_raw(&response.stop_reason) {
+                        fail_turn(&state, &app, &window_owned, &key, raw.to_string());
+                        return;
                     }
+                    set_working(&state, &window_owned, &key, false);
+                    set_failed(&state, &window_owned, &key, false);
+                    log::info!(
+                        "TurnDone window={window_owned} session={}::{:?} stop_reason={:?}",
+                        key.plan,
+                        key.role,
+                        response.stop_reason,
+                    );
+                    emit_event(
+                        &app,
+                        &window_owned,
+                        AppEvent::TurnDone {
+                            session: key.clone(),
+                        },
+                    );
+                    push_sorted(&state, &app, &window_owned);
+                    // Automatic plans advance once the turn ends clean.
+                    drop(connection);
+                    pump_manager.spawn_pump(&pump_window);
                 }
                 Err(error) => {
                     if !check_current(&state, &window_owned, &spawn) {
                         return;
                     }
                     let raw = error.to_string();
-                    let transport_gone = is_transport_error(&raw);
-                    set_working(&state, &window_owned, &key, false);
-                    set_failed(&state, &window_owned, &key, true);
-                    if transport_gone {
+                    if is_transport_error(&raw) {
                         match lock_backend(&state) {
                             Some(mut backend) => {
                                 if let Some(win) = backend.windows.get_mut(&window_owned)
@@ -264,23 +238,7 @@ impl AgentManager {
                             }
                         }
                     }
-                    let hint = classify_error(&raw);
-                    log::info!(
-                        "TurnFailed window={window_owned} session={}::{:?}",
-                        key.plan,
-                        key.role
-                    );
-                    emit_event(
-                        &app,
-                        &window_owned,
-                        AppEvent::TurnFailed {
-                            session: key.clone(),
-                            raw,
-                            hint: hint.text,
-                            retryable: hint.retryable,
-                        },
-                    );
-                    push_sorted(&push_state, &push_app, &push_window);
+                    fail_turn(&state, &app, &window_owned, &key, raw);
                 }
             }
         });
@@ -373,20 +331,48 @@ impl AgentManager {
     }
 }
 
-/// Map a non-clean ACP stop reason to a retryable turn failure. Pure.
-/// `EndTurn` and user-cancelled turns are clean ends (`None`); every other
-/// reason surfaces as `TurnFailed` so truncated turns never idle silently.
-fn stop_failure_reason(reason: &acp::StopReason) -> Option<(String, ErrorHint, bool)> {
-    let raw = match reason {
-        acp::StopReason::EndTurn | acp::StopReason::Cancelled => return None,
-        acp::StopReason::MaxTokens => "turn stopped: max_tokens",
-        acp::StopReason::MaxTurnRequests => "turn stopped: max_turn_requests",
-        acp::StopReason::Refusal => "turn stopped: refusal",
-        _ => "turn stopped: aborted",
-    };
-    let raw = raw.to_string();
+/// Raw failure message for an aborted ACP stop reason, or `None` when the
+/// turn ended clean. `EndTurn` and user-cancelled turns are clean ends;
+/// every other reason surfaces as `TurnFailed` so truncated turns never
+/// idle silently. Pure.
+fn stop_failure_raw(reason: &acp::StopReason) -> Option<&'static str> {
+    match reason {
+        acp::StopReason::EndTurn | acp::StopReason::Cancelled => None,
+        acp::StopReason::MaxTokens => Some("turn stopped: max_tokens"),
+        acp::StopReason::MaxTurnRequests => Some("turn stopped: max_turn_requests"),
+        acp::StopReason::Refusal => Some("turn stopped: refusal"),
+        _ => Some("turn stopped: aborted"),
+    }
+}
+
+/// Settle a failed turn: clear working, mark failed, classify the raw
+/// reason for the retry bar, emit it, and refresh the list.
+fn fail_turn(
+    state: &Mutex<BackendState>,
+    app: &AppHandle,
+    window: &str,
+    key: &SessionKey,
+    raw: String,
+) {
+    set_working(state, window, key, false);
+    set_failed(state, window, key, true);
     let hint = classify_error(&raw);
-    Some((raw, hint, true))
+    log::info!(
+        "TurnFailed window={window} session={}::{:?} raw={raw}",
+        key.plan,
+        key.role
+    );
+    emit_event(
+        app,
+        window,
+        AppEvent::TurnFailed {
+            session: key.clone(),
+            raw,
+            hint: hint.text,
+            retryable: hint.retryable,
+        },
+    );
+    push_sorted(state, app, window);
 }
 
 pub(crate) fn handle_notification(
@@ -1045,43 +1031,22 @@ mod tests {
     }
 
     #[test]
-    fn end_turn_stop_is_done() {
-        assert!(stop_failure_reason(&acp::StopReason::EndTurn).is_none());
+    fn clean_stops_end_turn() {
+        assert_eq!(stop_failure_raw(&acp::StopReason::EndTurn), None);
+        assert_eq!(stop_failure_raw(&acp::StopReason::Cancelled), None);
     }
 
     #[test]
-    fn cancelled_stop_is_done() {
-        assert!(stop_failure_reason(&acp::StopReason::Cancelled).is_none());
-    }
-
-    #[test]
-    fn max_tokens_stop_is_retryable_failure() {
-        let (raw, hint, retryable) =
-            stop_failure_reason(&acp::StopReason::MaxTokens).expect("max_tokens fails the turn");
-        assert!(raw.contains("max_tokens"));
-        assert_eq!(hint.kind, crate::error_hint::ErrorHintKind::PlainRetry);
-        assert!(hint.text.contains("retry the turn"));
-        assert!(retryable);
-    }
-
-    #[test]
-    fn max_turn_requests_stop_is_retryable_failure() {
-        let (raw, hint, retryable) = stop_failure_reason(&acp::StopReason::MaxTurnRequests)
-            .expect("max_turn_requests fails the turn");
-        assert!(raw.contains("max_turn_requests"));
-        assert_eq!(hint.kind, crate::error_hint::ErrorHintKind::PlainRetry);
-        assert!(hint.text.contains("retry the turn"));
-        assert!(retryable);
-    }
-
-    #[test]
-    fn refusal_stop_is_retryable_failure() {
-        let (raw, hint, retryable) =
-            stop_failure_reason(&acp::StopReason::Refusal).expect("refusal fails the turn");
-        assert!(raw.contains("refusal"));
-        assert_eq!(hint.kind, crate::error_hint::ErrorHintKind::PlainRetry);
-        assert!(hint.text.contains("retry the turn"));
-        assert!(retryable);
+    fn aborted_stops_fail_turn() {
+        for (reason, expected) in [
+            (acp::StopReason::MaxTokens, "max_tokens"),
+            (acp::StopReason::MaxTurnRequests, "max_turn_requests"),
+            (acp::StopReason::Refusal, "refusal"),
+        ] {
+            let raw = stop_failure_raw(&reason).expect("aborted stop fails the turn");
+            assert!(raw.contains(expected), "{raw} mentions {expected}");
+            assert!(raw.contains("turn stopped"));
+        }
     }
 
     #[test]
