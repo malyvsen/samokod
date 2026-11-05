@@ -65,6 +65,20 @@ function typeLines(area: HTMLElement, text: string) {
 	selection?.addRange(range);
 }
 
+function setCaretAtOffset(area: HTMLElement, offset: number): void {
+	area.focus();
+	const text = area.firstChild;
+	if (text === null) throw new Error("no text node");
+	const range = document.createRange();
+	range.setStart(text, offset);
+	range.collapse(true);
+	const selection = window.getSelection();
+	selection?.removeAllRanges();
+	selection?.addRange(range);
+}
+
+const REL = ".samokod/plans/scoping/test/attachments/image-1-0.png";
+
 describe("draft bubble", () => {
 	test("autofocuses on mount", () => {
 		const { area } = bubble();
@@ -116,13 +130,29 @@ describe("draft bubble", () => {
 		expect(area.querySelectorAll("*")).toHaveLength(0);
 	});
 
-	test("paste with image saves and inserts the path", async () => {
+	test("paste with image saves and inserts a backticked ref", async () => {
 		const onInput = vi.fn();
 		const { area } = bubble({ onInput });
 		setCaretAtEnd(area);
-		vi.mocked(saveAttachment).mockResolvedValue(
-			"/plan/attachments/image-1-0.png",
-		);
+		vi.mocked(saveAttachment).mockResolvedValue(REL);
+		fireEvent.paste(area, {
+			clipboardData: {
+				getData: () => "",
+				files: [pngFile()],
+				items: [],
+			},
+		});
+		await waitFor(() => expect(area.textContent).toBe(`\`${REL}\``));
+		expect(area.textContent).not.toContain("\n");
+		expect(vi.mocked(saveAttachment)).toHaveBeenCalledTimes(1);
+		expect(onInput).toHaveBeenCalled();
+	});
+
+	test("mid-word paste pads both sides", async () => {
+		const { area } = bubble();
+		typeLines(area, "helloworld");
+		setCaretAtOffset(area, 5);
+		vi.mocked(saveAttachment).mockResolvedValue(REL);
 		fireEvent.paste(area, {
 			clipboardData: {
 				getData: () => "",
@@ -131,10 +161,43 @@ describe("draft bubble", () => {
 			},
 		});
 		await waitFor(() =>
-			expect(area.textContent).toContain("/plan/attachments/image-1-0.png"),
+			expect(area.textContent).toBe(`hello \`${REL}\` world`),
 		);
-		expect(vi.mocked(saveAttachment)).toHaveBeenCalledTimes(1);
-		expect(onInput).toHaveBeenCalled();
+		expect(area.textContent).not.toContain("\n");
+	});
+
+	test("paste after a space adds no double space", async () => {
+		const { area } = bubble();
+		typeLines(area, "word ");
+		setCaretAtEnd(area);
+		vi.mocked(saveAttachment).mockResolvedValue(REL);
+		fireEvent.paste(area, {
+			clipboardData: {
+				getData: () => "",
+				files: [pngFile()],
+				items: [],
+			},
+		});
+		await waitFor(() => expect(area.textContent).toBe(`word \`${REL}\``));
+		expect(area.textContent).not.toContain("  ");
+		expect(area.textContent).not.toContain("\n");
+	});
+
+	test("paste before a space adds none", async () => {
+		const { area } = bubble();
+		typeLines(area, " word");
+		setCaretAtOffset(area, 0);
+		vi.mocked(saveAttachment).mockResolvedValue(REL);
+		fireEvent.paste(area, {
+			clipboardData: {
+				getData: () => "",
+				files: [pngFile()],
+				items: [],
+			},
+		});
+		await waitFor(() => expect(area.textContent).toBe(`\`${REL}\` word`));
+		expect(area.textContent).not.toContain("  ");
+		expect(area.textContent).not.toContain("\n");
 	});
 
 	test("unsupported and oversize images never reach IPC", async () => {

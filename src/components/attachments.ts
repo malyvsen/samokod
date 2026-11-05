@@ -31,6 +31,32 @@ export async function fileToBase64(file: File): Promise<string> {
 	return btoa(binary);
 }
 
+// Caret context for space padding: text immediately before/after the
+// caret in the selection range. Element boundaries count as whitespace,
+// so empty drafts get no padding. Pure except reading the selection.
+function caretPadding(node: HTMLElement): { prefix: string; suffix: string } {
+	const selection = window.getSelection();
+	if (selection === null || selection.rangeCount === 0)
+		return { prefix: "", suffix: "" };
+	const range = selection.getRangeAt(0);
+	if (!node.contains(range.commonAncestorContainer))
+		return { prefix: "", suffix: "" };
+	let before: string | undefined;
+	let after: string | undefined;
+	if (range.startContainer.nodeType === Node.TEXT_NODE) {
+		const data = (range.startContainer as Text).data;
+		before = data[range.startOffset - 1];
+	}
+	if (range.endContainer.nodeType === Node.TEXT_NODE) {
+		const data = (range.endContainer as Text).data;
+		after = data[range.endOffset];
+	}
+	return {
+		prefix: before !== undefined && !/\s/.test(before) ? " " : "",
+		suffix: after !== undefined && !/\s/.test(after) ? " " : "",
+	};
+}
+
 async function handleImageFiles(
 	node: HTMLElement,
 	session: SessionKey,
@@ -53,8 +79,9 @@ async function handleImageFiles(
 		}
 		try {
 			const base64 = await fileToBase64(file);
-			const absolutePath = await saveAttachment(session, base64);
-			insertTextAtCaret(node, `\n${absolutePath}\n`);
+			const relativePath = await saveAttachment(session, base64);
+			const { prefix, suffix } = caretPadding(node);
+			insertTextAtCaret(node, `${prefix}\`${relativePath}\`${suffix}`);
 			options.onInput?.(extractText(node));
 		} catch (error) {
 			options.onError(error instanceof Error ? error.message : String(error));
@@ -86,8 +113,9 @@ function collectDropImages(files: FileList | File[]): File[] {
 }
 
 /// Shared paste/drop wiring for the compose boxes. Images save and insert
-/// the absolute path; imageless pastes fall through to `onPlainText` so
-/// the draft and queued editors keep their own plain-text sync.
+/// a backticked repo-relative ref; imageless pastes fall through to
+/// `onPlainText` so the draft and queued editors keep their own plain-text
+/// sync.
 export function attachmentHandlers(
 	getNode: () => HTMLElement | null,
 	session: SessionKey,
