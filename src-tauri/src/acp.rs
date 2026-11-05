@@ -6,8 +6,8 @@ pub use agent_client_protocol::schema::v1::{
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionConfigId, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigOptionValue, SessionConfigSelectOptions, SessionConfigValueId, SessionId,
-    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, TextContent, ToolCall,
-    ToolCallStatus, ToolCallUpdate, ToolKind,
+    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, StopReason, TextContent,
+    ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 #[cfg(test)]
 pub use agent_client_protocol::schema::v1::{
