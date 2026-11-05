@@ -9,7 +9,6 @@ import type {
 import type { SessionStart } from "../sessions/store";
 import type { LiveStatus } from "../sessions/thoughts";
 import { thinkingSeconds } from "../sessions/thoughts";
-import { todoMark, todoRowClass } from "../todos";
 import type { TranscriptItem } from "../types";
 import {
 	CollapseControl,
@@ -141,6 +140,7 @@ export function groupRuns(items: TranscriptItem[]): TranscriptGroup[] {
 export function summarizeRun(items: RunItem[]): {
 	counts: string;
 	durationMs: number | null;
+	hasFailed: boolean;
 } {
 	let durationMs: number | null = null;
 	const ats = items
@@ -151,14 +151,34 @@ export function summarizeRun(items: RunItem[]): {
 	}
 	const toolCounts = new Map<string, number>();
 	let thinkCount = 0;
+	const todoCounts = new Map<string, number>();
+	let approvalCount = 0;
+	let failedCount = 0;
 	for (const item of items) {
 		if (item.kind === "tool") {
 			toolCounts.set(
 				item.line.label,
 				(toolCounts.get(item.line.label) ?? 0) + 1,
 			);
+			if (item.line.status === "failed") {
+				failedCount += 1;
+			}
 		} else if (item.kind === "thought") {
 			thinkCount += 1;
+		} else if (item.kind === "todos") {
+			for (const change of item.changes) {
+				const label =
+					change.status === "pending"
+						? "new todo"
+						: change.status === "in_progress"
+							? "active todo"
+							: "done todo";
+				todoCounts.set(label, (todoCounts.get(label) ?? 0) + 1);
+			}
+		} else if (item.kind === "approval") {
+			approvalCount += 1;
+		} else if (item.kind === "error") {
+			failedCount += 1;
 		}
 	}
 	const entries: { label: string; count: number }[] = [];
@@ -168,11 +188,20 @@ export function summarizeRun(items: RunItem[]): {
 	if (thinkCount > 0) {
 		entries.push({ label: "think", count: thinkCount });
 	}
+	for (const [label, count] of todoCounts) {
+		entries.push({ label, count });
+	}
+	if (approvalCount > 0) {
+		entries.push({ label: "approval", count: approvalCount });
+	}
+	if (failedCount > 0) {
+		entries.push({ label: "failed", count: failedCount });
+	}
 	entries.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 	const counts = entries
 		.map(({ label, count }) => `${count}x ${label}`)
 		.join(", ");
-	return { counts, durationMs };
+	return { counts, durationMs, hasFailed: failedCount > 0 };
 }
 
 function WorkBox({
@@ -192,7 +221,7 @@ function WorkBox({
 }) {
 	const [open, setOpen] = useState(false);
 	const workRef = useRef<HTMLDivElement>(null);
-	const { counts, durationMs: frozenMs } = summarizeRun(items);
+	const { counts, durationMs: frozenMs, hasFailed } = summarizeRun(items);
 	const ats = items
 		.map((item) => item.at)
 		.filter((at): at is number => at !== undefined);
@@ -203,10 +232,9 @@ function WorkBox({
 	const duration =
 		durationMs === null ? null : `${(durationMs / 1000).toFixed(1)}s`;
 	const verb = live ? "Working" : "Worked";
-	const summary =
-		duration === null
-			? `${verb} · ${counts}`
-			: `${verb} for ${duration} · ${counts}`;
+	const prefix =
+		duration === null ? `${verb} · ` : `${verb} for ${duration} · `;
+	const countParts = counts === "" ? [] : counts.split(", ");
 	const hasUnresolvedApproval = items.some(
 		(item) => item.kind === "approval" && !item.resolved,
 	);
@@ -214,7 +242,9 @@ function WorkBox({
 	const showStop = live && !hasUnresolvedApproval && onStop !== null;
 
 	function focusFirstApproval() {
-		const button = workRef.current?.querySelector(".approval button");
+		const button = workRef.current?.querySelector(
+			".drow.appr button, .approval button",
+		);
 		if (button instanceof HTMLElement) {
 			button.focus();
 		}
@@ -236,7 +266,7 @@ function WorkBox({
 	}
 
 	return (
-		<div className="work" ref={workRef}>
+		<div className={hasFailed ? "work failed" : "work"} ref={workRef}>
 			<div className="summary-row">
 				<button
 					className="summary"
@@ -246,7 +276,19 @@ function WorkBox({
 					onClick={toggle}
 				>
 					{!live && <span className="chev">{open ? "▾" : "▸"}</span>}
-					<span className="txt">{summary}</span>
+					<span className="txt">
+						{prefix}
+						{countParts.map((part, index) => (
+							<span key={part}>
+								{index > 0 && ", "}
+								{part.includes("failed") ? (
+									<span style={{ color: "#ff6b6b" }}>{part}</span>
+								) : (
+									part
+								)}
+							</span>
+						))}
+					</span>
 				</button>
 				{showReview && (
 					<button
@@ -276,7 +318,11 @@ function WorkBox({
 			<div className="detail" hidden={!open}>
 				{items.map((item) =>
 					item.kind === "thought" ? (
-						<ThoughtRow key={item.id} ms={item.ms} />
+						<ThoughtRow
+							key={item.id}
+							ms={item.ms}
+							{...(item.at === undefined ? {} : { at: item.at })}
+						/>
 					) : (
 						<ItemRow
 							key={item.id}
@@ -291,8 +337,19 @@ function WorkBox({
 	);
 }
 
-function ThoughtRow({ ms }: { ms: number }) {
-	return <div className="arow thought">thinking: {thinkingSeconds(ms)}s</div>;
+function formatClock(at: number): string {
+	const date = new Date(at);
+	const pad = (n: number) => String(n).padStart(2, "0");
+	return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function ThoughtRow({ ms, at }: { ms: number; at?: number }) {
+	return (
+		<div className="arow thought">
+			{at !== undefined && <span className="ts">{formatClock(at)} </span>}
+			{`thinking: ${thinkingSeconds(ms)}s`}
+		</div>
+	);
 }
 
 function ItemRow({
@@ -324,24 +381,36 @@ function ItemRow({
 				/>
 			);
 		case "tool":
-			return <ToolRow line={item.line} />;
+			return (
+				<ToolRow
+					line={item.line}
+					{...(item.at === undefined ? {} : { at: item.at })}
+				/>
+			);
 		case "todos":
 			return (
-				<div className="todo">
-					<div className="head">
-						<span>TODOS</span>
-					</div>
-					{item.changes.map((change) => (
-						<div
-							className={`row ${todoRowClass(change.status)}`}
-							data-full={change.content}
-							key={change.content}
-						>
-							<span className="mark">[{todoMark(change.status)}]</span>
-							{change.content}
-						</div>
-					))}
-				</div>
+				<>
+					{item.changes.map((change) => {
+						const label =
+							change.status === "pending"
+								? "new"
+								: change.status === "in_progress"
+									? "active"
+									: "done";
+						return (
+							<div
+								className="drow"
+								data-full={change.content}
+								key={change.content}
+							>
+								{item.at !== undefined && (
+									<span className="ts">{formatClock(item.at)} </span>
+								)}
+								{`todo ${label}: ${change.content}`}
+							</div>
+						);
+					})}
+				</>
 			);
 		case "approval": {
 			const permission: PermissionView = item.permission;
@@ -352,14 +421,11 @@ function ItemRow({
 				(option: PermissionOptionView) => option.kind === "reject",
 			);
 			return (
-				<div className="approval">
-					<h3 data-full={permission.title}>{permission.title}</h3>
-					<p>
-						{permission.tool} · {permission.rule_hint}
-					</p>
-					<p className="hint">
-						Reject skips just this command - the agent keeps working.
-					</p>
+				<div className="drow appr">
+					{item.at !== undefined && (
+						<span className="ts">{formatClock(item.at)} </span>
+					)}
+					<span data-full={permission.title}>{permission.title}</span>
 					<div className="row">
 						{allow !== undefined && (
 							<button
@@ -493,7 +559,7 @@ function ErrorBar({
 	);
 }
 
-function ToolRow({ line }: { line: ToolLineView }) {
+function ToolRow({ line, at }: { line: ToolLineView; at?: number }) {
 	const status: ToolStatus = line.status;
 	switch (status) {
 		case "pending":
@@ -506,6 +572,7 @@ function ToolRow({ line }: { line: ToolLineView }) {
 	}
 	return (
 		<div className="tool" data-status={line.status} data-full={line.text}>
+			{at !== undefined && <span className="ts">{formatClock(at)} </span>}
 			{line.text}
 		</div>
 	);

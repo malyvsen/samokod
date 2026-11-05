@@ -461,8 +461,8 @@ describe("transcript thought rows", () => {
 		expect(container.querySelectorAll(".work")).toHaveLength(1);
 		const rows = container.querySelectorAll(".arow.thought");
 		expect(rows).toHaveLength(2);
-		expect(rows[0]?.textContent).toBe("thinking: 2s");
-		expect(rows[1]?.textContent).toBe("thinking: 1s");
+		expect(rows[0]?.textContent).toContain("thinking: 2s");
+		expect(rows[1]?.textContent).toContain("thinking: 1s");
 	});
 });
 
@@ -580,9 +580,161 @@ describe("transcript grouping", () => {
 			fireEvent.click(toggle);
 		}
 		expect(toggle?.getAttribute("aria-expanded")).toBe("true");
-		expect(container.querySelector(".work .detail .tool")?.textContent).toBe(
-			"read: src/types.ts",
+		expect(
+			container.querySelector(".work .detail .tool")?.textContent,
+		).toContain("read: src/types.ts");
+	});
+
+	test("todos counted by status", () => {
+		const todos = (
+			status: "pending" | "in_progress" | "completed",
+		): RunItem => ({
+			kind: "todos",
+			id: `id-${status}`,
+			changes: [{ content: "do it", status }],
+			at: 1000,
+		});
+		expect(
+			summarizeRun([todos("pending"), todos("in_progress"), todos("completed")])
+				.counts,
+		).toBe("1x active todo, 1x done todo, 1x new todo");
+	});
+
+	test("approvals counted once each", () => {
+		const approval = (id: string): RunItem => ({
+			kind: "approval",
+			id,
+			permission: {
+				tool_call_id: id,
+				title: "run it",
+				tool: "bash",
+				options: [],
+				rule_hint: "hint",
+			},
+			resolved: false,
+			at: 1000,
+		});
+		expect(summarizeRun([approval("a1"), approval("a2")]).counts).toBe(
+			"2x approval",
 		);
+	});
+
+	test("failed counts errors and failed tools", () => {
+		const failedTool: RunItem = {
+			kind: "tool",
+			id: "t1",
+			line: { id: "l1", text: "bash: boom", status: "failed", label: "bash" },
+			at: 1000,
+		};
+		const error: RunItem = {
+			kind: "error",
+			id: "e1",
+			raw: "boom",
+			hint: "retry",
+			retryable: true,
+			at: 2000,
+		};
+		const { counts, hasFailed } = summarizeRun([failedTool, error]);
+		expect(counts).toContain("2x failed");
+		expect(counts).toContain("1x bash");
+		expect(hasFailed).toBe(true);
+	});
+
+	test("failed runs get a red border", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{
+						kind: "tool",
+						id: "t1",
+						line: {
+							id: "l1",
+							text: "bash: boom",
+							status: "failed",
+							label: "bash",
+						},
+						at: 1000,
+					},
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		expect(container.querySelector(".work.failed")).not.toBeNull();
+		expect(container.querySelector(".work .summary")?.textContent).toContain(
+			"1x failed",
+		);
+	});
+
+	test("todos render as plain rows without the card", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{
+						kind: "todos",
+						id: "td1",
+						changes: [
+							{ content: "write it", status: "pending" },
+							{ content: "write it", status: "completed" },
+						],
+						at: 1000,
+					},
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		fireEvent.click(screen.getByTitle("Expand"));
+		expect(container.querySelector(".todo")).toBeNull();
+		expect(container.querySelector(".work .detail")?.textContent).toContain(
+			"todo new: write it",
+		);
+		expect(container.querySelector(".work .detail")?.textContent).toContain(
+			"todo done: write it",
+		);
+	});
+
+	test("approvals render as plain blocks without hint or rule", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{
+						kind: "approval",
+						id: "a1",
+						permission: {
+							tool_call_id: "tc1",
+							title: "bash: run tests",
+							tool: "bash",
+							options: [
+								{ id: "allow1", kind: "allow" },
+								{ id: "reject1", kind: "reject" },
+							],
+							rule_hint: "hint",
+						},
+						resolved: false,
+						at: 1000,
+					},
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+			/>,
+		);
+		fireEvent.click(screen.getByTitle("Expand"));
+		expect(container.querySelector(".approval")).toBeNull();
+		const detail = container.querySelector(".work .detail");
+		expect(detail?.textContent).toContain("bash: run tests");
+		expect(detail?.textContent).not.toContain("Reject skips");
+		expect(detail?.querySelector(".hint")).toBeNull();
+		expect(
+			screen.getByRole("button", { name: "allow once" }),
+		).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "reject" })).toBeInTheDocument();
 	});
 });
 
