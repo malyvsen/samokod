@@ -65,23 +65,9 @@ export function sideContentFor(
 		const working =
 			entry.sessions.find((session) => session.role === "landing")?.working ??
 			false;
-		const progress = entry.landing_progress;
-		if (progress == null) {
-			return {
-				kind: "commits",
-				commits: entry.commits,
-				done: 0,
-				total: entry.commits.length,
-				working,
-			};
-		}
-		return {
-			kind: "commits",
-			commits: entry.commits,
-			done: Math.min(progress.done, progress.total),
-			total: progress.total,
-			working,
-		};
+		const total = entry.landing_progress?.total ?? entry.commits.length;
+		const done = Math.min(entry.landing_progress?.done ?? 0, total);
+		return { kind: "commits", commits: entry.commits, done, total, working };
 	}
 	return { kind: "todos", todos };
 }

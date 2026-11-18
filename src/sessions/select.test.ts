@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import type { PlanEntry, ProgressView } from "../bindings";
 import { testEntryWith, testKey, testStatus } from "../fixtures";
 import { sessionKeyOf } from "../types";
 import {
@@ -131,20 +132,27 @@ describe("repairSelection", () => {
 	});
 });
 
+function landingEntry(
+	progress: ProgressView | null,
+	working: boolean,
+): PlanEntry {
+	return testEntryWith(
+		"a",
+		"landing",
+		"Alpha",
+		true,
+		[testStatus("scoping"), testStatus("landing", { working })],
+		false,
+		true,
+		["abc plan work", "def more work"],
+		false,
+		progress,
+	);
+}
+
 describe("sideContentFor", () => {
 	test("landing role returns commits with progress and working", () => {
-		const entry = testEntryWith(
-			"a",
-			"landing",
-			"Alpha",
-			true,
-			[testStatus("scoping"), testStatus("landing", { working: true })],
-			false,
-			true,
-			["abc plan work", "def more work"],
-			false,
-			{ done: 1, total: 2, eta_secs: null },
-		);
+		const entry = landingEntry({ done: 1, total: 2, eta_secs: null }, true);
 		expect(sideContentFor(entry, { plan: "a", role: "landing" }, [])).toEqual({
 			kind: "commits",
 			commits: ["abc plan work", "def more work"],
@@ -155,16 +163,7 @@ describe("sideContentFor", () => {
 	});
 
 	test("landing role falls back when progress is null", () => {
-		const entry = testEntryWith(
-			"a",
-			"landing",
-			"Alpha",
-			true,
-			[testStatus("scoping"), testStatus("landing")],
-			false,
-			true,
-			["abc plan work", "def more work"],
-		);
+		const entry = landingEntry(null, false);
 		expect(sideContentFor(entry, { plan: "a", role: "landing" }, [])).toEqual({
 			kind: "commits",
 			commits: ["abc plan work", "def more work"],
@@ -175,18 +174,7 @@ describe("sideContentFor", () => {
 	});
 
 	test("landing done clamps to total", () => {
-		const entry = testEntryWith(
-			"a",
-			"landing",
-			"Alpha",
-			true,
-			[testStatus("scoping"), testStatus("landing", { working: true })],
-			false,
-			true,
-			["abc plan work", "def more work"],
-			false,
-			{ done: 5, total: 2, eta_secs: null },
-		);
+		const entry = landingEntry({ done: 5, total: 2, eta_secs: null }, true);
 		expect(sideContentFor(entry, { plan: "a", role: "landing" }, [])).toEqual({
 			kind: "commits",
 			commits: ["abc plan work", "def more work"],
