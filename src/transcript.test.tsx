@@ -473,11 +473,11 @@ describe("transcript grouping", () => {
 		};
 	}
 
-	function thought(id: string, at?: number): RunItem {
+	function thought(id: string, at?: number, ms = 1000): RunItem {
 		return {
 			kind: "thought",
 			id,
-			ms: 1000,
+			ms,
 			text: "hmm",
 			...(at === undefined ? {} : { at }),
 		};
@@ -543,6 +543,27 @@ describe("transcript grouping", () => {
 			summarizeRun([tool("l1", "read", 1000), tool("l2", "read")]).durationMs,
 		).toBeNull();
 		expect(summarizeRun([thought("t1")]).durationMs).toBeNull();
+	});
+
+	test("duration counts thought streaming time", () => {
+		expect(summarizeRun([thought("t1", 16000, 16000)]).durationMs).toBe(16000);
+		expect(
+			summarizeRun([thought("t1", 5000, 3000), tool("l1", "read", 5000)])
+				.durationMs,
+		).toBe(3000);
+	});
+
+	test("duration prefers wall-clock span over thought time", () => {
+		expect(
+			summarizeRun([tool("l1", "read", 1000), thought("t1", 5000, 1000)])
+				.durationMs,
+		).toBe(4000);
+	});
+
+	test("live duration measures from inferred thought start", () => {
+		expect(summarizeRun([thought("t1", 5000, 3000)], 6000).durationMs).toBe(
+			4000,
+		);
 	});
 
 	test("collapsed box expands to today's rows", () => {

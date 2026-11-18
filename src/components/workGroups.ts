@@ -45,8 +45,10 @@ export type RunSummary = {
 };
 
 /// Counts sort count-desc, ties alphabetical. Tool counts read the label
-/// field directly. Duration needs every item stamped; passing `now` measures
-/// the live run up to now instead of the frozen first-to-last span.
+/// field directly. Duration needs every item stamped; thought items also
+/// contribute their inferred start (`at - ms`) so streaming time counts.
+/// Passing `now` measures the live run up to now instead of the frozen
+/// first-to-last span.
 export function summarizeRun(items: RunItem[], now?: number): RunSummary {
 	let durationMs: number | null = null;
 	if (items.length > 0) {
@@ -54,10 +56,15 @@ export function summarizeRun(items: RunItem[], now?: number): RunSummary {
 			.map((item) => item.at)
 			.filter((at): at is number => at !== undefined);
 		if (ats.length === items.length) {
+			const starts = items.flatMap((item) =>
+				item.kind === "thought" && item.at !== undefined
+					? [item.at, item.at - item.ms]
+					: [item.at as number],
+			);
 			durationMs =
 				now !== undefined
-					? now - Math.min(...ats)
-					: Math.max(...ats) - Math.min(...ats);
+					? now - Math.min(...starts)
+					: Math.max(...starts) - Math.min(...starts);
 		}
 	}
 	const toolCounts = new Map<string, number>();
