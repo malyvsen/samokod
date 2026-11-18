@@ -705,52 +705,6 @@ impl AgentManager {
             .await
     }
 
-    /// Finish a plan via the shared transition core: a clean
-    /// fast-forwardable executing or evergreening plan completes directly,
-    /// a clean landing plan finishes the same way once it lands.
-    pub async fn finish_landing(
-        &self,
-        window: &str,
-        session: SessionKey,
-    ) -> Result<PlansUpdate, AgentError> {
-        let action = match session.role {
-            SessionRole::Executing => advance::Transition::FinishExecuting { plan: session.plan },
-            SessionRole::Evergreening => {
-                advance::Transition::FinishEvergreening { plan: session.plan }
-            }
-            SessionRole::Landing => advance::Transition::FinishLanding { plan: session.plan },
-            SessionRole::Scoping => {
-                return Err(AgentError::RequestFailed {
-                    raw: "no executing plan to complete".to_string(),
-                });
-            }
-        };
-        self.transition(window, action).await
-    }
-
-    /// Move a clean diverged executing or evergreening plan into the landing
-    /// queue via the shared core. Move-only: explicit commands never spawn;
-    /// the pump starts the head. Thin over `transition`.
-    pub async fn begin_landing(
-        &self,
-        window: &str,
-        session: SessionKey,
-    ) -> Result<PlansUpdate, AgentError> {
-        if !matches!(
-            session.role,
-            SessionRole::Executing | SessionRole::Evergreening
-        ) {
-            return Err(AgentError::RequestFailed {
-                raw: "no executing or evergreening plan to land".to_string(),
-            });
-        }
-        self.transition(
-            window,
-            advance::Transition::BeginLanding { plan: session.plan },
-        )
-        .await
-    }
-
     /// Cancel an active plan. An empty scoping session vanishes without a
     /// `cancelled/` trace; otherwise the plan moves to `cancelled/`,
     /// force-removing the worktree and branch for executing and landing

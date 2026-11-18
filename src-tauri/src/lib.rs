@@ -49,8 +49,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
             refresh_branch,
             create_plan,
             execute_plan,
-            finish_landing,
-            begin_landing,
             cancel_plan,
             select_plan,
             set_plan_mode,
@@ -181,32 +179,6 @@ async fn execute_plan(
 ) -> Result<PlansUpdate, String> {
     state
         .execute_plan(&window_label(&window), session)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-#[specta::specta]
-async fn finish_landing(
-    window: Window,
-    state: State<'_, AgentManager>,
-    session: SessionKey,
-) -> Result<PlansUpdate, String> {
-    state
-        .finish_landing(&window_label(&window), session)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-#[specta::specta]
-async fn begin_landing(
-    window: Window,
-    state: State<'_, AgentManager>,
-    session: SessionKey,
-) -> Result<PlansUpdate, String> {
-    state
-        .begin_landing(&window_label(&window), session)
         .await
         .map_err(|error| error.to_string())
 }
