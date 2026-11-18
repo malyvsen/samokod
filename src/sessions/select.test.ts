@@ -132,7 +132,29 @@ describe("repairSelection", () => {
 });
 
 describe("sideContentFor", () => {
-	test("landing role returns commits", () => {
+	test("landing role returns commits with progress and working", () => {
+		const entry = testEntryWith(
+			"a",
+			"landing",
+			"Alpha",
+			true,
+			[testStatus("scoping"), testStatus("landing", { working: true })],
+			false,
+			true,
+			["abc plan work", "def more work"],
+			false,
+			{ done: 1, total: 2, eta_secs: null },
+		);
+		expect(sideContentFor(entry, { plan: "a", role: "landing" }, [])).toEqual({
+			kind: "commits",
+			commits: ["abc plan work", "def more work"],
+			done: 1,
+			total: 2,
+			working: true,
+		});
+	});
+
+	test("landing role falls back when progress is null", () => {
 		const entry = testEntryWith(
 			"a",
 			"landing",
@@ -146,6 +168,31 @@ describe("sideContentFor", () => {
 		expect(sideContentFor(entry, { plan: "a", role: "landing" }, [])).toEqual({
 			kind: "commits",
 			commits: ["abc plan work", "def more work"],
+			done: 0,
+			total: 2,
+			working: false,
+		});
+	});
+
+	test("landing done clamps to total", () => {
+		const entry = testEntryWith(
+			"a",
+			"landing",
+			"Alpha",
+			true,
+			[testStatus("scoping"), testStatus("landing", { working: true })],
+			false,
+			true,
+			["abc plan work", "def more work"],
+			false,
+			{ done: 5, total: 2, eta_secs: null },
+		);
+		expect(sideContentFor(entry, { plan: "a", role: "landing" }, [])).toEqual({
+			kind: "commits",
+			commits: ["abc plan work", "def more work"],
+			done: 2,
+			total: 2,
+			working: true,
 		});
 	});
 

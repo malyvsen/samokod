@@ -1,4 +1,5 @@
 import type { TodoView } from "../bindings";
+import { commitStatusFor, commitSubject } from "../commits";
 import { doneCount, todoMark, todoRowClass } from "../todos";
 
 export function SidePanel({ todos }: { todos: TodoView[] }) {
@@ -10,23 +11,46 @@ export function SidePanel({ todos }: { todos: TodoView[] }) {
 	);
 }
 
-export function CommitsPanel({ commits }: { commits: string[] }) {
+export function CommitsPanel({
+	commits,
+	done,
+	total,
+	working,
+}: {
+	commits: string[];
+	done: number;
+	total: number;
+	working: boolean;
+}) {
 	return (
 		<div className="side">
 			<div className="head">
 				<span>COMMITS</span>
-				{commits.length > 0 && <span className="count">{commits.length}</span>}
+				{total > 0 && (
+					<span className="count">
+						{done}/{total}
+					</span>
+				)}
 			</div>
 			{commits.length === 0 ? (
 				<div className="row dim">
 					<span className="txt">No commits yet</span>
 				</div>
 			) : (
-				commits.map((line) => (
-					<div className="row" data-full={line} key={line}>
-						<span className="txt">{line}</span>
-					</div>
-				))
+				commits.map((line, index) => {
+					const status = commitStatusFor(index, done, total, working);
+					const subject = commitSubject(line);
+					return (
+						<div
+							className={`row ${todoRowClass(status)}`}
+							data-full={subject}
+							key={line}
+						>
+							<span className="mark">[{todoMark(status)}]</span>
+							<span className="txt">{subject}</span>
+						</div>
+					);
+				})
 			)}
 		</div>
 	);

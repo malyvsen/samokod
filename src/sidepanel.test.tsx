@@ -64,20 +64,48 @@ describe("commits panel", () => {
 	const COMMITS = ["abc plan work", "def more work"];
 
 	test("empty state shows no commits", () => {
-		render(<CommitsPanel commits={[]} />);
+		render(<CommitsPanel commits={[]} done={0} total={0} working={false} />);
 		expect(screen.getByText("No commits yet")).toBeInTheDocument();
 		expect(screen.queryByText("COMMITS")).toBeInTheDocument();
+		expect(screen.queryByText("0/0")).not.toBeInTheDocument();
 	});
 
-	test("live list shows count and rows", () => {
-		const { container } = render(<CommitsPanel commits={COMMITS} />);
+	test("partial shows done/total with subjects only", () => {
+		const { container } = render(
+			<CommitsPanel commits={COMMITS} done={1} total={2} working={true} />,
+		);
 		expect(screen.getByText("COMMITS")).toBeInTheDocument();
-		expect(screen.getByText("2")).toBeInTheDocument();
-		expect(screen.getByText("abc plan work")).toBeInTheDocument();
-		expect(screen.getByText("def more work")).toBeInTheDocument();
+		expect(screen.getByText("1/2")).toBeInTheDocument();
+		expect(screen.getByText("[x]")).toBeInTheDocument();
+		expect(screen.getByText("[>]")).toBeInTheDocument();
+		expect(screen.getByText("plan work")).toBeInTheDocument();
+		expect(screen.getByText("more work")).toBeInTheDocument();
+		expect(screen.queryByText("abc plan work")).not.toBeInTheDocument();
+		expect(screen.queryByText("def more work")).not.toBeInTheDocument();
 		const rows = container.querySelectorAll(".side .row[data-full]");
 		expect(rows.length).toBe(2);
-		expect(rows[0]?.getAttribute("data-full")).toBe("abc plan work");
+		expect(rows[0]?.getAttribute("data-full")).toBe("plan work");
+		expect(rows[1]?.getAttribute("data-full")).toBe("more work");
+	});
+
+	test("ready shows all done", () => {
+		render(
+			<CommitsPanel commits={COMMITS} done={2} total={2} working={false} />,
+		);
+		expect(screen.getByText("2/2")).toBeInTheDocument();
+		expect(screen.getAllByText("[x]").length).toBe(2);
+		expect(screen.queryByText("[>]")).not.toBeInTheDocument();
+		expect(screen.queryByText("[ ]")).not.toBeInTheDocument();
+	});
+
+	test("blocked shows all pending", () => {
+		render(
+			<CommitsPanel commits={COMMITS} done={0} total={2} working={false} />,
+		);
+		expect(screen.getByText("0/2")).toBeInTheDocument();
+		expect(screen.getAllByText("[ ]").length).toBe(2);
+		expect(screen.queryByText("[x]")).not.toBeInTheDocument();
+		expect(screen.queryByText("[>]")).not.toBeInTheDocument();
 	});
 });
 
@@ -118,7 +146,9 @@ describe("landing sidebar", () => {
 			scoping_preview: null,
 		});
 		await screen.findByText("COMMITS");
-		expect(screen.getByText("abc plan work")).toBeInTheDocument();
+		expect(screen.getByText("plan work")).toBeInTheDocument();
+		expect(screen.getByText("more work")).toBeInTheDocument();
+		expect(screen.queryByText("abc plan work")).not.toBeInTheDocument();
 		expect(screen.queryByText("TODOS")).not.toBeInTheDocument();
 		await user.click(
 			screen.getByRole("button", {
@@ -127,6 +157,6 @@ describe("landing sidebar", () => {
 		);
 		await screen.findByText("TODOS");
 		expect(screen.queryByText("COMMITS")).not.toBeInTheDocument();
-		expect(screen.queryByText("abc plan work")).not.toBeInTheDocument();
+		expect(screen.queryByText("plan work")).not.toBeInTheDocument();
 	});
 });

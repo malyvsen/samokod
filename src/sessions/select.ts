@@ -46,7 +46,13 @@ export function selectedEntry(
 
 export type SideContent =
 	| { kind: "todos"; todos: TodoView[] }
-	| { kind: "commits"; commits: string[] };
+	| {
+			kind: "commits";
+			commits: string[];
+			done: number;
+			total: number;
+			working: boolean;
+	  };
 
 /// Sidebar content for the selected session: commits when the selected
 /// session has the landing role on a landing plan, else todos. Pure.
@@ -56,7 +62,26 @@ export function sideContentFor(
 	todos: TodoView[],
 ): SideContent {
 	if (entry?.phase === "landing" && selectedKey?.role === "landing") {
-		return { kind: "commits", commits: entry.commits };
+		const working =
+			entry.sessions.find((session) => session.role === "landing")?.working ??
+			false;
+		const progress = entry.landing_progress;
+		if (progress == null) {
+			return {
+				kind: "commits",
+				commits: entry.commits,
+				done: 0,
+				total: entry.commits.length,
+				working,
+			};
+		}
+		return {
+			kind: "commits",
+			commits: entry.commits,
+			done: Math.min(progress.done, progress.total),
+			total: progress.total,
+			working,
+		};
 	}
 	return { kind: "todos", todos };
 }

@@ -878,7 +878,12 @@ export function App() {
 						{isScoping ? (
 							<PlanMdPane text={planMd} />
 						) : side.kind === "commits" ? (
-							<CommitsPanel commits={side.commits} />
+							<CommitsPanel
+								commits={side.commits}
+								done={side.done}
+								total={side.total}
+								working={side.working}
+							/>
 						) : (
 							<SidePanel todos={side.todos} />
 						)}
