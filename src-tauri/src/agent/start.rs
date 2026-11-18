@@ -112,8 +112,6 @@ impl WindowState {
     /// its first turn already carried the role message. Re-derives
     /// in-memory-only state from the authoritative opencode session, so no
     /// cross-restart memory can go stale. Pure; no-op on unknown keys.
-    /// Temporary `allow` until the replay wiring lands in the next commit.
-    #[allow(dead_code)]
     pub(crate) fn note_replayed_user(&mut self, key: &SessionKey) {
         if let Some(session) = self.sessions.get_mut(key) {
             session.plan.prefixed = true;
@@ -325,6 +323,42 @@ mod tests {
         let key = key();
         state.note_replayed_user(&key);
         assert!(!state.sessions.contains_key(&key));
+    }
+
+    #[test]
+    fn restart_replay_restores_executing_prefix() {
+        let mut state = WindowState::default();
+        let key = SessionKey {
+            plan: key().plan.clone(),
+            role: SessionRole::Executing,
+        };
+        state.sessions.insert(
+            key.clone(),
+            crate::agent::LiveSession::fresh(
+                ActivePlan::executing(key.plan.clone()),
+                crate::repo_state::RepoState::default(),
+            ),
+        );
+        assert!(!state.sessions.get(&key).expect("session").plan.prefixed);
+        state.note_replayed_user(&key);
+        assert!(state.sessions.get(&key).expect("session").plan.prefixed);
+    }
+
+    #[test]
+    fn empty_replay_leaves_executing_unprefixed() {
+        let mut state = WindowState::default();
+        let key = SessionKey {
+            plan: key().plan.clone(),
+            role: SessionRole::Executing,
+        };
+        state.sessions.insert(
+            key.clone(),
+            crate::agent::LiveSession::fresh(
+                ActivePlan::executing(key.plan.clone()),
+                crate::repo_state::RepoState::default(),
+            ),
+        );
+        assert!(!state.sessions.get(&key).expect("session").plan.prefixed);
     }
 
     fn window_is(
