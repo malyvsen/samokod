@@ -6,7 +6,7 @@ If needed, put supporting material (mockups, notes, sketches) under `{{PLAN_DIR}
 
 Plan structure:
 ```
-# Plan title
+# A short title for the plan, e.g. "Violin chromaticism" or "Calendar busy indicator"
 
 One or two sentences explaining the ultimate objective of the plan.
 
