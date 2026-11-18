@@ -8,8 +8,8 @@
 // commits clean up in evergreening first; empty work means nothing changed
 // and the plan takes the landing path as if intent were off.
 // `next_action` is pure over a plain view (unit-tested with no git repo);
-// `transition` is the single effectful core that the manual commands and
-// the pump all go through, so the pump adds no second copy of any step.
+// `transition` is the single effectful core that the manual approve and
+// the pump go through, so the pump adds no second copy of any step.
 use std::collections::HashSet;
 
 use crate::opencode;
@@ -25,8 +25,8 @@ use super::{AgentManager, lock_backend};
 /// plan per pass. Scoping plans always wait for the manual `>` click and
 /// never fire here. Many waiters sit in `landing/`, one agent runs at the
 /// head; fast finishes never need the agent so they proceed from any
-/// position even while a rebase is active. Evergreening needs no gate:
-/// worktrees are independent.
+/// position even while a rebase is active. Evergreening needs no
+/// landing-queue gate: worktrees are independent.
 // Dirty or diverged plans hold and are skipped until a later trigger,
 // showing only their existing markers. A landing whose target moved under
 // it re-rebases automatically while still on A. Selection never moves here
@@ -157,13 +157,13 @@ impl AgentManager {
             Phase::Scoping | Phase::Completed | Phase::Cancelled => (false, false, false),
         };
         let landing = landing_queue::position_in(landing_queue, &plan.name);
-        let landing_started = stored.session(SessionRole::Landing).is_some();
-        let has_session = match plan.phase {
-            Phase::Executing => stored.session(SessionRole::Executing).is_some(),
-            Phase::Evergreening => stored.session(SessionRole::Evergreening).is_some(),
-            Phase::Scoping | Phase::Landing | Phase::Completed | Phase::Cancelled => true,
+        let started = match plan.phase {
+            Phase::Executing | Phase::Evergreening | Phase::Landing => {
+                stored.session(role).is_some()
+            }
+            Phase::Scoping | Phase::Completed | Phase::Cancelled => false,
         };
-        if !has_session {
+        if !started && matches!(plan.phase, Phase::Executing | Phase::Evergreening) {
             log::warn!(
                 "automatic view for {} held: no {:?} session yet",
                 plan.name,
@@ -180,8 +180,7 @@ impl AgentManager {
             ffable,
             has_commits,
             landing,
-            landing_started,
-            has_session,
+            started,
         }
     }
 
@@ -211,8 +210,8 @@ impl AgentManager {
     /// Shared transition core: idle gate, repo snapshot, `PlanRef` build,
     /// existence check, live-session drop, prompted carry, follow-own-move
     /// selection, and plans update happen once here for every entry point.
-    /// The manual commands map their session onto a `Transition` and
-    /// delegate; the pump calls this directly.
+    /// The manual approve maps its session onto a `Transition` and
+    /// delegates; the pump calls this directly.
     pub(crate) async fn transition(
         &self,
         window: &str,
@@ -589,7 +588,7 @@ impl AgentManager {
     }
 }
 
-/// One transition the pump or a manual command can perform. At most one per
+/// One transition the pump or the manual approve can perform. At most one per
 /// plan per pump pass. `Execute` is manual-only (the header `>` click) and
 /// never fires from the pump; `BeginEvergreening` starts the cleanup agent
 /// in the same worktree; `FinishExecuting` and `FinishEvergreening` are the
@@ -625,10 +624,9 @@ impl Transition {
 
 /// Plain view of one plan for the pure decision: phase, stored mode and
 /// evergreen intent, idle (no turn running), worktree dirtiness and
-/// fast-forwardability, commit presence, queue position, whether the
-/// landing agent already started (stored session ID), and whether the
-/// current work phase ran yet (stored executing or evergreening session
-/// ID; always true outside those phases).
+/// fast-forwardability, commit presence, queue position, and whether the
+/// phase's agent started yet (stored session ID; unused for scoping,
+/// completed, and cancelled, which never fire).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlanView {
     pub name: String,
@@ -640,17 +638,16 @@ pub(crate) struct PlanView {
     pub ffable: bool,
     pub has_commits: bool,
     pub landing: LandingPosition,
-    pub landing_started: bool,
-    pub has_session: bool,
+    pub started: bool,
 }
 
 /// Pure automation decision over one plan: at most one transition. Scoping
 /// always waits for the manual `>` click and never fires here. Manual
 /// plans hold; running turns hold; dirty worktrees hold. Executing and
-/// evergreening plans also hold until their agent started (stored session
-/// ID), so a fresh approval never completes before the first turn.
-/// Executing plans with evergreen intent and fresh commits clean up first; without intent
-/// or without commits they queue for landing. Evergreening plans finish
+/// evergreening plans also hold until their agent started, so a fresh
+/// approval never completes before the first turn. Executing plans with
+/// evergreen intent and fresh commits clean up first; without intent or
+/// without commits they queue for landing. Evergreening plans finish
 /// directly when ffable, else queue for landing. Landing plans finish
 /// directly when ffable from any position; clean non-ffable landings start
 /// fresh at the head or rebase when already started, and hold while
@@ -662,7 +659,7 @@ pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
     match view.phase {
         Phase::Scoping | Phase::Completed | Phase::Cancelled => None,
         Phase::Executing => {
-            if !view.has_session || view.dirty {
+            if !view.started || view.dirty {
                 None
             } else if view.evergreen && view.has_commits {
                 Some(Transition::BeginEvergreening {
@@ -679,7 +676,7 @@ pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
             }
         }
         Phase::Evergreening => {
-            if !view.has_session || view.dirty {
+            if !view.started || view.dirty {
                 None
             } else if view.ffable {
                 Some(Transition::FinishEvergreening {
@@ -700,11 +697,9 @@ pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
                 })
             } else {
                 match view.landing {
-                    LandingPosition::Head if view.landing_started => {
-                        Some(Transition::RebaseLanding {
-                            plan: view.name.clone(),
-                        })
-                    }
+                    LandingPosition::Head if view.started => Some(Transition::RebaseLanding {
+                        plan: view.name.clone(),
+                    }),
                     LandingPosition::Head => Some(Transition::StartLanding {
                         plan: view.name.clone(),
                     }),
@@ -778,8 +773,7 @@ mod tests {
             } else {
                 LandingPosition::NotLanding
             },
-            landing_started: false,
-            has_session: true,
+            started: true,
         }
     }
 
@@ -1018,22 +1012,36 @@ mod tests {
                 plan: "a".to_string()
             })
         );
+        let unstarted_done = PlanView {
+            ffable: true,
+            started: false,
+            ..view("b", Phase::Landing)
+        };
+        assert_eq!(
+            next_action(&unstarted_done),
+            Some(Transition::FinishLanding {
+                plan: "b".to_string()
+            })
+        );
         let queued_done = PlanView {
             ffable: true,
             landing: LandingPosition::Queued,
-            ..view("b", Phase::Landing)
+            ..view("c", Phase::Landing)
         };
         assert_eq!(
             next_action(&queued_done),
             Some(Transition::FinishLanding {
-                plan: "b".to_string()
+                plan: "c".to_string()
             })
         );
     }
 
     #[test]
     fn head_starts_fresh_and_rebases_once_started() {
-        let fresh = view("a", Phase::Landing);
+        let fresh = PlanView {
+            started: false,
+            ..view("a", Phase::Landing)
+        };
         assert_eq!(
             next_action(&fresh),
             Some(Transition::StartLanding {
@@ -1041,7 +1049,7 @@ mod tests {
             })
         );
         let started = PlanView {
-            landing_started: true,
+            started: true,
             ..view("a", Phase::Landing)
         };
         assert_eq!(
@@ -1089,84 +1097,28 @@ mod tests {
     }
 
     #[test]
-    fn executing_holds_without_execution_proof() {
+    fn executing_holds_until_agent_starts() {
         let fresh = PlanView {
             ffable: true,
-            has_session: false,
+            started: false,
             ..view("a", Phase::Executing)
         };
         assert_eq!(next_action(&fresh), None);
-        let finished = PlanView {
-            ffable: true,
-            has_session: true,
-            ..view("a", Phase::Executing)
-        };
-        assert_eq!(
-            next_action(&finished),
-            Some(Transition::FinishExecuting {
-                plan: "a".to_string()
-            })
-        );
-    }
-
-    #[test]
-    fn executing_with_commits_holds_without_session_instead_of_evergreening() {
-        let fresh = PlanView {
+        let with_commits = PlanView {
             has_commits: true,
-            has_session: false,
+            started: false,
             ..view("a", Phase::Executing)
         };
-        assert_eq!(next_action(&fresh), None);
+        assert_eq!(next_action(&with_commits), None);
     }
 
     #[test]
-    fn evergreening_holds_without_execution_proof() {
+    fn evergreening_holds_until_agent_starts() {
         let fresh = PlanView {
             ffable: true,
-            has_session: false,
+            started: false,
             ..view("a", Phase::Evergreening)
         };
         assert_eq!(next_action(&fresh), None);
-        let finished = PlanView {
-            ffable: true,
-            has_session: true,
-            ..view("a", Phase::Evergreening)
-        };
-        assert_eq!(
-            next_action(&finished),
-            Some(Transition::FinishEvergreening {
-                plan: "a".to_string()
-            })
-        );
-    }
-
-    #[test]
-    fn landing_finishes_without_session_proof() {
-        let done = PlanView {
-            ffable: true,
-            has_session: false,
-            ..view("a", Phase::Landing)
-        };
-        assert_eq!(
-            next_action(&done),
-            Some(Transition::FinishLanding {
-                plan: "a".to_string()
-            })
-        );
-    }
-
-    #[test]
-    fn empty_executing_work_still_finishes_once_the_agent_ran() {
-        let done = PlanView {
-            ffable: true,
-            has_session: true,
-            ..view("a", Phase::Executing)
-        };
-        assert_eq!(
-            next_action(&done),
-            Some(Transition::FinishExecuting {
-                plan: "a".to_string()
-            })
-        );
     }
 }
