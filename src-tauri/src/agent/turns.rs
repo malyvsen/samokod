@@ -432,24 +432,21 @@ pub(crate) fn handle_notification(
     // mapping them outside a replay would double-add every prompt.
     if let Some(chunk) = crate::updates::user_text_of(&notification.update)
         && lock_backend(state)
-            .map(|backend| {
+            .map(|mut backend| {
                 backend
                     .windows
-                    .get(window)
-                    .map(|win| win.is_history_loading(key))
+                    .get_mut(window)
+                    .map(|win| {
+                        if !win.is_history_loading(key) {
+                            return false;
+                        }
+                        win.mark_prefixed(key);
+                        true
+                    })
                     .unwrap_or(false)
             })
             .unwrap_or(false)
     {
-        // A replayed user chunk proves the conversation started, which proves
-        // its first turn already carried the role message. Re-derive the
-        // in-memory-only prefix flag here so a restart between prompts cannot
-        // prefix twice; empty replays emit no chunk and stay unprefixed.
-        if let Some(mut backend) = lock_backend(state)
-            && let Some(win) = backend.windows.get_mut(window)
-        {
-            win.note_replayed_user(key);
-        }
         for bubble in replay_bubbles(key, &chunk) {
             emit_event(
                 app,

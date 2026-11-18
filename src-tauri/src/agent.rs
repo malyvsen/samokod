@@ -230,6 +230,15 @@ impl WindowState {
             .map(|session| session.working)
             .unwrap_or(false)
     }
+
+    /// Mark one session prefixed. History replay calls this on every user
+    /// chunk: any replayed user message proves its first turn already
+    /// carried the role message.
+    fn mark_prefixed(&mut self, key: &SessionKey) {
+        if let Some(session) = self.sessions.get_mut(key) {
+            session.plan.prefixed = true;
+        }
+    }
 }
 
 /// Empty scoping session: no `plan.md`, no prompted flag (memory or
@@ -2199,6 +2208,29 @@ mod tests {
     #[test]
     fn scoping_starts_unprefixed() {
         assert!(!ActivePlan::scoping("n".to_string()).prefixed);
+    }
+
+    #[test]
+    fn replayed_user_marks_prefixed() {
+        let mut state = WindowState::default();
+        let key = test_key();
+        state.sessions.insert(
+            key.clone(),
+            LiveSession::fresh(
+                ActivePlan::scoping(key.plan.clone()),
+                crate::repo_state::RepoState::default(),
+            ),
+        );
+        state.mark_prefixed(&key);
+        assert!(state.sessions.get(&key).expect("session").plan.prefixed);
+    }
+
+    #[test]
+    fn mark_prefixed_on_unknown_key_is_noop() {
+        let mut state = WindowState::default();
+        let key = test_key();
+        state.mark_prefixed(&key);
+        assert!(!state.sessions.contains_key(&key));
     }
 
     #[test]

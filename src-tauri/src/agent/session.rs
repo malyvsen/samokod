@@ -48,7 +48,8 @@ pub(crate) struct ActivePlan {
     /// Role already delivered for this ACP conversation. Executing,
     /// evergreening, and landing send once, as the full first turn or
     /// prefixed to it; scoping prefixes its template server-side to the
-    /// first prompt.
+    /// first prompt. In-memory only: history replay re-derives it from any
+    /// user message, so no cross-restart memory can go stale.
     pub(crate) prefixed: bool,
 }
 
