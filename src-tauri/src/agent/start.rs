@@ -106,6 +106,19 @@ impl WindowState {
         self.history_loading.remove(key);
         self.history_loaded.remove(key);
     }
+
+    /// Restore the one-time role prefix from a replayed user message: any
+    /// replayed user chunk proves the conversation started, which proves
+    /// its first turn already carried the role message. Re-derives
+    /// in-memory-only state from the authoritative opencode session, so no
+    /// cross-restart memory can go stale. Pure; no-op on unknown keys.
+    /// Temporary `allow` until the replay wiring lands in the next commit.
+    #[allow(dead_code)]
+    pub(crate) fn note_replayed_user(&mut self, key: &SessionKey) {
+        if let Some(session) = self.sessions.get_mut(key) {
+            session.plan.prefixed = true;
+        }
+    }
 }
 
 /// RAII warm claim: releases on drop so every early return settles it.
@@ -275,6 +288,43 @@ mod tests {
         let key = key();
         assert!(state.claim_warm(&key));
         assert!(state.claim_history(&key));
+    }
+
+    #[test]
+    fn fresh_entry_starts_unprefixed() {
+        let mut state = WindowState::default();
+        let key = key();
+        state.sessions.insert(
+            key.clone(),
+            crate::agent::LiveSession::fresh(
+                ActivePlan::scoping(key.plan.clone()),
+                crate::repo_state::RepoState::default(),
+            ),
+        );
+        assert!(!state.sessions.get(&key).expect("session").plan.prefixed);
+    }
+
+    #[test]
+    fn replayed_user_marks_prefixed() {
+        let mut state = WindowState::default();
+        let key = key();
+        state.sessions.insert(
+            key.clone(),
+            crate::agent::LiveSession::fresh(
+                ActivePlan::scoping(key.plan.clone()),
+                crate::repo_state::RepoState::default(),
+            ),
+        );
+        state.note_replayed_user(&key);
+        assert!(state.sessions.get(&key).expect("session").plan.prefixed);
+    }
+
+    #[test]
+    fn replayed_user_on_unknown_key_is_noop() {
+        let mut state = WindowState::default();
+        let key = key();
+        state.note_replayed_user(&key);
+        assert!(!state.sessions.contains_key(&key));
     }
 
     fn window_is(
