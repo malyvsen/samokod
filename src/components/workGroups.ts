@@ -51,21 +51,17 @@ export type RunSummary = {
 /// first-to-last span.
 export function summarizeRun(items: RunItem[], now?: number): RunSummary {
 	let durationMs: number | null = null;
-	if (items.length > 0) {
-		const ats = items
-			.map((item) => item.at)
-			.filter((at): at is number => at !== undefined);
-		if (ats.length === items.length) {
-			const starts = items.flatMap((item) =>
-				item.kind === "thought" && item.at !== undefined
-					? [item.at, item.at - item.ms]
-					: [item.at as number],
-			);
-			durationMs =
-				now !== undefined
-					? now - Math.min(...starts)
-					: Math.max(...starts) - Math.min(...starts);
-		}
+	const stamped = items.filter(
+		(item): item is RunItem & { at: number } => item.at !== undefined,
+	);
+	if (stamped.length > 0 && stamped.length === items.length) {
+		const bounds = stamped.flatMap((item) =>
+			item.kind === "thought" ? [item.at - item.ms, item.at] : [item.at],
+		);
+		durationMs =
+			now !== undefined
+				? now - Math.min(...bounds)
+				: Math.max(...bounds) - Math.min(...bounds);
 	}
 	const toolCounts = new Map<string, number>();
 	let thinkCount = 0;
