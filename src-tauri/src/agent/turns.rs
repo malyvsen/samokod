@@ -1086,6 +1086,7 @@ mod tests {
             has_commits: true,
             landing: LandingPosition::NotLanding,
             landing_started: false,
+            has_session: true,
         };
         assert_eq!(next_action(&held), None);
         let path = executing.path(root).join(plans::STATE_FILE);

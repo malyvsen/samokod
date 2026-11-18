@@ -158,6 +158,18 @@ impl AgentManager {
         };
         let landing = landing_queue::position_in(landing_queue, &plan.name);
         let landing_started = stored.session(SessionRole::Landing).is_some();
+        let has_session = match plan.phase {
+            Phase::Executing => stored.session(SessionRole::Executing).is_some(),
+            Phase::Evergreening => stored.session(SessionRole::Evergreening).is_some(),
+            Phase::Scoping | Phase::Landing | Phase::Completed | Phase::Cancelled => true,
+        };
+        if !has_session {
+            log::warn!(
+                "automatic view for {} held: no {:?} session yet",
+                plan.name,
+                plan.phase
+            );
+        }
         PlanView {
             name: plan.name.clone(),
             phase: plan.phase,
@@ -169,6 +181,7 @@ impl AgentManager {
             has_commits,
             landing,
             landing_started,
+            has_session,
         }
     }
 
@@ -612,8 +625,10 @@ impl Transition {
 
 /// Plain view of one plan for the pure decision: phase, stored mode and
 /// evergreen intent, idle (no turn running), worktree dirtiness and
-/// fast-forwardability, commit presence, queue position, and whether the
-/// landing agent already started (stored session ID).
+/// fast-forwardability, commit presence, queue position, whether the
+/// landing agent already started (stored session ID), and whether the
+/// current work phase ran yet (stored executing or evergreening session
+/// ID; always true outside those phases).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlanView {
     pub name: String,
@@ -626,12 +641,15 @@ pub(crate) struct PlanView {
     pub has_commits: bool,
     pub landing: LandingPosition,
     pub landing_started: bool,
+    pub has_session: bool,
 }
 
 /// Pure automation decision over one plan: at most one transition. Scoping
 /// always waits for the manual `>` click and never fires here. Manual
-/// plans hold; running turns hold; dirty worktrees hold. Executing plans
-/// with evergreen intent and fresh commits clean up first; without intent
+/// plans hold; running turns hold; dirty worktrees hold. Executing and
+/// evergreening plans also hold until their agent started (stored session
+/// ID), so a fresh approval never completes before the first turn.
+/// Executing plans with evergreen intent and fresh commits clean up first; without intent
 /// or without commits they queue for landing. Evergreening plans finish
 /// directly when ffable, else queue for landing. Landing plans finish
 /// directly when ffable from any position; clean non-ffable landings start
@@ -644,7 +662,7 @@ pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
     match view.phase {
         Phase::Scoping | Phase::Completed | Phase::Cancelled => None,
         Phase::Executing => {
-            if view.dirty {
+            if !view.has_session || view.dirty {
                 None
             } else if view.evergreen && view.has_commits {
                 Some(Transition::BeginEvergreening {
@@ -661,7 +679,7 @@ pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
             }
         }
         Phase::Evergreening => {
-            if view.dirty {
+            if !view.has_session || view.dirty {
                 None
             } else if view.ffable {
                 Some(Transition::FinishEvergreening {
@@ -761,6 +779,7 @@ mod tests {
                 LandingPosition::NotLanding
             },
             landing_started: false,
+            has_session: true,
         }
     }
 
@@ -1067,5 +1086,87 @@ mod tests {
             };
             assert_eq!(next_action(&done), None, "{phase:?} stays put");
         }
+    }
+
+    #[test]
+    fn executing_holds_without_execution_proof() {
+        let fresh = PlanView {
+            ffable: true,
+            has_session: false,
+            ..view("a", Phase::Executing)
+        };
+        assert_eq!(next_action(&fresh), None);
+        let finished = PlanView {
+            ffable: true,
+            has_session: true,
+            ..view("a", Phase::Executing)
+        };
+        assert_eq!(
+            next_action(&finished),
+            Some(Transition::FinishExecuting {
+                plan: "a".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn executing_with_commits_holds_without_session_instead_of_evergreening() {
+        let fresh = PlanView {
+            has_commits: true,
+            has_session: false,
+            ..view("a", Phase::Executing)
+        };
+        assert_eq!(next_action(&fresh), None);
+    }
+
+    #[test]
+    fn evergreening_holds_without_execution_proof() {
+        let fresh = PlanView {
+            ffable: true,
+            has_session: false,
+            ..view("a", Phase::Evergreening)
+        };
+        assert_eq!(next_action(&fresh), None);
+        let finished = PlanView {
+            ffable: true,
+            has_session: true,
+            ..view("a", Phase::Evergreening)
+        };
+        assert_eq!(
+            next_action(&finished),
+            Some(Transition::FinishEvergreening {
+                plan: "a".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn landing_finishes_without_session_proof() {
+        let done = PlanView {
+            ffable: true,
+            has_session: false,
+            ..view("a", Phase::Landing)
+        };
+        assert_eq!(
+            next_action(&done),
+            Some(Transition::FinishLanding {
+                plan: "a".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn empty_executing_work_still_finishes_once_the_agent_ran() {
+        let done = PlanView {
+            ffable: true,
+            has_session: true,
+            ..view("a", Phase::Executing)
+        };
+        assert_eq!(
+            next_action(&done),
+            Some(Transition::FinishExecuting {
+                plan: "a".to_string()
+            })
+        );
     }
 }
