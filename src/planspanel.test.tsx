@@ -1162,8 +1162,6 @@ describe("plans panel", () => {
 
 		test("plan menus anchor to their header above the title tooltip", () => {
 			const css = appCss();
-			const head = /\.phead\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
-			expect(head).toContain("position: relative");
 			const top = /\.phead-top\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(top).toContain("position: relative");
 			const drop = /\.pdrop\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
@@ -1184,8 +1182,6 @@ describe("plans panel", () => {
 
 		test("executing headers stack an ETA and a 3px bar", () => {
 			const css = appCss();
-			const stack = /\.phead\.stack\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
-			expect(stack).toContain("column");
 			const top = /\.phead-top\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(top).toContain("display: flex");
 			const meta = /\.pmeta\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
@@ -1197,6 +1193,23 @@ describe("plans panel", () => {
 			expect(fill).toContain("#7dffc4");
 			const paused = /\.hbar-in\.paused\s+i\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(paused).toContain("#9d9a92");
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing", {
+						working: true,
+						progress: { done: 2, total: 5, eta_secs: 480 },
+					}),
+				],
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const group = planGroup("Shiny, executing, opens Executing");
+			expect(group.querySelector(".bgutter")).not.toBeNull();
+			expect(group.querySelector(".bgutter + .hbar-in")).not.toBeNull();
 		});
 
 		test("mode switch uses green auto and blue manual", () => {

@@ -114,6 +114,9 @@ function PlanGroup({
 				plan={plan}
 				target={target}
 				attention={attention}
+				expanded={expanded}
+				openPath={openPath}
+				openIdx={openIdx}
 				onSelect={onSelect}
 				onExecute={onExecute}
 				onCancel={onCancel}
@@ -142,6 +145,9 @@ function PlanHeader({
 	plan,
 	target,
 	attention,
+	expanded,
+	openPath,
+	openIdx,
 	onSelect,
 	onExecute,
 	onCancel,
@@ -151,6 +157,9 @@ function PlanHeader({
 	plan: PlanEntry;
 	target: SessionKey;
 	attention: AttentionKind | null;
+	expanded: boolean;
+	openPath: AttentionKind | "sel";
+	openIdx: number;
 	onSelect: (session: SessionKey) => void;
 	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
@@ -186,24 +195,30 @@ function PlanHeader({
 			{meta?.eta == null ? null : <span className="pmeta">{meta.eta}</span>}
 		</button>
 	);
+	const top = (
+		<div className="phead-top">
+			{button}
+			{controls}
+		</div>
+	);
 	if (meta === null) {
-		return (
-			<div className="phead">
-				{button}
-				{controls}
-			</div>
-		);
+		return top;
 	}
 	return (
-		<div className="phead stack">
-			<div className="phead-top">
-				{button}
-				{controls}
-			</div>
+		<>
+			{top}
+			<span className="bgutter">
+				{expanded ? (
+					<i
+						className={`v${openIdx >= 0 ? ` c-${openPath}` : ""}`}
+						aria-hidden="true"
+					/>
+				) : null}
+			</span>
 			<div className={`hbar-in${meta.barClass ? ` ${meta.barClass}` : ""}`}>
 				<i style={{ width: `${meta.pct}%` }} />
 			</div>
-		</div>
+		</>
 	);
 }
 

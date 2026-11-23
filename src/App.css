@@ -1218,20 +1218,6 @@ button.arow {
 	padding-top: 0;
 }
 
-.phead {
-	position: relative;
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	min-width: 0;
-}
-
-.phead.stack {
-	flex-direction: column;
-	align-items: stretch;
-	gap: 0;
-}
-
 .phead-top {
 	position: relative;
 	display: flex;
@@ -1338,7 +1324,7 @@ button.arow {
 	background: rgba(255, 255, 255, 0.04);
 }
 
-.phead .plan-name {
+.phead-top .plan-name {
 	flex: 1;
 	min-width: 0;
 }
@@ -1454,6 +1440,20 @@ button.arow {
 	position: absolute;
 	left: 50%;
 	top: 50%;
+	bottom: -1px;
+	width: 1px;
+	margin-left: -0.5px;
+	background: rgba(255, 255, 255, 0.22);
+}
+
+.bgutter {
+	position: relative;
+}
+
+.bgutter .v {
+	position: absolute;
+	left: 50%;
+	top: -1px;
 	bottom: -1px;
 	width: 1px;
 	margin-left: -0.5px;
@@ -1658,6 +1658,7 @@ button.arow {
 }
 
 .mgutter .v.c-sel,
+.bgutter .v.c-sel,
 .ngutter .v.c-sel {
 	background: #fff;
 	box-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
@@ -1672,6 +1673,7 @@ button.arow {
 }
 
 .mgutter .v.c-idle,
+.bgutter .v.c-idle,
 .ngutter .v.c-idle {
 	background: #57c8ff;
 	box-shadow: 0 0 8px rgba(87, 200, 255, 0.7);
@@ -1686,6 +1688,7 @@ button.arow {
 }
 
 .mgutter .v.c-approval,
+.bgutter .v.c-approval,
 .ngutter .v.c-approval {
 	background: #ffd98a;
 	box-shadow: 0 0 8px rgba(255, 217, 138, 0.7);
@@ -1700,6 +1703,7 @@ button.arow {
 }
 
 .mgutter .v.c-failed,
+.bgutter .v.c-failed,
 .ngutter .v.c-failed {
 	background: #ff6b6b;
 	box-shadow: 0 0 8px rgba(255, 107, 107, 0.7);
