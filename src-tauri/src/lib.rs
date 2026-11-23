@@ -382,8 +382,8 @@ fn take_pending_repo(window: Window) -> Option<String> {
     crate::cli::take_pending(&label).map(|path| path.to_string_lossy().to_string())
 }
 
-fn log_level() -> log::LevelFilter {
-    match std::env::var("SAMOKOD_LOG")
+fn log_level(samokod_log: Option<&str>) -> log::LevelFilter {
+    match samokod_log
         .unwrap_or_default()
         .to_ascii_lowercase()
         .as_str()
@@ -396,24 +396,19 @@ fn log_level() -> log::LevelFilter {
     }
 }
 
-/// Stdout logs only in dev or when `SAMOKOD_LOG` opts in; release stays
-/// file-only so detached CLI launches never spew to the terminal.
-fn stdout_logging_enabled(samokod_log: Option<&str>) -> bool {
-    if cfg!(debug_assertions) {
-        return true;
-    }
-    samokod_log.is_some_and(|value| !value.is_empty())
-}
-
 #[cfg(test)]
-mod log_target_tests {
-    use super::stdout_logging_enabled;
+mod tests {
+    use super::log_level;
 
     #[test]
-    fn stdout_opt_in_requires_non_empty_env_in_release() {
-        assert_eq!(stdout_logging_enabled(None), cfg!(debug_assertions));
-        assert_eq!(stdout_logging_enabled(Some("")), cfg!(debug_assertions));
-        assert!(stdout_logging_enabled(Some("info")));
+    fn log_level_maps_known_names() {
+        assert_eq!(log_level(Some("trace")), log::LevelFilter::Trace);
+        assert_eq!(log_level(Some("DEBUG")), log::LevelFilter::Debug);
+        assert_eq!(log_level(Some("warn")), log::LevelFilter::Warn);
+        assert_eq!(log_level(Some("error")), log::LevelFilter::Error);
+        assert_eq!(log_level(None), log::LevelFilter::Info);
+        assert_eq!(log_level(Some("")), log::LevelFilter::Info);
+        assert_eq!(log_level(Some("verbose")), log::LevelFilter::Info);
     }
 }
 
@@ -423,25 +418,6 @@ fn prefs_dir(app: &AppHandle) -> Result<PathBuf, String> {
         log::error!("{message}");
         message
     })
-}
-
-/// Validated repo root when invoked as `samokod <path>`. Exits 1 with a
-/// stderr diagnostic on failure before any window exists: the
-/// single-instance plugin would otherwise swallow the failure in the
-/// already-running process.
-fn cli_launch_root() -> Option<PathBuf> {
-    let raw = cli::first_positional(std::env::args_os())?;
-    let cwd = std::env::current_dir().unwrap_or_else(|error| {
-        eprintln!("samokod: cannot resolve path: {error}");
-        std::process::exit(1);
-    });
-    match cli::resolve_and_validate(&raw, &cwd) {
-        Ok(root) => Some(root),
-        Err(error) => {
-            eprintln!("samokod: {error}");
-            std::process::exit(1);
-        }
-    }
 }
 
 /// Second-process launch: open the forwarded path in this process, or a
@@ -471,7 +447,7 @@ fn handle_second_launch(app: &AppHandle, args: &[String], cwd: String) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     cli::maybe_detach();
-    if let Some(root) = cli_launch_root() {
+    if let Some(root) = cli::launch_root() {
         cli::insert_pending(windows::FIRST_WINDOW_LABEL, root);
     }
     let builder = specta_builder();
@@ -483,11 +459,12 @@ pub fn run() {
         }))
         .setup(|app| {
             app.manage(AgentManager::new(app.handle().clone()));
+            let samokod_log = std::env::var("SAMOKOD_LOG").ok();
             let mut log_builder = tauri_plugin_log::Builder::new()
-                .level(log_level())
+                .level(log_level(samokod_log.as_deref()))
                 .clear_targets()
                 .target(Target::new(TargetKind::LogDir { file_name: None }));
-            if stdout_logging_enabled(std::env::var("SAMOKOD_LOG").ok().as_deref()) {
+            if cfg!(debug_assertions) || cli::log_opt_in(samokod_log.as_deref()) {
                 log_builder = log_builder.target(Target::new(TargetKind::Stdout));
             }
             app.handle().plugin(log_builder.build())?;
