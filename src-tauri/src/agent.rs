@@ -1106,8 +1106,8 @@ pub(crate) struct WorktreeLive {
     pub commits: Vec<String>,
 }
 
-/// Which rebasing step the user asked for. `Begin` moves a diverged work
-/// plan into the queue; `Start` spawns the head's agent fresh.
+/// Which rebasing step the user asked for. `Begin` promotes a queued plan
+/// into rebasing; `Start` spawns the rebasing agent fresh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RebasingStep {
     Begin,
@@ -1115,10 +1115,11 @@ enum RebasingStep {
     Finish,
 }
 
-/// Refuse a rebasing step that cannot run. A dirty worktree never lands;
-/// an already fast-forwardable branch finishes directly instead of
-/// moving or starting rebasing; a diverged branch moves and starts before
-/// finishing. Pure.
+/// Refuse a rebasing step that cannot run. A dirty worktree never rebases.
+/// Promotion has no fast-forwardable gate: ffable plans queue and promote
+/// like any other, then hand to evergreening or finishing. An already
+/// fast-forwardable branch still finishes directly instead of starting the
+/// rebase agent, and a diverged branch starts before finishing. Pure.
 fn gate_rebasing(dirty: bool, ffable: bool, step: RebasingStep) -> Result<(), AgentError> {
     if dirty {
         return Err(AgentError::RequestFailed {
@@ -1126,7 +1127,8 @@ fn gate_rebasing(dirty: bool, ffable: bool, step: RebasingStep) -> Result<(), Ag
         });
     }
     match step {
-        RebasingStep::Begin | RebasingStep::Start => {
+        RebasingStep::Begin => Ok(()),
+        RebasingStep::Start => {
             if ffable {
                 return Err(AgentError::RequestFailed {
                     raw: "already fast-forwardable, land it directly".to_string(),
@@ -1921,12 +1923,14 @@ mod tests {
     fn rebasing_gate_refuses_dirty_and_misplaced_steps() {
         assert!(gate_rebasing(false, true, RebasingStep::Finish).is_ok());
         assert!(gate_rebasing(false, false, RebasingStep::Begin).is_ok());
+        // Promotion has no fast-forwardable gate: ffable plans queue and
+        // promote like any other, then hand to evergreening or finishing.
+        assert!(gate_rebasing(false, true, RebasingStep::Begin).is_ok());
         assert!(gate_rebasing(false, false, RebasingStep::Start).is_ok());
         assert!(gate_rebasing(true, true, RebasingStep::Finish).is_err());
         assert!(gate_rebasing(true, false, RebasingStep::Begin).is_err());
         assert!(gate_rebasing(true, false, RebasingStep::Start).is_err());
         assert!(gate_rebasing(false, false, RebasingStep::Finish).is_err());
-        assert!(gate_rebasing(false, true, RebasingStep::Begin).is_err());
         assert!(gate_rebasing(false, true, RebasingStep::Start).is_err());
     }
 

@@ -1079,7 +1079,6 @@ mod tests {
     #[test]
     fn stop_holds_work_and_holds_pump() {
         use super::super::advance::{PlanView, next_action};
-        use super::super::rebasing_queue::RebasingPosition;
         use crate::plans::Phase;
 
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1105,10 +1104,10 @@ mod tests {
             dirty: false,
             ffable: true,
             has_commits: true,
-            rebasing: RebasingPosition::NotRebasing,
+            queue_position: None,
             started: true,
         };
-        assert_eq!(next_action(&held), None);
+        assert_eq!(next_action(&held, false), None);
         let path = executing.path(root).join(plans::STATE_FILE);
         let before = std::fs::metadata(&path)
             .expect("metadata")

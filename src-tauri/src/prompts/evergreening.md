@@ -1,6 +1,6 @@
 # Introduction
 
-You are working in the git worktree at {{WORKTREE_PATH}}, whose branch is {{WORKTREE_BRANCH}}. The plan at {{PLAN_MD_ABS_PATH}} was just executed here against the target branch {{TARGET_BRANCH}}. The commits below, oldest first, are what a coding agent did in order to carry it out:
+You are working in the git worktree at {{WORKTREE_PATH}}, whose branch is {{WORKTREE_BRANCH}}. The plan at {{PLAN_MD_ABS_PATH}} was just executed here against the target branch {{TARGET_BRANCH}}. The branch was just rebased onto the target, so the cleanup below takes the rebase changes into account. The commits below, oldest first, are what a coding agent did in order to carry it out:
 {{COMMITS}}
 
 # Objective

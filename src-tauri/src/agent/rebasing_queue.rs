@@ -1,50 +1,50 @@
-// Rebasing queue order: oldest-first waiters in `rebasing/`, one agent.
-// The pump moves diverged plans into `rebasing/` in arrival order; only the
-// head runs the rebasing agent, the rest hold with no live session. This
-// module owns that order plus the shared held-guard: moves, spawns,
-// rebases, and all no-spawn guards branch on it.
+// Queued order plus the rebase mutex: oldest-first waiters in `queued/`,
+// at most one plan in `rebasing/` or `evergreening/` at a time. The pump
+// promotes queued plans while the mutex is free; queued plans hold with no
+// live session. This module owns that order plus the shared held-guard:
+// warm, prompts, and history share it instead of ad-hoc phase checks.
 use std::path::Path;
 
 use crate::plans::{self, Phase};
-use crate::types::{SessionKey, SessionRole};
+use crate::types::SessionKey;
 
-/// Where one plan sits in the rebasing queue. No bools: callers match.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RebasingPosition {
-    NotRebasing,
-    Head,
-    Queued,
+/// Queue position inside a precomputed queue: the index oldest-first, or
+/// `None` when the plan is not queued. Pure.
+pub(crate) fn position_in(queue: &[String], plan_name: &str) -> Option<usize> {
+    queue.iter().position(|name| name == plan_name)
 }
 
-/// Queue position for one plan name. Scans `rebasing/` once, resolves
-/// arrivals via `plans::arrival_ms`, oldest first.
-pub(crate) fn position(repo_root: &Path, plan_name: &str) -> RebasingPosition {
-    position_in(&sorted_rebasing_names(repo_root), plan_name)
-}
-
-/// True when the plan waits behind the head.
-pub(crate) fn is_queued(repo_root: &Path, plan_name: &str) -> bool {
-    is_queued_in(&sorted_rebasing_names(repo_root), plan_name)
-}
-
-/// True when a rebasing session must not mint a live agent: it waits behind
-/// the head. Warm, prompts, and history share this instead of ad-hoc
-/// role-plus-scan checks.
+/// True when a session must not mint a live agent: its plan sits in
+/// `queued/`, which owns no live session. Warm, prompts, and history share
+/// this instead of ad-hoc phase checks.
 pub(crate) fn is_held(repo_root: &Path, session: &SessionKey) -> bool {
-    session.role == SessionRole::Rebasing && is_queued(repo_root, &session.plan)
+    plans::PlanRef {
+        name: session.plan.clone(),
+        phase: Phase::Queued,
+    }
+    .path(repo_root)
+    .is_dir()
 }
 
-/// Rebasing names oldest first: `(arrival, name)` order, unstamped last.
-pub(crate) fn sorted_rebasing_names(repo_root: &Path) -> Vec<String> {
+/// True when any plan sits in `rebasing/` or `evergreening/`. Promotion
+/// from queued is gated on this, so at most one plan rebases at a time.
+pub(crate) fn rebase_mutex_held(repo_root: &Path) -> bool {
+    plans::scan_plans(repo_root)
+        .iter()
+        .any(|plan| matches!(plan.phase, Phase::Rebasing | Phase::Evergreening))
+}
+
+/// Queued names oldest first: `(arrival, name)` order, unstamped last.
+pub(crate) fn sorted_queued_names(repo_root: &Path) -> Vec<String> {
     let entries: Vec<(String, i64)> = plans::scan_plans(repo_root)
         .into_iter()
-        .filter(|plan| plan.phase == Phase::Rebasing)
+        .filter(|plan| plan.phase == Phase::Queued)
         .map(|plan| {
             let arrival = plans::arrival_ms(
                 repo_root,
                 &plans::PlanRef {
                     name: plan.name.clone(),
-                    phase: Phase::Rebasing,
+                    phase: Phase::Queued,
                 },
             )
             .unwrap_or(i64::MAX);
@@ -54,41 +54,22 @@ pub(crate) fn sorted_rebasing_names(repo_root: &Path) -> Vec<String> {
     sort_names(entries)
 }
 
-/// Position inside a precomputed queue. Pure.
-pub(crate) fn position_in(queue: &[String], plan_name: &str) -> RebasingPosition {
-    if head(queue) == Some(plan_name) {
-        return RebasingPosition::Head;
-    }
-    if queue.iter().any(|name| name == plan_name) {
-        return RebasingPosition::Queued;
-    }
-    RebasingPosition::NotRebasing
-}
-
-/// True when the plan waits behind the head of a precomputed queue. Pure.
-pub(crate) fn is_queued_in(queue: &[String], plan_name: &str) -> bool {
-    position_in(queue, plan_name) == RebasingPosition::Queued
-}
-
 /// Oldest first by `(arrival, name)`. Pure.
 fn sort_names(mut entries: Vec<(String, i64)>) -> Vec<String> {
     entries.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
     entries.into_iter().map(|(name, _)| name).collect()
 }
 
-/// Oldest entry in a precomputed queue. Pure.
-fn head(queue: &[String]) -> Option<&str> {
-    queue.first().map(String::as_str)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn rebasing_dir(root: &Path, name: &str, entered_at: i64) {
+    use crate::types::SessionRole;
+
+    fn queued_dir(root: &Path, name: &str, entered_at: i64) {
         let plan = plans::PlanRef {
             name: name.to_string(),
-            phase: plans::Phase::Rebasing,
+            phase: plans::Phase::Queued,
         };
         std::fs::create_dir_all(plan.path(root)).expect("mkdir");
         std::fs::write(plan.path(root).join("plan.md"), "# T\n").expect("write");
@@ -97,39 +78,25 @@ mod tests {
         plans::store_state(&plan.path(root), &state);
     }
 
-    fn rebasing_session(plan: &str) -> SessionKey {
+    fn queued_session(plan: &str) -> SessionKey {
         SessionKey {
             plan: plan.to_string(),
-            role: SessionRole::Rebasing,
+            role: SessionRole::Executing,
         }
     }
 
     #[test]
-    fn empty_has_no_head() {
+    fn empty_queue_has_no_positions() {
         let queue: Vec<String> = sort_names(Vec::new());
-        assert_eq!(head(&queue), None);
-        assert_eq!(
-            position_in(&queue, "2026-10-11.02-00-00"),
-            RebasingPosition::NotRebasing
-        );
-    }
-
-    #[test]
-    fn single_rebasing_is_head() {
-        let queue = sort_names(vec![("2026-10-11.02-00-00".to_string(), 100)]);
-        assert_eq!(head(&queue), Some("2026-10-11.02-00-00"));
-        assert_eq!(
-            position_in(&queue, "2026-10-11.02-00-00"),
-            RebasingPosition::Head
-        );
+        assert_eq!(position_in(&queue, "2026-10-11.02-00-00"), None);
     }
 
     #[test]
     fn oldest_arrival_wins() {
         let queue = sort_names(vec![("newer".to_string(), 200), ("older".to_string(), 100)]);
         assert_eq!(queue, vec!["older".to_string(), "newer".to_string()]);
-        assert_eq!(position_in(&queue, "older"), RebasingPosition::Head);
-        assert_eq!(position_in(&queue, "newer"), RebasingPosition::Queued);
+        assert_eq!(position_in(&queue, "older"), Some(0));
+        assert_eq!(position_in(&queue, "newer"), Some(1));
     }
 
     #[test]
@@ -139,27 +106,24 @@ mod tests {
             ("a-plan".to_string(), 100),
         ]);
         assert_eq!(queue, vec!["a-plan".to_string(), "b-plan".to_string()]);
-        assert_eq!(position_in(&queue, "a-plan"), RebasingPosition::Head);
-        assert_eq!(position_in(&queue, "b-plan"), RebasingPosition::Queued);
+        assert_eq!(position_in(&queue, "a-plan"), Some(0));
+        assert_eq!(position_in(&queue, "b-plan"), Some(1));
     }
 
     #[test]
-    fn non_rebasing_is_not_rebasing() {
+    fn outsiders_have_no_position() {
         let queue = sort_names(vec![("a-plan".to_string(), 100)]);
-        assert_eq!(
-            position_in(&queue, "other-plan"),
-            RebasingPosition::NotRebasing
-        );
+        assert_eq!(position_in(&queue, "other-plan"), None);
     }
 
     #[test]
-    fn disk_queue_marks_head_queued_and_outsiders() {
+    fn disk_queue_orders_oldest_first() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
-        rebasing_dir(root, "2026-10-11.02-00-00.old", 100);
-        rebasing_dir(root, "2026-10-11.02-00-01.new", 200);
-        let queue = sorted_rebasing_names(root);
+        queued_dir(root, "2026-10-11.02-00-00.old", 100);
+        queued_dir(root, "2026-10-11.02-00-01.new", 200);
+        let queue = sorted_queued_names(root);
         assert_eq!(
             queue,
             vec![
@@ -167,26 +131,40 @@ mod tests {
                 "2026-10-11.02-00-01.new".to_string()
             ]
         );
-        assert_eq!(
-            position(root, "2026-10-11.02-00-00.old"),
-            RebasingPosition::Head
-        );
-        assert_eq!(
-            position(root, "2026-10-11.02-00-01.new"),
-            RebasingPosition::Queued
-        );
-        assert_eq!(position(root, "missing"), RebasingPosition::NotRebasing);
-        assert!(!is_queued(root, "2026-10-11.02-00-00.old"));
-        assert!(is_queued(root, "2026-10-11.02-00-01.new"));
-        assert!(is_queued_in(&queue, "2026-10-11.02-00-01.new"));
-        assert!(!is_held(root, &rebasing_session("2026-10-11.02-00-00.old")));
-        assert!(is_held(root, &rebasing_session("2026-10-11.02-00-01.new")));
-        assert!(!is_held(
-            root,
-            &SessionKey {
-                plan: "2026-10-11.02-00-01.new".to_string(),
-                role: SessionRole::Executing,
-            }
-        ));
+        assert_eq!(position_in(&queue, "2026-10-11.02-00-00.old"), Some(0));
+        assert_eq!(position_in(&queue, "2026-10-11.02-00-01.new"), Some(1));
+        assert_eq!(position_in(&queue, "missing"), None);
+    }
+
+    #[test]
+    fn mutex_tracks_rebasing_and_evergreening() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        assert!(!rebase_mutex_held(root));
+        queued_dir(root, "2026-10-11.02-00-00.waiting", 100);
+        assert!(!rebase_mutex_held(root));
+        let rebasing = plans::PlanRef {
+            name: "2026-10-11.02-00-01.active".to_string(),
+            phase: plans::Phase::Rebasing,
+        };
+        std::fs::create_dir_all(rebasing.path(root)).expect("mkdir");
+        assert!(rebase_mutex_held(root));
+        let greening = plans::PlanRef {
+            name: "2026-10-11.02-00-02.green".to_string(),
+            phase: plans::Phase::Evergreening,
+        };
+        std::fs::create_dir_all(greening.path(root)).expect("mkdir");
+        assert!(rebase_mutex_held(root));
+    }
+
+    #[test]
+    fn held_covers_queued_plans_without_live_sessions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        queued_dir(root, "2026-10-11.02-00-01.new", 200);
+        assert!(is_held(root, &queued_session("2026-10-11.02-00-01.new")));
+        assert!(!is_held(root, &queued_session("missing")));
     }
 }

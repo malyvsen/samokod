@@ -14,7 +14,6 @@ use crate::types::{
 };
 
 use super::AgentManager;
-use super::rebasing_queue;
 use super::scoping_preview_for;
 use super::session::LiveSession;
 use super::{BackendState, WindowState, emit_event, lock_backend};
@@ -218,12 +217,10 @@ pub(crate) fn sorted_entries(
                     .then_with(|| right.0.name.cmp(&left.0.name))
             })
     });
-    let rebasing_queue = rebasing_queue::sorted_rebasing_names(repo_root);
     rows.iter()
         .map(|(plan, state, _)| {
             let (commits, ffable) = branch_state_for(repo_root, checkout_branch, plan);
-            let queued = plan.phase == plans::Phase::Queued
-                || rebasing_queue::is_queued_in(&rebasing_queue, &plan.name);
+            let queued = plan.phase == plans::Phase::Queued;
             let rebasing_progress = rebasing_progress_for(repo_root, plan, state, &commits, ffable);
             PlanEntry {
                 name: plan.name.clone(),
@@ -877,5 +874,30 @@ mod tests {
         assert_eq!(statuses.len(), 1);
         assert_eq!(statuses[0].spend.cost, 0.0);
         assert_eq!(statuses[0].spend.ctx_pct, 0.0);
+    }
+
+    #[test]
+    fn queued_rows_hold_with_no_rebasing_progress() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let plan = plans::PlanRef {
+            name: "2026-09-26.08-41-03.slug".to_string(),
+            phase: plans::Phase::Queued,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].phase, plans::Phase::Queued);
+        assert!(entries[0].queued);
+        assert_eq!(entries[0].rebasing_progress, None);
+        assert_eq!(
+            entries[0]
+                .sessions
+                .iter()
+                .map(|status| status.role)
+                .collect::<Vec<_>>(),
+            vec![SessionRole::Scoping, SessionRole::Executing]
+        );
     }
 }
