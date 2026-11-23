@@ -470,6 +470,7 @@ fn handle_second_launch(app: &AppHandle, args: &[String], cwd: String) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    cli::maybe_detach();
     if let Some(root) = cli_launch_root() {
         cli::insert_pending(windows::FIRST_WINDOW_LABEL, root);
     }

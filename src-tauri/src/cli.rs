@@ -3,8 +3,12 @@
 // window's mount claim cannot race the frontend load.
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+
+/// Internal marker for the detached child; never user-facing.
+pub const DETACHED_ENV: &str = "SAMOKOD_DETACHED";
 
 /// Repo roots staged for window labels, each claimed once on mount.
 #[derive(Debug, Default)]
@@ -76,6 +80,64 @@ pub fn resolve_and_validate(raw: &Path, cwd: &Path) -> Result<PathBuf, String> {
     let resolved = resolve_path(raw, cwd);
     let info = crate::repo::validate_repo(&resolved)?;
     Ok(PathBuf::from(info.root))
+}
+
+/// Detach when launching from a terminal: not already the detached child,
+/// no `SAMOKOD_LOG` opt-in, and stdout is a tty. Release-only: the caller
+/// also requires `!cfg!(debug_assertions)` so dev and tests stay foreground.
+pub fn should_detach(detached: bool, samokod_log_set: bool, stdout_is_tty: bool) -> bool {
+    !detached && !samokod_log_set && stdout_is_tty
+}
+
+/// True in the detached child spawned by [`maybe_detach`].
+pub fn is_detached() -> bool {
+    std::env::var(DETACHED_ENV).is_ok()
+}
+
+fn samokod_log_set() -> bool {
+    std::env::var("SAMOKOD_LOG").is_ok_and(|value| !value.is_empty())
+}
+
+/// First-instance terminal launch: validate the path synchronously so errors
+/// stay visible, then respawn detached with stdio nulled and exit the parent
+/// so the terminal returns immediately. Child and non-tty launches fall
+/// through to the normal startup path.
+pub fn maybe_detach() {
+    let detached = is_detached();
+    if detached || cfg!(debug_assertions) {
+        return;
+    }
+    if !should_detach(detached, samokod_log_set(), std::io::stdout().is_terminal()) {
+        return;
+    }
+    if let Some(raw) = first_positional(std::env::args_os()) {
+        let cwd = std::env::current_dir().unwrap_or_else(|error| {
+            eprintln!("samokod: cannot resolve path: {error}");
+            std::process::exit(1);
+        });
+        if let Err(error) = resolve_and_validate(&raw, &cwd) {
+            eprintln!("samokod: {error}");
+            std::process::exit(1);
+        }
+    }
+    let exe = std::env::current_exe().unwrap_or_else(|error| {
+        eprintln!("samokod: cannot relaunch: {error}");
+        std::process::exit(1);
+    });
+    let status = std::process::Command::new(exe)
+        .args(std::env::args_os().skip(1))
+        .env(DETACHED_ENV, "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    match status {
+        Ok(_) => std::process::exit(0),
+        Err(error) => {
+            eprintln!("samokod: cannot relaunch: {error}");
+            std::process::exit(1);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -178,5 +240,32 @@ mod tests {
         assert_eq!(pending.take("a"), Some(PathBuf::from("/repo-a")));
         assert_eq!(pending.take("a"), None);
         assert_eq!(pending.take("b"), Some(PathBuf::from("/repo-b")));
+    }
+
+    #[test]
+    fn detach_requires_foreground_terminal_without_log_opt_in() {
+        assert!(should_detach(false, false, true));
+        assert!(!should_detach(true, false, true));
+        assert!(!should_detach(false, true, true));
+        assert!(!should_detach(false, false, false));
+        assert!(!should_detach(true, true, false));
+    }
+
+    #[test]
+    fn detached_flag_wiring_matches_spawn_and_check() {
+        assert_eq!(DETACHED_ENV, "SAMOKOD_DETACHED");
+        unsafe {
+            std::env::remove_var(DETACHED_ENV);
+        }
+        assert!(!is_detached());
+        unsafe {
+            std::env::set_var(DETACHED_ENV, "1");
+        }
+        assert!(is_detached());
+        assert!(!should_detach(is_detached(), false, true));
+        unsafe {
+            std::env::remove_var(DETACHED_ENV);
+        }
+        assert!(!is_detached());
     }
 }
