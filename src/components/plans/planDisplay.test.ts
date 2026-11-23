@@ -113,7 +113,7 @@ describe("attentionFor", () => {
 		).toBe("failed");
 	});
 
-	test("ignores working sessions", () => {
+	test("stays quiet for plain working sessions", () => {
 		expect(
 			attentionFor(
 				plan("run", "scoping", [testStatus("scoping", { working: true })]),
@@ -127,6 +127,9 @@ describe("attentionFor", () => {
 				]),
 			),
 		).toBeNull();
+	});
+
+	test("approval and failure win over working", () => {
 		expect(
 			attentionFor(
 				plan("wait", "scoping", [

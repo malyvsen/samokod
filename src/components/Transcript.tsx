@@ -49,6 +49,13 @@ export function Transcript({
 		!items.some((item) => item.kind === "user" && item.text === lead);
 	const groups = groupRuns(items);
 	const now = useNow(working);
+	// Bind the owning session once so approval cards answer their own
+	// session. A null session disables the card, matching onRetry/onStop.
+	const boundAnswer =
+		session === null
+			? null
+			: (toolCallId: string, optionId: string) =>
+					onAnswer(session, toolCallId, optionId);
 	return (
 		<>
 			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
@@ -67,19 +74,17 @@ export function Transcript({
 							key={group.items[0].id}
 							items={group.items}
 							onRetry={onRetry}
-							onAnswer={onAnswer}
+							onAnswer={boundAnswer}
 							isLive={working && index === groups.length - 1}
 							now={now}
 							onStop={onStop}
-							session={session}
 						/>
 					) : (
 						<ItemRow
 							key={group.item.id}
 							item={group.item}
 							onRetry={onRetry}
-							onAnswer={onAnswer}
-							session={session}
+							onAnswer={boundAnswer}
 						/>
 					),
 				)}
@@ -117,28 +122,23 @@ function WorkBox({
 	isLive = false,
 	now = Date.now(),
 	onStop = null,
-	session,
 }: {
 	items: RunItem[];
 	onRetry: (() => void) | null;
-	onAnswer: (session: SessionKey, toolCallId: string, optionId: string) => void;
+	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
 	isLive?: boolean;
 	now?: number;
 	onStop?: (() => void) | null;
-	session: SessionKey | null;
 }) {
 	const hasUnresolvedApproval = items.some(
 		(item) => item.kind === "approval" && !item.resolved,
 	);
-	const unresolvedCount = items.filter(
-		(item) => item.kind === "approval" && !item.resolved,
-	).length;
 	const [open, setOpen] = useState(hasUnresolvedApproval);
 	useEffect(() => {
-		if (unresolvedCount > 0) {
+		if (hasUnresolvedApproval) {
 			setOpen(true);
 		}
-	}, [unresolvedCount]);
+	}, [hasUnresolvedApproval]);
 	const workRef = useRef<HTMLDivElement>(null);
 	const summary = summarizeRun(items, isLive ? now : undefined);
 	const duration =
@@ -232,7 +232,6 @@ function WorkBox({
 							item={item}
 							onRetry={onRetry}
 							onAnswer={onAnswer}
-							session={session}
 						/>
 					),
 				)}
@@ -279,12 +278,10 @@ function ItemRow({
 	item,
 	onRetry,
 	onAnswer,
-	session,
 }: {
 	item: Exclude<TranscriptItem, { kind: "thought" }>;
 	onRetry: (() => void) | null;
-	onAnswer: (session: SessionKey, toolCallId: string, optionId: string) => void;
-	session: SessionKey | null;
+	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
 }) {
 	switch (item.kind) {
 		case "user":
@@ -343,11 +340,8 @@ function ItemRow({
 							<button
 								className="tbtn primary"
 								type="button"
-								disabled={item.resolved || session === null}
-								onClick={() =>
-									session !== null &&
-									onAnswer(session, permission.tool_call_id, allow.id)
-								}
+								disabled={item.resolved || onAnswer === null}
+								onClick={() => onAnswer?.(permission.tool_call_id, allow.id)}
 							>
 								allow once
 							</button>
@@ -356,11 +350,8 @@ function ItemRow({
 							<button
 								className="tbtn danger"
 								type="button"
-								disabled={item.resolved || session === null}
-								onClick={() =>
-									session !== null &&
-									onAnswer(session, permission.tool_call_id, reject.id)
-								}
+								disabled={item.resolved || onAnswer === null}
+								onClick={() => onAnswer?.(permission.tool_call_id, reject.id)}
 							>
 								reject
 							</button>

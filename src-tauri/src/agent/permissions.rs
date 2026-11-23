@@ -86,38 +86,26 @@ pub(crate) async fn handle_permission_request(
     expected: &super::WindowIncarnation,
 ) {
     let is_current = super::check_current(state, window, expected);
-    let current = lock_backend(state).and_then(|backend| {
-        backend
-            .windows
-            .get(window)?
-            .sessions
-            .get(key)
-            .and_then(|session| session.session_id.clone())
-    });
-    let session_matches = match current {
-        Some(current) => request.session_id.to_string() == current,
-        None => true,
-    };
-    let options = crate::permissions::to_view(&request.options);
-    let has_options = !options.is_empty();
-    let is_replaying = lock_backend(state)
+    let (session_matches, is_replaying) = lock_backend(state)
         .map(|backend| {
-            backend
-                .windows
-                .get(window)
-                .map(|win| win.is_history_loading(key))
-                .unwrap_or(false)
+            let win = backend.windows.get(window);
+            let matches = win
+                .and_then(|win| win.sessions.get(key))
+                .and_then(|session| session.session_id.clone())
+                .is_none_or(|current| request.session_id.to_string() == current);
+            let replaying = win.map(|win| win.is_history_loading(key)).unwrap_or(false);
+            (matches, replaying)
         })
-        .unwrap_or(false);
-    match route_permission(is_current, session_matches, has_options, is_replaying) {
-        PermissionRoute::Cancel => {
-            let context = if !is_current {
-                "for stale incarnation"
-            } else if !session_matches {
-                "for stale session"
-            } else {
-                "for empty options"
-            };
+        .unwrap_or((true, false));
+    let options = crate::permissions::to_view(&request.options);
+    let gate = PermissionGate {
+        is_current,
+        session_matches,
+        has_options: !options.is_empty(),
+        is_replaying,
+    };
+    match route_permission(gate) {
+        PermissionRoute::Cancel(context) => {
             answer_cancelled(responder, context);
             return;
         }
@@ -271,31 +259,33 @@ fn emit_replayed_approval(
     );
 }
 
-/// Where one permission request goes. Pure so the stall fix stays testable
+/// Where one permission request goes. Pure so routing stays testable
 /// without an `AppHandle`.
 #[derive(Debug, PartialEq, Eq)]
 enum PermissionRoute {
     Ask,
-    Cancel,
+    Cancel(&'static str),
     Replay,
 }
 
-fn route_permission(
+struct PermissionGate {
     is_current: bool,
     session_matches: bool,
     has_options: bool,
     is_replaying: bool,
-) -> PermissionRoute {
-    if !is_current {
-        return PermissionRoute::Cancel;
+}
+
+fn route_permission(gate: PermissionGate) -> PermissionRoute {
+    if !gate.is_current {
+        return PermissionRoute::Cancel("for stale incarnation");
     }
-    if !session_matches {
-        return PermissionRoute::Cancel;
+    if !gate.session_matches {
+        return PermissionRoute::Cancel("for stale session");
     }
-    if !has_options {
-        return PermissionRoute::Cancel;
+    if !gate.has_options {
+        return PermissionRoute::Cancel("for empty options");
     }
-    if is_replaying {
+    if gate.is_replaying {
         return PermissionRoute::Replay;
     }
     PermissionRoute::Ask
@@ -305,34 +295,48 @@ fn route_permission(
 mod tests {
     use super::*;
 
+    fn gate(
+        is_current: bool,
+        session_matches: bool,
+        has_options: bool,
+        is_replaying: bool,
+    ) -> PermissionGate {
+        PermissionGate {
+            is_current,
+            session_matches,
+            has_options,
+            is_replaying,
+        }
+    }
+
     #[test]
     fn stale_incarnation_cancels() {
         assert_eq!(
-            route_permission(false, true, true, false),
-            PermissionRoute::Cancel
+            route_permission(gate(false, true, true, false)),
+            PermissionRoute::Cancel("for stale incarnation")
         );
     }
 
     #[test]
     fn session_mismatch_cancels() {
         assert_eq!(
-            route_permission(true, false, true, false),
-            PermissionRoute::Cancel
+            route_permission(gate(true, false, true, false)),
+            PermissionRoute::Cancel("for stale session")
         );
     }
 
     #[test]
     fn empty_options_cancel() {
         assert_eq!(
-            route_permission(true, true, false, false),
-            PermissionRoute::Cancel
+            route_permission(gate(true, true, false, false)),
+            PermissionRoute::Cancel("for empty options")
         );
     }
 
     #[test]
     fn replaying_auto_resolves() {
         assert_eq!(
-            route_permission(true, true, true, true),
+            route_permission(gate(true, true, true, true)),
             PermissionRoute::Replay
         );
     }
@@ -340,7 +344,7 @@ mod tests {
     #[test]
     fn live_request_proceeds() {
         assert_eq!(
-            route_permission(true, true, true, false),
+            route_permission(gate(true, true, true, false)),
             PermissionRoute::Ask
         );
     }

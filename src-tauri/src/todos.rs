@@ -1,29 +1,21 @@
-// Todo list read off tool payloads by shape.
+// Todo lists are carried only by the `todowrite` tool. Every other tool -
+// including `task`, `subagent` and `explore` - may carry a `todos`-shaped
+// payload that must stay a plain tool line.
 use crate::types::{TodoChangeView, TodoStatus, TodoView};
 
-/// Extract a todo list from a `tool_call` raw input, if it carries one.
-/// Only the `todowrite` tool (enabled by `experimental.todo`) carries todos;
-/// every other tool name - including `task`, `subagent`, `explore` and
-/// `None` - returns `None` so subagent steps stay visible as tool lines.
-pub fn todos_from_call(
-    tool_name: Option<&str>,
-    raw_input: Option<&serde_json::Value>,
-) -> Option<Vec<TodoView>> {
-    if tool_name != Some("todowrite") {
-        return None;
-    }
-    raw_input.and_then(parse_todos)
-}
+/// Tool whose payloads carry the todo list.
+const TODOS_TOOL: &str = "todowrite";
 
-/// Extract a todo list from a `tool_call_update`, preferring the raw output
-/// over the raw input, if either carries one. Same `todowrite` gate as
-/// `todos_from_call`.
-pub fn todos_from_update(
+/// Extract a todo list from a tool call's payloads, preferring the raw
+/// output over the raw input. Returns `None` unless the tool is `todowrite`
+/// or no payload carries a list, so callers can tell "not a todo payload"
+/// apart from "cleared list".
+pub fn todos_from_tool(
     tool_name: Option<&str>,
     raw_input: Option<&serde_json::Value>,
     raw_output: Option<&serde_json::Value>,
 ) -> Option<Vec<TodoView>> {
-    if tool_name != Some("todowrite") {
+    if tool_name != Some(TODOS_TOOL) {
         return None;
     }
     raw_output
@@ -168,62 +160,20 @@ mod tests {
     }
 
     #[test]
-    fn call_extracts_input() {
+    fn extracts_input() {
         let todos = todo_items();
         let raw = json!({"todos": todos});
-        let fresh = todos_from_call(Some("todowrite"), Some(&raw)).expect("input carries todos");
-        assert_eq!(fresh.len(), 2);
-        assert_eq!(fresh[0].content, "a");
-    }
-
-    #[test]
-    fn call_ignores_empty_input() {
-        assert!(todos_from_call(Some("todowrite"), None).is_none());
-        assert!(todos_from_call(Some("todowrite"), Some(&json!({}))).is_none());
-    }
-
-    #[test]
-    fn call_ignores_non_todowrite_tools() {
-        let todos = todo_items();
-        let raw = json!({"todos": todos});
-        for tool in [
-            None,
-            Some("task"),
-            Some("explore"),
-            Some("subagent"),
-            Some(""),
-        ] {
-            assert!(
-                todos_from_call(tool, Some(&raw)).is_none(),
-                "tool {tool:?} must not parse todos"
-            );
-        }
-    }
-
-    #[test]
-    fn update_prefers_output_over_input() {
-        let input = json!({"todos": [{"content": "a", "status": "pending"}]});
-        let output =
-            json!({"output": "…", "metadata": {"todos": todo_items(), "truncated": false}});
-        let fresh = todos_from_update(Some("todowrite"), Some(&input), Some(&output))
-            .expect("output carries todos");
-        assert_eq!(fresh.len(), 2);
-        assert_eq!(fresh[0].content, "a");
-    }
-
-    #[test]
-    fn update_falls_back_to_input() {
-        let input = json!({"todos": todo_items()});
         let fresh =
-            todos_from_update(Some("todowrite"), Some(&input), None).expect("input carries todos");
+            todos_from_tool(Some("todowrite"), Some(&raw), None).expect("input carries todos");
         assert_eq!(fresh.len(), 2);
+        assert_eq!(fresh[0].content, "a");
     }
 
     #[test]
-    fn update_ignores_payloads_without_todos() {
-        assert!(todos_from_update(Some("todowrite"), None, None).is_none());
+    fn ignores_empty_payloads() {
+        assert!(todos_from_tool(Some("todowrite"), None, None).is_none());
         assert!(
-            todos_from_update(
+            todos_from_tool(
                 Some("todowrite"),
                 Some(&json!({})),
                 Some(&json!({"output": "…"}))
@@ -233,16 +183,42 @@ mod tests {
     }
 
     #[test]
-    fn update_ignores_non_todowrite_tools() {
-        let input = json!({"todos": todo_items()});
+    fn ignores_non_todowrite_tools() {
+        let todos = todo_items();
+        let input = json!({"todos": todos});
         let output =
             json!({"output": "…", "metadata": {"todos": todo_items(), "truncated": false}});
-        for tool in [None, Some("task"), Some("explore"), Some("subagent")] {
+        for tool in [
+            None,
+            Some("task"),
+            Some("explore"),
+            Some("subagent"),
+            Some(""),
+        ] {
             assert!(
-                todos_from_update(tool, Some(&input), Some(&output)).is_none(),
+                todos_from_tool(tool, Some(&input), Some(&output)).is_none(),
                 "tool {tool:?} must not parse todos"
             );
         }
+    }
+
+    #[test]
+    fn prefers_output_over_input() {
+        let input = json!({"todos": [{"content": "a", "status": "pending"}]});
+        let output =
+            json!({"output": "…", "metadata": {"todos": todo_items(), "truncated": false}});
+        let fresh = todos_from_tool(Some("todowrite"), Some(&input), Some(&output))
+            .expect("output carries todos");
+        assert_eq!(fresh.len(), 2);
+        assert_eq!(fresh[0].content, "a");
+    }
+
+    #[test]
+    fn falls_back_to_input() {
+        let input = json!({"todos": todo_items()});
+        let fresh =
+            todos_from_tool(Some("todowrite"), Some(&input), None).expect("input carries todos");
+        assert_eq!(fresh.len(), 2);
     }
 
     #[test]
