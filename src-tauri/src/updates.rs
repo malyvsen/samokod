@@ -167,7 +167,7 @@ fn tool_body(title: &str, kind: Option<ToolKind>, raw_input: Option<&serde_json:
 }
 
 /// Placeholder titles carry no summary, so the input summary replaces them.
-/// Pure.
+/// Both V1 (`bash`) and V2 (`shell`) shell titles count. Pure.
 fn is_placeholder_title(kind: Option<ToolKind>, title: &str) -> bool {
     matches!(
         (kind, title),
@@ -176,7 +176,7 @@ fn is_placeholder_title(kind: Option<ToolKind>, title: &str) -> bool {
             | (Some(ToolKind::Delete), "delete")
             | (Some(ToolKind::Move), "move")
             | (Some(ToolKind::Search), "glob" | "grep")
-            | (Some(ToolKind::Execute), "bash")
+            | (Some(ToolKind::Execute), "bash" | "shell")
             | (Some(ToolKind::Think), "think")
             | (Some(ToolKind::Fetch), "fetch")
             | (Some(ToolKind::SwitchMode), "mode")
@@ -373,6 +373,13 @@ mod tests {
             .raw_input(serde_json::json!({"command": "ls -la"}))
             .status(ToolCallStatus::Completed);
         assert_eq!(format_tool_line(&placeholder_bash).text, "bash: ls -la");
+
+        let placeholder_shell = ToolCall::new("id-1", "shell")
+            .name("shell")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({"command": "ls -la"}))
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&placeholder_shell).text, "shell: ls -la");
 
         let multiline = ToolCall::new("id-1", "")
             .name("bash")

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-programs=(task pnpm node cargo)
+programs=(task pnpm node cargo opencode)
 missing=()
 for prog in "${programs[@]}"; do
   command -v "$prog" >/dev/null || missing+=("$prog")
