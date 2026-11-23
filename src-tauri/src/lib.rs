@@ -396,6 +396,27 @@ fn log_level() -> log::LevelFilter {
     }
 }
 
+/// Stdout logs only in dev or when `SAMOKOD_LOG` opts in; release stays
+/// file-only so detached CLI launches never spew to the terminal.
+fn stdout_logging_enabled(samokod_log: Option<&str>) -> bool {
+    if cfg!(debug_assertions) {
+        return true;
+    }
+    samokod_log.is_some_and(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod log_target_tests {
+    use super::stdout_logging_enabled;
+
+    #[test]
+    fn stdout_opt_in_requires_non_empty_env_in_release() {
+        assert_eq!(stdout_logging_enabled(None), cfg!(debug_assertions));
+        assert_eq!(stdout_logging_enabled(Some("")), cfg!(debug_assertions));
+        assert!(stdout_logging_enabled(Some("info")));
+    }
+}
+
 fn prefs_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_data_dir().map_err(|error| {
         let message = format!("failed to resolve app data dir: {error}");
@@ -461,12 +482,14 @@ pub fn run() {
         }))
         .setup(|app| {
             app.manage(AgentManager::new(app.handle().clone()));
-            app.handle().plugin(
-                tauri_plugin_log::Builder::new()
-                    .level(log_level())
-                    .target(Target::new(TargetKind::Stdout))
-                    .build(),
-            )?;
+            let mut log_builder = tauri_plugin_log::Builder::new()
+                .level(log_level())
+                .clear_targets()
+                .target(Target::new(TargetKind::LogDir { file_name: None }));
+            if stdout_logging_enabled(std::env::var("SAMOKOD_LOG").ok().as_deref()) {
+                log_builder = log_builder.target(Target::new(TargetKind::Stdout));
+            }
+            app.handle().plugin(log_builder.build())?;
             let menu = build_menu(app.handle())?;
             app.set_menu(menu)?;
             Ok(())
