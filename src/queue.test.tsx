@@ -40,6 +40,12 @@ beforeEach(() => {
 	api.cancelTurn.mockResolvedValue(undefined);
 });
 
+function queuedBadges(): HTMLElement[] {
+	return screen
+		.queryAllByText("QUEUED")
+		.filter((node) => node.closest(".sect-head") === null);
+}
+
 async function startWorking() {
 	api.sendPrompt.mockReturnValue(new Promise(() => {}));
 	const user = await openChat(api);
@@ -70,7 +76,7 @@ describe("message queue", () => {
 		const user = await startWorking();
 		await user.keyboard("followup{Enter}");
 		expect(api.sendPrompt).toHaveBeenCalledTimes(1);
-		expect(screen.getByText("QUEUED")).toBeInTheDocument();
+		expect(queuedBadges()).toHaveLength(1);
 		expect(screen.getByText("followup")).toBeInTheDocument();
 		expect(screen.getByText("followup").closest(".body")).not.toBeNull();
 		expect(document.querySelector(".msg.user.queued .body p")).not.toBeNull();
@@ -83,7 +89,7 @@ describe("message queue", () => {
 		await vi.waitFor(() =>
 			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "followup"),
 		);
-		expect(screen.queryByText("QUEUED")).not.toBeInTheDocument();
+		expect(queuedBadges()).toHaveLength(0);
 		expect(screen.getByText("followup")).toBeInTheDocument();
 	});
 
@@ -91,19 +97,18 @@ describe("message queue", () => {
 		const user = await startWorking();
 		await user.keyboard("first{Enter}");
 		await user.keyboard("second{Enter}");
-		const queued = screen.getAllByText("QUEUED");
-		expect(queued).toHaveLength(2);
+		expect(queuedBadges()).toHaveLength(2);
 		emitAppEvent(api, { type: "turn_done", session: testKey() });
 		await vi.waitFor(() =>
 			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "first"),
 		);
-		expect(screen.getAllByText("QUEUED")).toHaveLength(1);
+		expect(queuedBadges()).toHaveLength(1);
 		expect(screen.getByText("second")).toBeInTheDocument();
 		emitAppEvent(api, { type: "turn_done", session: testKey() });
 		await vi.waitFor(() =>
 			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "second"),
 		);
-		expect(screen.queryByText("QUEUED")).not.toBeInTheDocument();
+		expect(queuedBadges()).toHaveLength(0);
 	});
 
 	test("turn_failed holds the queue", async () => {
@@ -117,7 +122,7 @@ describe("message queue", () => {
 			retryable: true,
 		});
 		expect(api.sendPrompt).toHaveBeenCalledTimes(1);
-		expect(screen.getByText("QUEUED")).toBeInTheDocument();
+		expect(queuedBadges()).toHaveLength(1);
 		expect(screen.getByText("followup")).toBeInTheDocument();
 	});
 
@@ -128,7 +133,7 @@ describe("message queue", () => {
 		await vi.waitFor(() =>
 			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "followup"),
 		);
-		expect(screen.queryByText("QUEUED")).not.toBeInTheDocument();
+		expect(queuedBadges()).toHaveLength(0);
 	});
 
 	test("approval never auto-drains", async () => {
@@ -149,7 +154,7 @@ describe("message queue", () => {
 			},
 		});
 		expect(api.sendPrompt).toHaveBeenCalledTimes(1);
-		expect(screen.getByText("QUEUED")).toBeInTheDocument();
+		expect(queuedBadges()).toHaveLength(1);
 	});
 
 	test("history replay drains the queued head", async () => {
@@ -162,7 +167,7 @@ describe("message queue", () => {
 		await vi.waitFor(() =>
 			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "followup"),
 		);
-		expect(screen.queryByText("QUEUED")).not.toBeInTheDocument();
+		expect(queuedBadges()).toHaveLength(0);
 	});
 
 	test("history_done with empty queue sends nothing", async () => {
@@ -171,7 +176,7 @@ describe("message queue", () => {
 		await screen.findByRole("textbox", { name: "Queue a follow-up…" });
 		emitAppEvent(api, { type: "history_done", session: testKey() });
 		expect(api.sendPrompt).not.toHaveBeenCalled();
-		expect(screen.queryByText("QUEUED")).not.toBeInTheDocument();
+		expect(queuedBadges()).toHaveLength(0);
 	});
 
 	test("background turn_done drains that session head", async () => {
@@ -253,7 +258,7 @@ describe("message queue", () => {
 			}),
 		);
 		expect(screen.getByText("aaa followup")).toBeInTheDocument();
-		expect(screen.getByText("QUEUED")).toBeInTheDocument();
+		expect(queuedBadges()).toHaveLength(1);
 	});
 
 	test("idle composer send with queued head sends head first", async () => {
@@ -275,7 +280,7 @@ describe("message queue", () => {
 		);
 		expect(screen.getByText("second")).toBeInTheDocument();
 		expect(screen.getByText("third")).toBeInTheDocument();
-		expect(screen.getAllByText("QUEUED")).toHaveLength(2);
+		expect(queuedBadges()).toHaveLength(2);
 	});
 
 	test("idle composer send with empty queue sends directly", async () => {
@@ -284,7 +289,7 @@ describe("message queue", () => {
 		await vi.waitFor(() =>
 			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello"),
 		);
-		expect(screen.queryByText("QUEUED")).not.toBeInTheDocument();
+		expect(queuedBadges()).toHaveLength(0);
 	});
 });
 
@@ -350,7 +355,7 @@ describe("queued editing", () => {
 		});
 		editor.textContent = "";
 		await user.keyboard("{Enter}");
-		expect(screen.queryByText("QUEUED")).not.toBeInTheDocument();
+		expect(queuedBadges()).toHaveLength(0);
 		expect(screen.queryByText("followup")).not.toBeInTheDocument();
 	});
 
@@ -364,7 +369,7 @@ describe("queued editing", () => {
 			expect(document.querySelector(".queued.blocked")).not.toBeNull(),
 		);
 		expect(api.sendPrompt).toHaveBeenCalledTimes(1);
-		expect(screen.getAllByText("QUEUED")).toHaveLength(2);
+		expect(queuedBadges()).toHaveLength(2);
 	});
 
 	test("editing a non-head item still drains", async () => {
@@ -376,7 +381,7 @@ describe("queued editing", () => {
 		await vi.waitFor(() =>
 			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "first"),
 		);
-		expect(screen.getAllByText("QUEUED")).toHaveLength(1);
+		expect(queuedBadges()).toHaveLength(1);
 	});
 
 	test("editing while working shows no yellow outline", async () => {
@@ -402,7 +407,7 @@ describe("queued editing", () => {
 		);
 		expect(screen.getByText("first edited")).toBeInTheDocument();
 		expect(screen.getByText("second")).toBeInTheDocument();
-		expect(screen.getAllByText("QUEUED")).toHaveLength(1);
+		expect(queuedBadges()).toHaveLength(1);
 	});
 
 	test("edit-commit non-head while idle sends head", async () => {
@@ -422,7 +427,7 @@ describe("queued editing", () => {
 			expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "first"),
 		);
 		expect(screen.getByText("second edited")).toBeInTheDocument();
-		expect(screen.getByText("QUEUED")).toBeInTheDocument();
+		expect(queuedBadges()).toHaveLength(1);
 	});
 });
 

@@ -9,8 +9,9 @@ import { testEntryWith, testStatus } from "./fixtures";
 const SECTIONS = [
 	"SCOPING",
 	"EXECUTING",
-	"EVERGREENING",
+	"QUEUED",
 	"REBASING",
+	"EVERGREENING",
 	"COMPLETED",
 	"CANCELLED",
 ];
@@ -111,7 +112,7 @@ function evergreeningPlan() {
 function sectionHeaders() {
 	return screen
 		.getAllByText(
-			/^(SCOPING|EXECUTING|EVERGREENING|REBASING|COMPLETED|CANCELLED)$/,
+			/^(SCOPING|EXECUTING|QUEUED|REBASING|EVERGREENING|COMPLETED|CANCELLED)$/,
 		)
 		.map((node) => node.textContent);
 }

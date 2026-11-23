@@ -61,12 +61,13 @@ describe("latestRole", () => {
 		expect(latestRole(plan("empty", "scoping", []))).toBe("scoping");
 	});
 
-	test("orders evergreening between executing and rebasing", () => {
+	test("orders queued between executing and rebasing before evergreening", () => {
 		expect(PHASES).toEqual([
 			"scoping",
 			"executing",
-			"evergreening",
+			"queued",
 			"rebasing",
+			"evergreening",
 			"completed",
 			"cancelled",
 		]);
@@ -167,6 +168,23 @@ describe("attentionFor", () => {
 
 	test("ignores plans without sessions", () => {
 		expect(attentionFor(plan("empty", "scoping", []))).toBeNull();
+	});
+
+	test("suppresses idle for queued plans", () => {
+		const queued = testEntryWith(
+			"queued",
+			"queued",
+			"Queued",
+			true,
+			[testStatus("scoping"), testStatus("executing")],
+			false,
+			true,
+			["abc plan work"],
+			true,
+		);
+		expect(attentionFor(queued)).toBeNull();
+		expect(todoProgress(queued)).toBeNull();
+		expect(headerProgress(queued)).toBeNull();
 	});
 
 	test("suppresses idle for queued rebasings", () => {

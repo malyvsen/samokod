@@ -102,7 +102,9 @@ impl ActivePlan {
             plans::Phase::Executing => SessionRole::Executing,
             plans::Phase::Evergreening => SessionRole::Evergreening,
             plans::Phase::Rebasing => SessionRole::Rebasing,
-            plans::Phase::Completed | plans::Phase::Cancelled => return None,
+            plans::Phase::Queued | plans::Phase::Completed | plans::Phase::Cancelled => {
+                return None;
+            }
         };
         Some(SessionKey {
             plan: self.name.clone(),
@@ -111,14 +113,15 @@ impl ActivePlan {
     }
 
     /// Working directory for the session: the plan worktree for executing,
-    /// evergreening, and rebasing plans, the main root for scoping plans.
-    /// Plan files always stay in the main checkout; only the agent's cwd
-    /// moves.
+    /// queued, evergreening, and rebasing plans, the main root for scoping
+    /// plans. Plan files always stay in the main checkout; only the agent's
+    /// cwd moves.
     pub(crate) fn cwd(&self, repo_root: &Path) -> PathBuf {
         match self.phase {
-            plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Rebasing => {
-                crate::worktrees::worktree_path(repo_root, &self.name)
-            }
+            plans::Phase::Executing
+            | plans::Phase::Queued
+            | plans::Phase::Evergreening
+            | plans::Phase::Rebasing => crate::worktrees::worktree_path(repo_root, &self.name),
             plans::Phase::Scoping | plans::Phase::Completed | plans::Phase::Cancelled => {
                 repo_root.to_path_buf()
             }

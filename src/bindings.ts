@@ -219,7 +219,7 @@ export type PermissionView = {
 };
 
 /**  Phase. One directory per phase under `.samokod/plans/`. */
-export type Phase = "scoping" | "executing" | "evergreening" | "rebasing" | "completed" | "cancelled";
+export type Phase = "scoping" | "executing" | "queued" | "rebasing" | "evergreening" | "completed" | "cancelled";
 
 /**  One plan row for the plans list. */
 export type PlanEntry = PlanEntry_Serialize | PlanEntry_Deserialize;

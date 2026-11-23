@@ -15,8 +15,9 @@ use crate::types::SessionRole;
 pub enum Phase {
     Scoping,
     Executing,
-    Evergreening,
+    Queued,
     Rebasing,
+    Evergreening,
     Completed,
     Cancelled,
 }
@@ -26,6 +27,7 @@ impl Phase {
         match self {
             Phase::Scoping => "scoping",
             Phase::Executing => "executing",
+            Phase::Queued => "queued",
             Phase::Evergreening => "evergreening",
             Phase::Rebasing => "rebasing",
             Phase::Completed => "completed",
@@ -37,16 +39,21 @@ impl Phase {
     pub fn is_active(self) -> bool {
         matches!(
             self,
-            Phase::Scoping | Phase::Executing | Phase::Evergreening | Phase::Rebasing
+            Phase::Scoping
+                | Phase::Executing
+                | Phase::Queued
+                | Phase::Evergreening
+                | Phase::Rebasing
         )
     }
 
     /// Every phase in disk-search order. Plan names stay unique across
     /// phases since moves rename rather than copy.
-    pub fn all() -> [Phase; 6] {
+    pub fn all() -> [Phase; 7] {
         [
             Phase::Scoping,
             Phase::Executing,
+            Phase::Queued,
             Phase::Evergreening,
             Phase::Rebasing,
             Phase::Completed,
@@ -344,11 +351,34 @@ pub fn complete(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> 
     Ok(next)
 }
 
-/// Move a diverged executing or evergreening plan to rebasing without
-/// renaming. The fast path never touches `rebasing/`: it completes straight
-/// from the work phase.
+/// Move an executing plan to queued without renaming. The pump promotes
+/// queued plans into rebasing one at a time; the queued plan holds with
+/// no live session until then. Wired into the pump in the next step; the
+/// allow lapses once the transition calls it.
+#[allow(dead_code)]
+pub fn queue(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
+    require_phase(plan, Phase::Executing)?;
+    let next = PlanRef {
+        name: plan.name.clone(),
+        phase: Phase::Queued,
+    };
+    rename(repo_root, plan, &next)?;
+    Ok(next)
+}
+
+/// Move a diverged executing, queued, or evergreening plan to rebasing
+/// without renaming. The fast path never touches `rebasing/`: it completes
+/// straight from the work phase.
 pub fn begin_rebasing(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
-    require_work_phase(plan)?;
+    if !matches!(
+        plan.phase,
+        Phase::Executing | Phase::Queued | Phase::Evergreening
+    ) {
+        return Err(PlanError::WrongPhase {
+            expected: "executing, queued, or evergreening",
+            actual: plan.phase.dir_name(),
+        });
+    }
     let next = PlanRef {
         name: plan.name.clone(),
         phase: Phase::Rebasing,
@@ -508,27 +538,29 @@ fn read_state_file(path: &Path) -> Option<PlanState> {
         }
     }
 }
-/// Sort rank for the plans list: scoping, executing, evergreening,
-/// rebasing, completed, cancelled.
+/// Sort rank for the plans list: scoping, executing, queued, rebasing,
+/// evergreening, completed, cancelled.
 pub fn phase_rank(phase: Phase) -> u8 {
     match phase {
         Phase::Scoping => 0,
         Phase::Executing => 1,
-        Phase::Evergreening => 2,
+        Phase::Queued => 2,
         Phase::Rebasing => 3,
-        Phase::Completed => 4,
-        Phase::Cancelled => 5,
+        Phase::Evergreening => 4,
+        Phase::Completed => 5,
+        Phase::Cancelled => 6,
     }
 }
 
 /// Session roles one plan owns: scoping always, executing once approved,
+/// queued keeps the executing row with no live session of its own,
 /// evergreening on the cleanup path, rebasing on the conflict path.
 /// Completed and cancelled plans keep their rows as history from the
 /// stored session IDs. Pure.
 pub fn roles_for(state: &PlanState, phase: Phase) -> Vec<SessionRole> {
     match phase {
         Phase::Scoping => vec![SessionRole::Scoping],
-        Phase::Executing => vec![SessionRole::Scoping, SessionRole::Executing],
+        Phase::Executing | Phase::Queued => vec![SessionRole::Scoping, SessionRole::Executing],
         Phase::Evergreening => vec![
             SessionRole::Scoping,
             SessionRole::Executing,
@@ -556,18 +588,11 @@ pub fn roles_for(state: &PlanState, phase: Phase) -> Vec<SessionRole> {
     }
 }
 
-/// Every plan directory across all six phases. Missing phase dirs yield
+/// Every plan directory across all seven phases. Missing phase dirs yield
 /// no rows; callers run `ensure_structure` first on open.
 pub fn scan_plans(repo_root: &Path) -> Vec<PlanRef> {
     let mut plans = Vec::new();
-    for phase in [
-        Phase::Scoping,
-        Phase::Executing,
-        Phase::Evergreening,
-        Phase::Rebasing,
-        Phase::Completed,
-        Phase::Cancelled,
-    ] {
+    for phase in Phase::all() {
         let dir = phase_dir(repo_root, phase);
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
@@ -717,6 +742,7 @@ mod tests {
         let dirs: HashSet<&str> = [
             Phase::Scoping,
             Phase::Executing,
+            Phase::Queued,
             Phase::Evergreening,
             Phase::Rebasing,
             Phase::Completed,
@@ -725,13 +751,14 @@ mod tests {
         .iter()
         .map(|phase| phase.dir_name())
         .collect();
-        assert_eq!(dirs.len(), 6);
+        assert_eq!(dirs.len(), 7);
     }
 
     #[test]
     fn only_active_phases_run_chats() {
         assert!(Phase::Scoping.is_active());
         assert!(Phase::Executing.is_active());
+        assert!(Phase::Queued.is_active());
         assert!(Phase::Evergreening.is_active());
         assert!(Phase::Rebasing.is_active());
         assert!(!Phase::Completed.is_active());
@@ -761,6 +788,7 @@ mod tests {
         for phase in [
             Phase::Scoping,
             Phase::Executing,
+            Phase::Queued,
             Phase::Evergreening,
             Phase::Rebasing,
         ] {
@@ -800,11 +828,12 @@ mod tests {
     }
 
     #[test]
-    fn phase_rank_orders_evergreening_between_executing_and_rebasing() {
+    fn phase_rank_orders_queued_between_executing_and_rebasing() {
         assert!(phase_rank(Phase::Scoping) < phase_rank(Phase::Executing));
-        assert!(phase_rank(Phase::Executing) < phase_rank(Phase::Evergreening));
-        assert!(phase_rank(Phase::Evergreening) < phase_rank(Phase::Rebasing));
-        assert!(phase_rank(Phase::Rebasing) < phase_rank(Phase::Completed));
+        assert!(phase_rank(Phase::Executing) < phase_rank(Phase::Queued));
+        assert!(phase_rank(Phase::Queued) < phase_rank(Phase::Rebasing));
+        assert!(phase_rank(Phase::Rebasing) < phase_rank(Phase::Evergreening));
+        assert!(phase_rank(Phase::Evergreening) < phase_rank(Phase::Completed));
         assert!(phase_rank(Phase::Completed) < phase_rank(Phase::Cancelled));
     }
 
@@ -1082,6 +1111,42 @@ mod tests {
     }
 
     #[test]
+    fn queued_moves_through_queued_without_renaming() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
+        std::fs::write(scoping.plan_md(root), "# Shiny\n").expect("write");
+        let executing = execute(root, &scoping).expect("execute");
+        let queued = queue(root, &executing).expect("queue");
+        assert_eq!(queued.phase, Phase::Queued);
+        assert_eq!(queued.name, executing.name);
+        assert!(!executing.path(root).exists());
+        assert!(queued.path(root).is_dir());
+        assert!(matches!(
+            queue(root, &queued),
+            Err(PlanError::WrongPhase { .. })
+        ));
+        assert!(matches!(
+            complete(root, &queued),
+            Err(PlanError::WrongPhase { .. })
+        ));
+        assert_eq!(
+            stored_roles(root, &queued),
+            vec![SessionRole::Scoping, SessionRole::Executing]
+        );
+        let rebasing = begin_rebasing(root, &queued).expect("begin");
+        assert_eq!(rebasing.phase, Phase::Rebasing);
+        assert_eq!(rebasing.name, queued.name);
+        let scoping2 = materialize_scoping(root, "2026-09-26.08-41-04").expect("second");
+        std::fs::write(scoping2.plan_md(root), "# Second\n").expect("write");
+        let executing2 = execute(root, &scoping2).expect("execute second");
+        let queued2 = queue(root, &executing2).expect("queue second");
+        let cancelled = cancel(root, &queued2).expect("cancel queued");
+        assert_eq!(cancelled.phase, Phase::Cancelled);
+    }
+
+    #[test]
     fn mtime_prefers_plan_md_then_dir() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
@@ -1110,6 +1175,7 @@ mod tests {
         for phase in [
             Phase::Scoping,
             Phase::Executing,
+            Phase::Queued,
             Phase::Evergreening,
             Phase::Rebasing,
             Phase::Completed,

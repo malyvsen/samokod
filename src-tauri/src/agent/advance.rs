@@ -116,7 +116,7 @@ impl AgentManager {
         let evergreen = stored.evergreen;
         let role = match plan.phase {
             Phase::Scoping => SessionRole::Scoping,
-            Phase::Executing => SessionRole::Executing,
+            Phase::Executing | Phase::Queued => SessionRole::Executing,
             Phase::Evergreening => SessionRole::Evergreening,
             Phase::Rebasing => SessionRole::Rebasing,
             Phase::Completed | Phase::Cancelled => SessionRole::Scoping,
@@ -154,14 +154,16 @@ impl AgentManager {
                     (true, false, false)
                 }
             },
-            Phase::Scoping | Phase::Completed | Phase::Cancelled => (false, false, false),
+            Phase::Scoping | Phase::Queued | Phase::Completed | Phase::Cancelled => {
+                (false, false, false)
+            }
         };
         let rebasing = rebasing_queue::position_in(rebasing_queue, &plan.name);
         let started = match plan.phase {
             Phase::Executing | Phase::Evergreening | Phase::Rebasing => {
                 stored.session(role).is_some()
             }
-            Phase::Scoping | Phase::Completed | Phase::Cancelled => false,
+            Phase::Scoping | Phase::Queued | Phase::Completed | Phase::Cancelled => false,
         };
         if !started && matches!(plan.phase, Phase::Executing | Phase::Evergreening) {
             log::warn!(
@@ -657,7 +659,7 @@ pub(crate) fn next_action(view: &PlanView) -> Option<Transition> {
         return None;
     }
     match view.phase {
-        Phase::Scoping | Phase::Completed | Phase::Cancelled => None,
+        Phase::Scoping | Phase::Queued | Phase::Completed | Phase::Cancelled => None,
         Phase::Executing => {
             if !view.started || view.dirty {
                 None

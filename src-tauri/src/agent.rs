@@ -761,19 +761,39 @@ impl AgentManager {
                 return Ok(self.plans_update(window));
             }
         }
-        let phase = session::role_phase(session.role);
-        let from = plans::PlanRef {
+        let role_phase = session::role_phase(session.role);
+        let mut from = plans::PlanRef {
             name: session.plan.clone(),
-            phase,
+            phase: role_phase,
         };
         if !from.path(&repo_root).is_dir() {
-            return Err(AgentError::RequestFailed {
-                raw: "no active plan to cancel".to_string(),
+            // Queued plans carry no own role: the viewed executing session
+            // names a plan that lives in `queued/`. Fall back to wherever
+            // the plan actually sits before failing loud.
+            let actual = plans::Phase::all().into_iter().find(|phase| {
+                plans::PlanRef {
+                    name: session.plan.clone(),
+                    phase: *phase,
+                }
+                .path(&repo_root)
+                .is_dir()
             });
+            match actual {
+                Some(phase) => from.phase = phase,
+                None => {
+                    return Err(AgentError::RequestFailed {
+                        raw: "no active plan to cancel".to_string(),
+                    });
+                }
+            }
         }
+        let phase = from.phase;
         if matches!(
             phase,
-            plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Rebasing
+            plans::Phase::Executing
+                | plans::Phase::Queued
+                | plans::Phase::Evergreening
+                | plans::Phase::Rebasing
         ) {
             self.remove_worktree(window, &repo_root, &from.name, true)?;
         }
@@ -1785,6 +1805,7 @@ mod tests {
         write_plan_dir(root, plans::Phase::Completed, "b", Some("B"));
         write_plan_dir(root, plans::Phase::Rebasing, "m", Some("M"));
         write_plan_dir(root, plans::Phase::Evergreening, "g", Some("G"));
+        write_plan_dir(root, plans::Phase::Queued, "q", Some("Q"));
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
         write_plan_dir(root, plans::Phase::Scoping, "s", Some("S"));
         let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
@@ -1794,8 +1815,9 @@ mod tests {
             vec![
                 plans::Phase::Scoping,
                 plans::Phase::Executing,
-                plans::Phase::Evergreening,
+                plans::Phase::Queued,
                 plans::Phase::Rebasing,
+                plans::Phase::Evergreening,
                 plans::Phase::Completed,
                 plans::Phase::Cancelled,
             ]

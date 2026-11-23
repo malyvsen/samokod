@@ -149,7 +149,10 @@ fn branch_state_for(
         plans::Phase::Scoping | plans::Phase::Completed | plans::Phase::Cancelled => {
             return (Vec::new(), false);
         }
-        plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Rebasing => {}
+        plans::Phase::Executing
+        | plans::Phase::Queued
+        | plans::Phase::Evergreening
+        | plans::Phase::Rebasing => {}
     }
     if checkout_branch.is_empty() {
         return (Vec::new(), false);
@@ -219,7 +222,8 @@ pub(crate) fn sorted_entries(
     rows.iter()
         .map(|(plan, state, _)| {
             let (commits, ffable) = branch_state_for(repo_root, checkout_branch, plan);
-            let queued = rebasing_queue::is_queued_in(&rebasing_queue, &plan.name);
+            let queued = plan.phase == plans::Phase::Queued
+                || rebasing_queue::is_queued_in(&rebasing_queue, &plan.name);
             let rebasing_progress = rebasing_progress_for(repo_root, plan, state, &commits, ffable);
             PlanEntry {
                 name: plan.name.clone(),
@@ -671,6 +675,28 @@ mod tests {
         assert!(!ffable);
     }
 
+    #[test]
+    fn branch_state_lists_queued_commits_like_executing() {
+        let dir = git_repo();
+        let root = dir.path();
+        let target = current_branch(root);
+        let base = crate::worktrees::head_commit(root).expect("head");
+        let name = "2026-09-26.14-53-26.queued-check";
+        let plan = plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Queued,
+        };
+        let record = crate::worktrees::create(root, name, &base).expect("create");
+        commit_file(&record.path, "work.txt", "work\n", "plan work");
+        commit_file(root, "target.txt", "target\n", "target moves on");
+        let (commits, ffable) = branch_state_for(root, &target, &plan);
+        assert_eq!(commits.len(), 1);
+        assert!(commits[0].ends_with("plan work"));
+        assert!(!ffable);
+        crate::worktrees::remove(root, &record.path, &record.worktree_branch, true)
+            .expect("remove");
+    }
+
     fn rebasing_plan(name: &str) -> plans::PlanRef {
         plans::PlanRef {
             name: name.to_string(),
@@ -781,6 +807,7 @@ mod tests {
         for phase in [
             plans::Phase::Scoping,
             plans::Phase::Executing,
+            plans::Phase::Queued,
             plans::Phase::Evergreening,
             plans::Phase::Completed,
             plans::Phase::Cancelled,

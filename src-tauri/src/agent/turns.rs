@@ -322,7 +322,10 @@ impl AgentManager {
                     user_text,
                 )
             }
-            plans::Phase::Evergreening | plans::Phase::Completed | plans::Phase::Cancelled => {
+            plans::Phase::Queued
+            | plans::Phase::Evergreening
+            | plans::Phase::Completed
+            | plans::Phase::Cancelled => {
                 return None;
             }
         };

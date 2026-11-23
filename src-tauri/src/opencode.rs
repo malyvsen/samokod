@@ -23,6 +23,7 @@ pub fn agent_for(phase: Phase) -> &'static str {
     match phase {
         Phase::Scoping => SCOPING_AGENT,
         Phase::Executing => EXECUTING_AGENT,
+        Phase::Queued => EXECUTING_AGENT,
         Phase::Evergreening => EVERGREENING_AGENT,
         Phase::Rebasing => REBASING_AGENT,
         Phase::Completed | Phase::Cancelled => EXECUTING_AGENT,

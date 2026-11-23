@@ -9,8 +9,9 @@ import type {
 export const PHASES: Phase[] = [
 	"scoping",
 	"executing",
-	"evergreening",
+	"queued",
 	"rebasing",
+	"evergreening",
 	"completed",
 	"cancelled",
 ];
@@ -40,6 +41,9 @@ export function attentionFor(plan: PlanEntry): AttentionKind | null {
 		return null;
 	}
 	if (plan.phase === "rebasing" && plan.queued) {
+		return null;
+	}
+	if (plan.phase === "queued") {
 		return null;
 	}
 	const role = latestRole(plan);
