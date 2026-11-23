@@ -49,7 +49,7 @@ export function PlanMenu({
 								onClick={() => onSetEvergreen(plan.name, !everOn)}
 								title={
 									everOn
-										? "Will clean after executing. Click to go straight to landing instead."
+										? "Will clean after executing. Click to go straight to rebasing instead."
 										: "Skipping cleanup. Click to clean after executing."
 								}
 							>
@@ -102,7 +102,7 @@ export function PlanMenu({
 									onClick={() => onSetEvergreen(plan.name, !everOn)}
 									title={
 										everOn
-											? "Will clean after executing. Click to go straight to landing instead."
+											? "Will clean after executing. Click to go straight to rebasing instead."
 											: "Skipping cleanup. Click to clean after executing."
 									}
 								>

@@ -109,18 +109,18 @@ describe("commits panel", () => {
 	});
 });
 
-describe("landing sidebar", () => {
-	test("selected landing shows commits while executing shows todos", async () => {
-		const landing = testEntryWith(
-			"2026-09-25.10-54-59.landing",
-			"landing",
+describe("rebasing sidebar", () => {
+	test("selected rebasing shows commits while executing shows todos", async () => {
+		const rebasing = testEntryWith(
+			"2026-09-25.10-54-59.rebasing",
+			"rebasing",
 			"Shiny",
 			true,
 			[
 				testStatus("scoping"),
 				testStatus("executing"),
 				testStatus("evergreening"),
-				testStatus("landing"),
+				testStatus("rebasing"),
 			],
 			false,
 			true,
@@ -133,7 +133,7 @@ describe("landing sidebar", () => {
 			true,
 			[testStatus("scoping"), testStatus("executing")],
 		);
-		const plans = [landing, executing];
+		const plans = [rebasing, executing];
 		api.selectPlan.mockResolvedValue({
 			plans,
 			selected: { plan: executing.name, role: "executing" },
@@ -142,7 +142,7 @@ describe("landing sidebar", () => {
 		});
 		const user = await openChat(api, {
 			plans,
-			selected: { plan: landing.name, role: "landing" },
+			selected: { plan: rebasing.name, role: "rebasing" },
 			scoping_preview: null,
 		});
 		await screen.findByText("COMMITS");

@@ -52,7 +52,7 @@ export type AppEvent_Deserialize = { type: "agent_text"; session: SessionKey; ch
 { type: "agent_thought"; session: SessionKey; chunk: string } | 
 /**
  *  Replayed user message chunk. Only emitted while a session's history
- *  loads, plus the eager executing/landing first prompt which emits
+ *  loads, plus the eager executing/rebasing first prompt which emits
  *  live; live scoping turns append the user bubble optimistically instead.
  */
 { type: "user_text"; session: SessionKey; chunk: string } | { type: "tool_line"; session: SessionKey; line: ToolLineView } | { type: "turn_done"; session: SessionKey } | { type: "turn_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "agent_exited"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "permission_asked"; session: SessionKey; permission: PermissionView } | { type: "permission_resolved"; session: SessionKey; tool_call_id: string } | { type: "config_options"; session: SessionKey; options: ConfigOptionView_Deserialize[] } | { type: "todos_changed"; session: SessionKey; todos: TodoView[]; changes: TodoChangeView[] } | { type: "spend_tick"; session: SessionKey; cost: number | null; ctx_pct: number | null } | { type: "branch_changed"; branch: string } | { type: "session_reset"; session: SessionKey } | 
@@ -99,7 +99,7 @@ export type AppEvent_Serialize = { type: "agent_text"; session: SessionKey; chun
 { type: "agent_thought"; session: SessionKey; chunk: string } | 
 /**
  *  Replayed user message chunk. Only emitted while a session's history
- *  loads, plus the eager executing/landing first prompt which emits
+ *  loads, plus the eager executing/rebasing first prompt which emits
  *  live; live scoping turns append the user bubble optimistically instead.
  */
 { type: "user_text"; session: SessionKey; chunk: string } | { type: "tool_line"; session: SessionKey; line: ToolLineView } | { type: "turn_done"; session: SessionKey } | { type: "turn_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "agent_exited"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "permission_asked"; session: SessionKey; permission: PermissionView } | { type: "permission_resolved"; session: SessionKey; tool_call_id: string } | { type: "config_options"; session: SessionKey; options: ConfigOptionView_Serialize[] } | { type: "todos_changed"; session: SessionKey; todos: TodoView[]; changes: TodoChangeView[] } | { type: "spend_tick"; session: SessionKey; cost: number | null; ctx_pct: number | null } | { type: "branch_changed"; branch: string } | { type: "session_reset"; session: SessionKey } | 
@@ -219,7 +219,7 @@ export type PermissionView = {
 };
 
 /**  Phase. One directory per phase under `.samokod/plans/`. */
-export type Phase = "scoping" | "executing" | "evergreening" | "landing" | "completed" | "cancelled";
+export type Phase = "scoping" | "executing" | "evergreening" | "rebasing" | "completed" | "cancelled";
 
 /**  One plan row for the plans list. */
 export type PlanEntry = PlanEntry_Serialize | PlanEntry_Deserialize;
@@ -247,12 +247,12 @@ export type PlanEntry_Deserialize = {
 	 */
 	commits: string[],
 	/**
-	 *  True when the landing waits behind the head. The head runs the
-	 *  agent; queued landings hold with no live session and no idle dot.
+	 *  True when the rebasing waits behind the head. The head runs the
+	 *  agent; queued rebasings hold with no live session and no idle dot.
 	 */
 	queued: boolean,
-	/**  Landing commit progress with ETA. `Some` for landing plans only. */
-	landing_progress?: ProgressView_Deserialize | null,
+	/**  Rebasing commit progress with ETA. `Some` for rebasing plans only. */
+	rebasing_progress?: ProgressView_Deserialize | null,
 };
 
 /**  One plan row for the plans list. */
@@ -278,12 +278,12 @@ export type PlanEntry_Serialize = {
 	 */
 	commits: string[],
 	/**
-	 *  True when the landing waits behind the head. The head runs the
-	 *  agent; queued landings hold with no live session and no idle dot.
+	 *  True when the rebasing waits behind the head. The head runs the
+	 *  agent; queued rebasings hold with no live session and no idle dot.
 	 */
 	queued: boolean,
-	/**  Landing commit progress with ETA. `Some` for landing plans only. */
-	landing_progress: ProgressView_Serialize | null,
+	/**  Rebasing commit progress with ETA. `Some` for rebasing plans only. */
+	rebasing_progress: ProgressView_Serialize | null,
 };
 
 /**
@@ -330,14 +330,14 @@ export type Prefs_Serialize = {
 /**
  *  Done/total progress with an optional ETA for the plans list.
  *  `eta_secs` is `None` when no ETA text shows (empty, estimating, or
- *  done). Shared by per-session todo progress and landing commit progress.
+ *  done). Shared by per-session todo progress and rebasing commit progress.
  */
 export type ProgressView = ProgressView_Serialize | ProgressView_Deserialize;
 
 /**
  *  Done/total progress with an optional ETA for the plans list.
  *  `eta_secs` is `None` when no ETA text shows (empty, estimating, or
- *  done). Shared by per-session todo progress and landing commit progress.
+ *  done). Shared by per-session todo progress and rebasing commit progress.
  */
 export type ProgressView_Deserialize = {
 	done: number,
@@ -348,7 +348,7 @@ export type ProgressView_Deserialize = {
 /**
  *  Done/total progress with an optional ETA for the plans list.
  *  `eta_secs` is `None` when no ETA text shows (empty, estimating, or
- *  done). Shared by per-session todo progress and landing commit progress.
+ *  done). Shared by per-session todo progress and rebasing commit progress.
  */
 export type ProgressView_Serialize = {
 	done: number,
@@ -391,9 +391,9 @@ export type SessionKey = {
 /**
  *  Role of one session inside a plan. A plan owns one scoping session,
  *  plus one executing session once approved, plus one evergreening session
- *  on the cleanup path, plus one landing session on the conflict path.
+ *  on the cleanup path, plus one rebasing session on the conflict path.
  */
-export type SessionRole = "scoping" | "executing" | "evergreening" | "landing";
+export type SessionRole = "scoping" | "executing" | "evergreening" | "rebasing";
 
 /**
  *  Per-session status for the plans list. The frontend derives the dot:

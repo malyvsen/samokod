@@ -16,7 +16,7 @@ pub enum Phase {
     Scoping,
     Executing,
     Evergreening,
-    Landing,
+    Rebasing,
     Completed,
     Cancelled,
 }
@@ -27,7 +27,7 @@ impl Phase {
             Phase::Scoping => "scoping",
             Phase::Executing => "executing",
             Phase::Evergreening => "evergreening",
-            Phase::Landing => "landing",
+            Phase::Rebasing => "rebasing",
             Phase::Completed => "completed",
             Phase::Cancelled => "cancelled",
         }
@@ -37,7 +37,7 @@ impl Phase {
     pub fn is_active(self) -> bool {
         matches!(
             self,
-            Phase::Scoping | Phase::Executing | Phase::Evergreening | Phase::Landing
+            Phase::Scoping | Phase::Executing | Phase::Evergreening | Phase::Rebasing
         )
     }
 
@@ -48,7 +48,7 @@ impl Phase {
             Phase::Scoping,
             Phase::Executing,
             Phase::Evergreening,
-            Phase::Landing,
+            Phase::Rebasing,
             Phase::Completed,
             Phase::Cancelled,
         ]
@@ -144,7 +144,7 @@ pub struct PlanState {
     #[serde(default)]
     pub evergreening: SessionRecord,
     #[serde(default)]
-    pub landing: SessionRecord,
+    pub rebasing: SessionRecord,
     #[serde(default)]
     pub entered_at: Option<i64>,
     /// Working title derived from the first scoping prompt. Set once,
@@ -177,7 +177,7 @@ impl Default for PlanState {
             scoping: SessionRecord::default(),
             executing: SessionRecord::default(),
             evergreening: SessionRecord::default(),
-            landing: SessionRecord::default(),
+            rebasing: SessionRecord::default(),
             entered_at: None,
             working_title: None,
             manual: false,
@@ -194,7 +194,7 @@ impl PlanState {
             SessionRole::Scoping => &self.scoping,
             SessionRole::Executing => &self.executing,
             SessionRole::Evergreening => &self.evergreening,
-            SessionRole::Landing => &self.landing,
+            SessionRole::Rebasing => &self.rebasing,
         }
     }
 
@@ -204,7 +204,7 @@ impl PlanState {
             SessionRole::Scoping => &mut self.scoping,
             SessionRole::Executing => &mut self.executing,
             SessionRole::Evergreening => &mut self.evergreening,
-            SessionRole::Landing => &mut self.landing,
+            SessionRole::Rebasing => &mut self.rebasing,
         }
     }
 
@@ -344,22 +344,22 @@ pub fn complete(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> 
     Ok(next)
 }
 
-/// Move a diverged executing or evergreening plan to landing without
-/// renaming. The fast path never touches `landing/`: it completes straight
+/// Move a diverged executing or evergreening plan to rebasing without
+/// renaming. The fast path never touches `rebasing/`: it completes straight
 /// from the work phase.
-pub fn begin_landing(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
+pub fn begin_rebasing(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
     require_work_phase(plan)?;
     let next = PlanRef {
         name: plan.name.clone(),
-        phase: Phase::Landing,
+        phase: Phase::Rebasing,
     };
     rename(repo_root, plan, &next)?;
     Ok(next)
 }
 
-/// Finish a landed landing plan. Name travels unchanged.
-pub fn finish_landing(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
-    require_phase(plan, Phase::Landing)?;
+/// Finish a landed rebasing plan. Name travels unchanged.
+pub fn finish_rebasing(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
+    require_phase(plan, Phase::Rebasing)?;
     let next = PlanRef {
         name: plan.name.clone(),
         phase: Phase::Completed,
@@ -509,20 +509,20 @@ fn read_state_file(path: &Path) -> Option<PlanState> {
     }
 }
 /// Sort rank for the plans list: scoping, executing, evergreening,
-/// landing, completed, cancelled.
+/// rebasing, completed, cancelled.
 pub fn phase_rank(phase: Phase) -> u8 {
     match phase {
         Phase::Scoping => 0,
         Phase::Executing => 1,
         Phase::Evergreening => 2,
-        Phase::Landing => 3,
+        Phase::Rebasing => 3,
         Phase::Completed => 4,
         Phase::Cancelled => 5,
     }
 }
 
 /// Session roles one plan owns: scoping always, executing once approved,
-/// evergreening on the cleanup path, landing on the conflict path.
+/// evergreening on the cleanup path, rebasing on the conflict path.
 /// Completed and cancelled plans keep their rows as history from the
 /// stored session IDs. Pure.
 pub fn roles_for(state: &PlanState, phase: Phase) -> Vec<SessionRole> {
@@ -534,11 +534,11 @@ pub fn roles_for(state: &PlanState, phase: Phase) -> Vec<SessionRole> {
             SessionRole::Executing,
             SessionRole::Evergreening,
         ],
-        Phase::Landing => vec![
+        Phase::Rebasing => vec![
             SessionRole::Scoping,
             SessionRole::Executing,
             SessionRole::Evergreening,
-            SessionRole::Landing,
+            SessionRole::Rebasing,
         ],
         Phase::Completed | Phase::Cancelled => {
             let mut roles = vec![SessionRole::Scoping];
@@ -548,8 +548,8 @@ pub fn roles_for(state: &PlanState, phase: Phase) -> Vec<SessionRole> {
             if state.session(SessionRole::Evergreening).is_some() {
                 roles.push(SessionRole::Evergreening);
             }
-            if state.session(SessionRole::Landing).is_some() {
-                roles.push(SessionRole::Landing);
+            if state.session(SessionRole::Rebasing).is_some() {
+                roles.push(SessionRole::Rebasing);
             }
             roles
         }
@@ -564,7 +564,7 @@ pub fn scan_plans(repo_root: &Path) -> Vec<PlanRef> {
         Phase::Scoping,
         Phase::Executing,
         Phase::Evergreening,
-        Phase::Landing,
+        Phase::Rebasing,
         Phase::Completed,
         Phase::Cancelled,
     ] {
@@ -671,7 +671,7 @@ fn require_phase(plan: &PlanRef, expected: Phase) -> Result<(), PlanError> {
 }
 
 /// Shared check for the two work phases: executing and evergreening both
-/// finish directly and both start landing. Pure.
+/// finish directly and both start rebasing. Pure.
 fn require_work_phase(plan: &PlanRef) -> Result<(), PlanError> {
     if matches!(plan.phase, Phase::Executing | Phase::Evergreening) {
         return Ok(());
@@ -718,7 +718,7 @@ mod tests {
             Phase::Scoping,
             Phase::Executing,
             Phase::Evergreening,
-            Phase::Landing,
+            Phase::Rebasing,
             Phase::Completed,
             Phase::Cancelled,
         ]
@@ -733,7 +733,7 @@ mod tests {
         assert!(Phase::Scoping.is_active());
         assert!(Phase::Executing.is_active());
         assert!(Phase::Evergreening.is_active());
-        assert!(Phase::Landing.is_active());
+        assert!(Phase::Rebasing.is_active());
         assert!(!Phase::Completed.is_active());
         assert!(!Phase::Cancelled.is_active());
     }
@@ -762,7 +762,7 @@ mod tests {
             Phase::Scoping,
             Phase::Executing,
             Phase::Evergreening,
-            Phase::Landing,
+            Phase::Rebasing,
         ] {
             let name = format!("active-{}", phase.dir_name());
             let plan = PlanRef {
@@ -800,11 +800,11 @@ mod tests {
     }
 
     #[test]
-    fn phase_rank_orders_evergreening_between_executing_and_landing() {
+    fn phase_rank_orders_evergreening_between_executing_and_rebasing() {
         assert!(phase_rank(Phase::Scoping) < phase_rank(Phase::Executing));
         assert!(phase_rank(Phase::Executing) < phase_rank(Phase::Evergreening));
-        assert!(phase_rank(Phase::Evergreening) < phase_rank(Phase::Landing));
-        assert!(phase_rank(Phase::Landing) < phase_rank(Phase::Completed));
+        assert!(phase_rank(Phase::Evergreening) < phase_rank(Phase::Rebasing));
+        assert!(phase_rank(Phase::Rebasing) < phase_rank(Phase::Completed));
         assert!(phase_rank(Phase::Completed) < phase_rank(Phase::Cancelled));
     }
 
@@ -940,7 +940,7 @@ mod tests {
             SessionRole::Scoping,
             SessionRole::Executing,
             SessionRole::Evergreening,
-            SessionRole::Landing,
+            SessionRole::Rebasing,
         ];
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
@@ -970,10 +970,15 @@ mod tests {
             "ses_second_evergreening",
         );
         assert_eq!(stored_roles(root, &greened), greening);
-        let landing = begin_landing(root, &greened).expect("begin");
-        seed_session(root, &landing, SessionRole::Landing, "ses_second_landing");
-        assert_eq!(stored_roles(root, &landing), all);
-        let landed = finish_landing(root, &landing).expect("finish");
+        let rebasing = begin_rebasing(root, &greened).expect("begin");
+        seed_session(
+            root,
+            &rebasing,
+            SessionRole::Rebasing,
+            "ses_second_rebasing",
+        );
+        assert_eq!(stored_roles(root, &rebasing), all);
+        let landed = finish_rebasing(root, &rebasing).expect("finish");
         assert_eq!(stored_roles(root, &landed), all);
         let third = materialize_scoping(root, "2026-09-26.08-41-05").expect("third");
         std::fs::write(third.plan_md(root), "# Third\n").expect("write");
@@ -1024,8 +1029,8 @@ mod tests {
         std::fs::write(second.plan_md(root), "# Second\n").expect("write");
         let running = execute(root, &second).expect("execute");
         let greening = begin_evergreening(root, &running).expect("evergreen");
-        let landed = begin_landing(root, &greening).expect("land from evergreening");
-        assert_eq!(landed.phase, Phase::Landing);
+        let landed = begin_rebasing(root, &greening).expect("land from evergreening");
+        assert_eq!(landed.phase, Phase::Rebasing);
         let third = materialize_scoping(root, "2026-09-26.08-41-05").expect("third");
         std::fs::write(third.plan_md(root), "# Third\n").expect("write");
         let third_exec = execute(root, &third).expect("execute");
@@ -1041,37 +1046,37 @@ mod tests {
             Err(PlanError::WrongPhase { .. })
         ));
         assert!(matches!(
-            begin_landing(root, &scoping_ref),
+            begin_rebasing(root, &scoping_ref),
             Err(PlanError::WrongPhase { .. })
         ));
     }
 
     #[test]
-    fn landing_moves_through_landing_without_renaming() {
+    fn rebasing_moves_through_rebasing_without_renaming() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
         let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
         std::fs::write(scoping.plan_md(root), "# Shiny\n").expect("write");
         let executing = execute(root, &scoping).expect("execute");
-        let landing = begin_landing(root, &executing).expect("begin");
-        assert_eq!(landing.phase, Phase::Landing);
-        assert_eq!(landing.name, executing.name);
+        let rebasing = begin_rebasing(root, &executing).expect("begin");
+        assert_eq!(rebasing.phase, Phase::Rebasing);
+        assert_eq!(rebasing.name, executing.name);
         assert!(!executing.path(root).exists());
-        assert!(landing.path(root).is_dir());
+        assert!(rebasing.path(root).is_dir());
         assert!(matches!(
-            begin_landing(root, &landing),
+            begin_rebasing(root, &rebasing),
             Err(PlanError::WrongPhase { .. })
         ));
-        let done = finish_landing(root, &landing).expect("finish");
+        let done = finish_rebasing(root, &rebasing).expect("finish");
         assert_eq!(done.phase, Phase::Completed);
-        assert_eq!(done.name, landing.name);
+        assert_eq!(done.name, rebasing.name);
         assert!(matches!(
-            finish_landing(root, &done),
+            finish_rebasing(root, &done),
             Err(PlanError::WrongPhase { .. })
         ));
         assert!(matches!(
-            complete(root, &landing),
+            complete(root, &rebasing),
             Err(PlanError::WrongPhase { .. })
         ));
     }
@@ -1106,7 +1111,7 @@ mod tests {
             Phase::Scoping,
             Phase::Executing,
             Phase::Evergreening,
-            Phase::Landing,
+            Phase::Rebasing,
             Phase::Completed,
             Phase::Cancelled,
         ] {
@@ -1242,11 +1247,11 @@ mod tests {
             Some("ses_scoping")
         );
         assert!(kept_green.evergreen);
-        let landing = begin_landing(root, &greening).expect("begin");
-        let kept = load_state(&landing.path(root));
+        let rebasing = begin_rebasing(root, &greening).expect("begin");
+        let kept = load_state(&rebasing.path(root));
         assert!(kept.entered_at.is_some());
         assert_eq!(kept.session(SessionRole::Scoping), Some("ses_scoping"));
-        let done = finish_landing(root, &landing).expect("finish");
+        let done = finish_rebasing(root, &rebasing).expect("finish");
         assert!(load_state(&done.path(root)).entered_at.is_some());
         assert_eq!(
             load_state(&done.path(root)).session(SessionRole::Scoping),
@@ -1312,7 +1317,7 @@ mod tests {
             SessionRole::Scoping,
             SessionRole::Executing,
             SessionRole::Evergreening,
-            SessionRole::Landing,
+            SessionRole::Rebasing,
         ] {
             assert_eq!(state.session(role), None);
             assert_eq!(state.cost(role), 0.0);
@@ -1326,7 +1331,7 @@ mod tests {
             SessionRole::Scoping,
             SessionRole::Executing,
             SessionRole::Evergreening,
-            SessionRole::Landing,
+            SessionRole::Rebasing,
         ];
         for (index, role) in roles.iter().enumerate() {
             state.set_session(*role, format!("ses_{index}"));
@@ -1389,12 +1394,15 @@ mod tests {
         assert!(!kept.evergreen);
         assert!(kept.prompted);
         let mut flipped = load_state(&scoping.path(root));
-        flipped.set_session(SessionRole::Landing, "ses_landing".to_string());
+        flipped.set_session(SessionRole::Rebasing, "ses_rebasing".to_string());
         store_state(&scoping.path(root), &flipped);
         let reloaded = load_state(&scoping.path(root));
         assert_eq!(reloaded.cost(SessionRole::Scoping), 1.24);
         assert_eq!(reloaded.cost(SessionRole::Executing), 2.5);
-        assert_eq!(reloaded.session(SessionRole::Landing), Some("ses_landing"));
+        assert_eq!(
+            reloaded.session(SessionRole::Rebasing),
+            Some("ses_rebasing")
+        );
         assert_eq!(reloaded.entered_at, Some(before));
     }
 }

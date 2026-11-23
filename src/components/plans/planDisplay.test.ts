@@ -24,17 +24,17 @@ function plan(
 }
 
 describe("latestRole", () => {
-	test("prefers landing over evergreening over executing over scoping", () => {
+	test("prefers rebasing over evergreening over executing over scoping", () => {
 		expect(
 			latestRole(
-				plan("a", "landing", [
+				plan("a", "rebasing", [
 					testStatus("scoping"),
 					testStatus("executing"),
 					testStatus("evergreening"),
-					testStatus("landing"),
+					testStatus("rebasing"),
 				]),
 			),
-		).toBe("landing");
+		).toBe("rebasing");
 		expect(
 			latestRole(
 				plan("a", "evergreening", [
@@ -61,12 +61,12 @@ describe("latestRole", () => {
 		expect(latestRole(plan("empty", "scoping", []))).toBe("scoping");
 	});
 
-	test("orders evergreening between executing and landing", () => {
+	test("orders evergreening between executing and rebasing", () => {
 		expect(PHASES).toEqual([
 			"scoping",
 			"executing",
 			"evergreening",
-			"landing",
+			"rebasing",
 			"completed",
 			"cancelled",
 		]);
@@ -169,13 +169,13 @@ describe("attentionFor", () => {
 		expect(attentionFor(plan("empty", "scoping", []))).toBeNull();
 	});
 
-	test("suppresses idle for queued landings", () => {
+	test("suppresses idle for queued rebasings", () => {
 		const queued = testEntryWith(
 			"queued",
-			"landing",
+			"rebasing",
 			"Queued",
 			true,
-			[testStatus("scoping"), testStatus("landing")],
+			[testStatus("scoping"), testStatus("rebasing")],
 			false,
 			true,
 			[],
@@ -184,10 +184,10 @@ describe("attentionFor", () => {
 		expect(attentionFor(queued)).toBeNull();
 		const head = testEntryWith(
 			"head",
-			"landing",
+			"rebasing",
 			"Head",
 			true,
-			[testStatus("scoping"), testStatus("landing")],
+			[testStatus("scoping"), testStatus("rebasing")],
 			false,
 			true,
 			[],
@@ -264,7 +264,7 @@ describe("roleLabel", () => {
 		expect(roleLabel("scoping")).toBe("Scoping");
 		expect(roleLabel("executing")).toBe("Executing");
 		expect(roleLabel("evergreening")).toBe("Evergreening");
-		expect(roleLabel("landing")).toBe("Landing");
+		expect(roleLabel("rebasing")).toBe("Rebasing");
 	});
 });
 
@@ -275,11 +275,11 @@ describe("todoProgress", () => {
 		).toBeNull();
 		expect(
 			todoProgress(
-				plan("a", "landing", [
+				plan("a", "rebasing", [
 					testStatus("scoping"),
 					testStatus("executing"),
 					testStatus("evergreening"),
-					testStatus("landing"),
+					testStatus("rebasing"),
 				]),
 			),
 		).toBeNull();
@@ -336,7 +336,7 @@ describe("todoProgress", () => {
 });
 
 describe("headerProgress", () => {
-	test("returns null outside executing, evergreening, and landing", () => {
+	test("returns null outside executing, evergreening, and rebasing", () => {
 		expect(
 			headerProgress(plan("a", "scoping", [testStatus("scoping")])),
 		).toBeNull();
@@ -358,13 +358,13 @@ describe("headerProgress", () => {
 		expect(headerProgress(entry)).toEqual(todoProgress(entry));
 	});
 
-	test("landing diverged stays empty", () => {
+	test("rebasing diverged stays empty", () => {
 		const entry = testEntryWith(
 			"a",
-			"landing",
+			"rebasing",
 			"a",
 			true,
-			[testStatus("scoping"), testStatus("landing")],
+			[testStatus("scoping"), testStatus("rebasing")],
 			false,
 			true,
 			["abc plan work", "def more work"],
@@ -378,13 +378,13 @@ describe("headerProgress", () => {
 		});
 	});
 
-	test("landing ready fills the bar", () => {
+	test("rebasing ready fills the bar", () => {
 		const entry = testEntryWith(
 			"a",
-			"landing",
+			"rebasing",
 			"a",
 			true,
-			[testStatus("scoping"), testStatus("landing")],
+			[testStatus("scoping"), testStatus("rebasing")],
 			false,
 			true,
 			["abc plan work", "def more work"],
@@ -398,10 +398,10 @@ describe("headerProgress", () => {
 		});
 	});
 
-	test("landing empty shows an empty track", () => {
-		const entry = testEntryWith("a", "landing", "a", true, [
+	test("rebasing empty shows an empty track", () => {
+		const entry = testEntryWith("a", "rebasing", "a", true, [
 			testStatus("scoping"),
-			testStatus("landing"),
+			testStatus("rebasing"),
 		]);
 		expect(headerProgress(entry)).toEqual({
 			done: 0,
@@ -410,13 +410,13 @@ describe("headerProgress", () => {
 		});
 	});
 
-	test("landing partial shows an ETA", () => {
+	test("rebasing partial shows an ETA", () => {
 		const entry = testEntryWith(
 			"a",
-			"landing",
+			"rebasing",
 			"a",
 			true,
-			[testStatus("scoping"), testStatus("landing")],
+			[testStatus("scoping"), testStatus("rebasing")],
 			false,
 			true,
 			["abc plan work", "def more work"],

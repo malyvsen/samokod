@@ -133,14 +133,14 @@ pub struct PermissionView {
 
 /// Role of one session inside a plan. A plan owns one scoping session,
 /// plus one executing session once approved, plus one evergreening session
-/// on the cleanup path, plus one landing session on the conflict path.
+/// on the cleanup path, plus one rebasing session on the conflict path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionRole {
     Scoping,
     Executing,
     Evergreening,
-    Landing,
+    Rebasing,
 }
 
 impl SessionRole {
@@ -150,7 +150,7 @@ impl SessionRole {
     pub fn is_work(self) -> bool {
         matches!(
             self,
-            SessionRole::Executing | SessionRole::Evergreening | SessionRole::Landing
+            SessionRole::Executing | SessionRole::Evergreening | SessionRole::Rebasing
         )
     }
 }
@@ -188,7 +188,7 @@ pub struct SpendStatusView {
 
 /// Done/total progress with an optional ETA for the plans list.
 /// `eta_secs` is `None` when no ETA text shows (empty, estimating, or
-/// done). Shared by per-session todo progress and landing commit progress.
+/// done). Shared by per-session todo progress and rebasing commit progress.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Type)]
 pub struct ProgressView {
     pub done: usize,
@@ -213,11 +213,11 @@ pub struct PlanEntry {
     /// Branch commits ahead of the target, oldest first. Empty when the
     /// plan owns no worktree.
     pub commits: Vec<String>,
-    /// True when the landing waits behind the head. The head runs the
-    /// agent; queued landings hold with no live session and no idle dot.
+    /// True when the rebasing waits behind the head. The head runs the
+    /// agent; queued rebasings hold with no live session and no idle dot.
     pub queued: bool,
-    /// Landing commit progress with ETA. `Some` for landing plans only.
-    pub landing_progress: Option<ProgressView>,
+    /// Rebasing commit progress with ETA. `Some` for rebasing plans only.
+    pub rebasing_progress: Option<ProgressView>,
 }
 
 /// Stored model/effort defaults for the instant disabled picker paint.
@@ -267,7 +267,7 @@ pub enum AppEvent {
         chunk: String,
     },
     /// Replayed user message chunk. Only emitted while a session's history
-    /// loads, plus the eager executing/landing first prompt which emits
+    /// loads, plus the eager executing/rebasing first prompt which emits
     /// live; live scoping turns append the user bubble optimistically instead.
     UserText {
         session: SessionKey,
@@ -511,7 +511,7 @@ mod tests {
         assert!(!SessionRole::Scoping.is_work());
         assert!(SessionRole::Executing.is_work());
         assert!(SessionRole::Evergreening.is_work());
-        assert!(SessionRole::Landing.is_work());
+        assert!(SessionRole::Rebasing.is_work());
     }
 
     #[test]
@@ -579,7 +579,7 @@ mod tests {
             evergreen: true,
             commits: Vec::new(),
             queued: false,
-            landing_progress: None,
+            rebasing_progress: None,
         };
         let value = serde_json::to_value(&entry).expect("serializes");
         let actual: std::collections::BTreeSet<String> =
@@ -594,7 +594,7 @@ mod tests {
             "evergreen",
             "commits",
             "queued",
-            "landing_progress",
+            "rebasing_progress",
         ]
         .into_iter()
         .map(str::to_string)

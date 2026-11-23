@@ -20,7 +20,7 @@ export function sameSession(
 // True for the work roles that auto-advance. Scoping always waits for its
 // manual approval, so STOP leaves it untouched.
 export function isWorkRole(role: SessionKey["role"]): boolean {
-	return role === "executing" || role === "evergreening" || role === "landing";
+	return role === "executing" || role === "evergreening" || role === "rebasing";
 }
 
 type ItemBase = {

@@ -9,7 +9,7 @@ use crate::plans::{Phase, PlanRef};
 pub const SCOPING_AGENT: &str = "samokod-scoping";
 pub const EXECUTING_AGENT: &str = "samokod-executing";
 pub const EVERGREENING_AGENT: &str = "samokod-evergreening";
-pub const LANDING_AGENT: &str = "samokod-landing";
+pub const REBASING_AGENT: &str = "samokod-rebasing";
 
 /// Matches every plan's state file. Each agent's edit rules deny it last.
 const STATE_DENY_GLOB: &str = ".samokod/plans/**/state.json";
@@ -24,7 +24,7 @@ pub fn agent_for(phase: Phase) -> &'static str {
         Phase::Scoping => SCOPING_AGENT,
         Phase::Executing => EXECUTING_AGENT,
         Phase::Evergreening => EVERGREENING_AGENT,
-        Phase::Landing => LANDING_AGENT,
+        Phase::Rebasing => REBASING_AGENT,
         Phase::Completed | Phase::Cancelled => EXECUTING_AGENT,
     }
 }
@@ -35,7 +35,7 @@ pub const CONFIG_CONTENT_ENV: &str = "OPENCODE_CONFIG_CONTENT";
 const SCOPING_PROMPT: &str = include_str!("prompts/scoping.md");
 const EXECUTING_PROMPT: &str = include_str!("prompts/executing.md");
 const EVERGREENING_PROMPT: &str = include_str!("prompts/evergreening.md");
-const LANDING_PROMPT: &str = include_str!("prompts/landing.md");
+const REBASING_PROMPT: &str = include_str!("prompts/rebasing.md");
 
 /// Extra spawn env pinning all agents. Pure: JSON only, no process access.
 pub fn agent_env(plan: &PlanRef) -> HashMap<String, String> {
@@ -67,10 +67,10 @@ pub fn agent_config(plan: &PlanRef) -> String {
                 "description": "Cleans up one executed plan.",
                 "permissions": evergreening_permissions(),
             },
-            LANDING_AGENT: {
+            REBASING_AGENT: {
                 "mode": "primary",
                 "description": "Lands one plan branch onto its target branch.",
-                "permissions": landing_permissions(),
+                "permissions": rebasing_permissions(),
             },
         },
     })
@@ -164,24 +164,24 @@ const WORK_EDIT_RULES: [(&str, &str); 5] = [
     (ATTACHMENTS_DENY_GLOB, "deny"),
 ];
 
-/// Landing resolves one plan branch onto its target, so every worktree
+/// Rebasing resolves one plan branch onto its target, so every worktree
 /// file is editable except state and attachments: a landed commit must
 /// cover files the target branch added on top. No permission questions
-/// and no subagent research: landing is a focused conflict-resolution
+/// and no subagent research: rebasing is a focused conflict-resolution
 /// task.
-fn landing_permissions() -> Vec<Value> {
+fn rebasing_permissions() -> Vec<Value> {
     let mut permissions = vec![
         rule("read", "*", "allow"),
         rule("external_directory", "*", "allow"),
     ];
-    permissions.extend(edit_rules(&LANDING_EDIT_RULES));
+    permissions.extend(edit_rules(&REBASING_EDIT_RULES));
     permissions.push(rule("shell", "*", "allow"));
     permissions.push(rule("question", "*", "deny"));
     permissions.push(rule("subagent", "*", "deny"));
     permissions
 }
 
-const LANDING_EDIT_RULES: [(&str, &str); 3] = [
+const REBASING_EDIT_RULES: [(&str, &str); 3] = [
     ("*", "allow"),
     (STATE_DENY_GLOB, "deny"),
     (ATTACHMENTS_DENY_GLOB, "deny"),
@@ -223,15 +223,15 @@ pub fn evergreening_first_message(
         .replace("{{COMMITS}}", commits)
 }
 
-/// Landing role and instruction. Sent as the full first turn when the
-/// conflict path starts the landing agent in the worktree. Pure.
-pub fn landing_first_message(
+/// Rebasing role and instruction. Sent as the full first turn when the
+/// conflict path starts the rebasing agent in the worktree. Pure.
+pub fn rebasing_first_message(
     worktree_branch: &str,
     target_branch: &str,
     worktree_path: &str,
     plan_md_abs_path: &str,
 ) -> String {
-    LANDING_PROMPT
+    REBASING_PROMPT
         .replace("{{WORKTREE_BRANCH}}", worktree_branch)
         .replace("{{TARGET_BRANCH}}", target_branch)
         .replace("{{WORKTREE_PATH}}", worktree_path)
@@ -331,7 +331,7 @@ mod tests {
             SCOPING_AGENT,
             EXECUTING_AGENT,
             EVERGREENING_AGENT,
-            LANDING_AGENT,
+            REBASING_AGENT,
         ] {
             let entry = config
                 .pointer(&format!("/agents/{agent}"))
@@ -454,7 +454,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            resources_of(&config, LANDING_AGENT, "edit"),
+            resources_of(&config, REBASING_AGENT, "edit"),
             vec![
                 "*".to_string(),
                 STATE_DENY_GLOB.to_string(),
@@ -470,7 +470,7 @@ mod tests {
             SCOPING_AGENT,
             EXECUTING_AGENT,
             EVERGREENING_AGENT,
-            LANDING_AGENT,
+            REBASING_AGENT,
         ] {
             assert_eq!(
                 effect_of(&config, agent, "question", "*"),
@@ -481,38 +481,38 @@ mod tests {
     }
 
     #[test]
-    fn landing_allows_worktree_edits_without_subagents() {
+    fn rebasing_allows_worktree_edits_without_subagents() {
         let config = config(&test_plan());
         assert_eq!(
-            effect_of(&config, LANDING_AGENT, "edit", "src/App.tsx"),
+            effect_of(&config, REBASING_AGENT, "edit", "src/App.tsx"),
             "allow"
         );
         assert_eq!(
-            effect_of(&config, LANDING_AGENT, "edit", ".samokod/state.json"),
+            effect_of(&config, REBASING_AGENT, "edit", ".samokod/state.json"),
             "allow"
         );
         assert_eq!(
             effect_of(
                 &config,
-                LANDING_AGENT,
+                REBASING_AGENT,
                 "edit",
-                &format!(".samokod/plans/landing/x/{STATE_FILE}")
+                &format!(".samokod/plans/rebasing/x/{STATE_FILE}")
             ),
             "deny"
         );
         assert_eq!(
-            effect_of(&config, LANDING_AGENT, "shell", "git rebase -i feature"),
+            effect_of(&config, REBASING_AGENT, "shell", "git rebase -i feature"),
             "allow"
         );
         assert_eq!(
-            effect_of(&config, LANDING_AGENT, "subagent", "explore"),
+            effect_of(&config, REBASING_AGENT, "subagent", "explore"),
             "deny"
         );
     }
 
     #[test]
-    fn landing_plans_run_the_landing_agent() {
-        assert_eq!(agent_for(Phase::Landing), LANDING_AGENT);
+    fn rebasing_plans_run_the_rebasing_agent() {
+        assert_eq!(agent_for(Phase::Rebasing), REBASING_AGENT);
         assert_eq!(agent_for(Phase::Evergreening), EVERGREENING_AGENT);
         assert_eq!(agent_for(Phase::Executing), EXECUTING_AGENT);
         assert_eq!(agent_for(Phase::Scoping), SCOPING_AGENT);
@@ -558,9 +558,9 @@ mod tests {
                 "{resource} should deny for evergreening"
             );
             assert_eq!(
-                effect_of(&config, LANDING_AGENT, "edit", &resource),
+                effect_of(&config, REBASING_AGENT, "edit", &resource),
                 "deny",
-                "{resource} should deny for landing"
+                "{resource} should deny for rebasing"
             );
         }
     }
@@ -578,7 +578,7 @@ mod tests {
             ".samokod/plans/scoping/other/attachments/image-1-0.png".to_string(),
             ".samokod/plans/executing/x/attachments/image-1-0.jpg".to_string(),
             ".samokod/plans/evergreening/x/attachments/image-1-0.webp".to_string(),
-            ".samokod/plans/landing/x/attachments/image-1-0.gif".to_string(),
+            ".samokod/plans/rebasing/x/attachments/image-1-0.gif".to_string(),
         ] {
             assert_eq!(
                 effect_of(&config, SCOPING_AGENT, "edit", &resource),
@@ -596,9 +596,9 @@ mod tests {
                 "{resource} should deny for evergreening"
             );
             assert_eq!(
-                effect_of(&config, LANDING_AGENT, "edit", &resource),
+                effect_of(&config, REBASING_AGENT, "edit", &resource),
                 "deny",
-                "{resource} should deny for landing"
+                "{resource} should deny for rebasing"
             );
         }
     }
@@ -628,12 +628,12 @@ mod tests {
     }
 
     #[test]
-    fn landing_message_fills_every_placeholder() {
-        let message = landing_first_message(
+    fn rebasing_message_fills_every_placeholder() {
+        let message = rebasing_first_message(
             "samokod/shiny-feature",
             "feature",
             "/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature",
-            "/repo/.samokod/plans/landing/2026-09-26.14-53-26.shiny-feature/plan.md",
+            "/repo/.samokod/plans/rebasing/2026-09-26.14-53-26.shiny-feature/plan.md",
         );
         assert!(message.contains("samokod/shiny-feature"));
         assert!(message.contains("`feature`"));

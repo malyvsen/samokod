@@ -55,18 +55,18 @@ export type SideContent =
 	  };
 
 /// Sidebar content for the selected session: commits when the selected
-/// session has the landing role on a landing plan, else todos. Pure.
+/// session has the rebasing role on a rebasing plan, else todos. Pure.
 export function sideContentFor(
 	entry: PlanEntry | undefined,
 	selectedKey: SessionKey | null,
 	todos: TodoView[],
 ): SideContent {
-	if (entry?.phase === "landing" && selectedKey?.role === "landing") {
+	if (entry?.phase === "rebasing" && selectedKey?.role === "rebasing") {
 		const working =
-			entry.sessions.find((session) => session.role === "landing")?.working ??
+			entry.sessions.find((session) => session.role === "rebasing")?.working ??
 			false;
-		const total = entry.landing_progress?.total ?? entry.commits.length;
-		const done = Math.min(entry.landing_progress?.done ?? 0, total);
+		const total = entry.rebasing_progress?.total ?? entry.commits.length;
+		const done = Math.min(entry.rebasing_progress?.done ?? 0, total);
 		return { kind: "commits", commits: entry.commits, done, total, working };
 	}
 	return { kind: "todos", todos };
@@ -78,11 +78,11 @@ export function isReadOnly(entry: PlanEntry | undefined): boolean {
 	return entry?.phase === "completed" || entry?.phase === "cancelled";
 }
 
-/// Latest role one plan owns, mirroring the header target: landing wins
+/// Latest role one plan owns, mirroring the header target: rebasing wins
 /// over evergreening over executing over scoping.
 function latestRoleFor(entry: PlanEntry): SessionRole {
 	const roles = new Set(entry.sessions.map((status) => status.role));
-	if (roles.has("landing")) return "landing";
+	if (roles.has("rebasing")) return "rebasing";
 	if (roles.has("evergreening")) return "evergreening";
 	if (roles.has("executing")) return "executing";
 	return "scoping";

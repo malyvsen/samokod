@@ -47,7 +47,7 @@ export function testEntry(
 	evergreen = true,
 	commits: string[] = [],
 	queued = false,
-	landing_progress: ProgressView | null = null,
+	rebasing_progress: ProgressView | null = null,
 ): PlanEntry {
 	const sessions =
 		phase === "scoping"
@@ -58,12 +58,12 @@ export function testEntry(
 						testStatus("executing"),
 						testStatus("evergreening"),
 					]
-				: phase === "landing"
+				: phase === "rebasing"
 					? [
 							testStatus("scoping"),
 							testStatus("executing"),
 							testStatus("evergreening"),
-							testStatus("landing"),
+							testStatus("rebasing"),
 						]
 					: [testStatus("scoping"), testStatus("executing")];
 	return {
@@ -76,7 +76,7 @@ export function testEntry(
 		evergreen,
 		commits,
 		queued,
-		landing_progress,
+		rebasing_progress,
 	};
 }
 
@@ -90,7 +90,7 @@ export function testEntryWith(
 	evergreen = true,
 	commits: string[] = [],
 	queued = false,
-	landing_progress: ProgressView | null = null,
+	rebasing_progress: ProgressView | null = null,
 ): PlanEntry {
 	return {
 		name,
@@ -102,6 +102,6 @@ export function testEntryWith(
 		evergreen,
 		commits,
 		queued,
-		landing_progress,
+		rebasing_progress,
 	};
 }

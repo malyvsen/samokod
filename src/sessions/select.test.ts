@@ -132,16 +132,16 @@ describe("repairSelection", () => {
 	});
 });
 
-function landingEntry(
+function rebasingEntry(
 	progress: ProgressView | null,
 	working: boolean,
 ): PlanEntry {
 	return testEntryWith(
 		"a",
-		"landing",
+		"rebasing",
 		"Alpha",
 		true,
-		[testStatus("scoping"), testStatus("landing", { working })],
+		[testStatus("scoping"), testStatus("rebasing", { working })],
 		false,
 		true,
 		["abc plan work", "def more work"],
@@ -151,9 +151,9 @@ function landingEntry(
 }
 
 describe("sideContentFor", () => {
-	test("landing role returns commits with progress and working", () => {
-		const entry = landingEntry({ done: 1, total: 2, eta_secs: null }, true);
-		expect(sideContentFor(entry, { plan: "a", role: "landing" }, [])).toEqual({
+	test("rebasing role returns commits with progress and working", () => {
+		const entry = rebasingEntry({ done: 1, total: 2, eta_secs: null }, true);
+		expect(sideContentFor(entry, { plan: "a", role: "rebasing" }, [])).toEqual({
 			kind: "commits",
 			commits: ["abc plan work", "def more work"],
 			done: 1,
@@ -162,9 +162,9 @@ describe("sideContentFor", () => {
 		});
 	});
 
-	test("landing role falls back when progress is null", () => {
-		const entry = landingEntry(null, false);
-		expect(sideContentFor(entry, { plan: "a", role: "landing" }, [])).toEqual({
+	test("rebasing role falls back when progress is null", () => {
+		const entry = rebasingEntry(null, false);
+		expect(sideContentFor(entry, { plan: "a", role: "rebasing" }, [])).toEqual({
 			kind: "commits",
 			commits: ["abc plan work", "def more work"],
 			done: 0,
@@ -173,9 +173,9 @@ describe("sideContentFor", () => {
 		});
 	});
 
-	test("landing done clamps to total", () => {
-		const entry = landingEntry({ done: 5, total: 2, eta_secs: null }, true);
-		expect(sideContentFor(entry, { plan: "a", role: "landing" }, [])).toEqual({
+	test("rebasing done clamps to total", () => {
+		const entry = rebasingEntry({ done: 5, total: 2, eta_secs: null }, true);
+		expect(sideContentFor(entry, { plan: "a", role: "rebasing" }, [])).toEqual({
 			kind: "commits",
 			commits: ["abc plan work", "def more work"],
 			done: 2,
@@ -187,7 +187,7 @@ describe("sideContentFor", () => {
 	test("other roles return todos", () => {
 		const entry = testEntryWith(
 			"a",
-			"landing",
+			"rebasing",
 			"Alpha",
 			true,
 			[testStatus("scoping"), testStatus("executing")],

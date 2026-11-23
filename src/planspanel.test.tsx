@@ -10,7 +10,7 @@ const SECTIONS = [
 	"SCOPING",
 	"EXECUTING",
 	"EVERGREENING",
-	"LANDING",
+	"REBASING",
 	"COMPLETED",
 	"CANCELLED",
 ];
@@ -19,7 +19,7 @@ function panelProps(
 	plans: PlanEntry[],
 	selected: {
 		plan: string;
-		role: "scoping" | "executing" | "evergreening" | "landing";
+		role: "scoping" | "executing" | "evergreening" | "rebasing";
 	} | null = null,
 ) {
 	return {
@@ -79,17 +79,17 @@ function executingPlan() {
 	]);
 }
 
-function landingPlan() {
+function rebasingPlan() {
 	return testEntryWith(
-		"2026-09-25.10-54-59.landing",
-		"landing",
+		"2026-09-25.10-54-59.rebasing",
+		"rebasing",
 		"Shiny",
 		true,
 		[
 			testStatus("scoping"),
 			testStatus("executing"),
 			testStatus("evergreening"),
-			testStatus("landing"),
+			testStatus("rebasing"),
 		],
 	);
 }
@@ -111,7 +111,7 @@ function evergreeningPlan() {
 function sectionHeaders() {
 	return screen
 		.getAllByText(
-			/^(SCOPING|EXECUTING|EVERGREENING|LANDING|COMPLETED|CANCELLED)$/,
+			/^(SCOPING|EXECUTING|EVERGREENING|REBASING|COMPLETED|CANCELLED)$/,
 		)
 		.map((node) => node.textContent);
 }
@@ -143,7 +143,7 @@ describe("plans panel", () => {
 		test("renders all six sections in fixed order", () => {
 			render(
 				<PlansPanel
-					{...panelProps([executingPlan(), scopingPlan(), landingPlan()])}
+					{...panelProps([executingPlan(), scopingPlan(), rebasingPlan()])}
 				/>,
 			);
 			expect(sectionHeaders()).toEqual(SECTIONS);
@@ -192,7 +192,7 @@ describe("plans panel", () => {
 					"evergreening",
 					/evergreening, opens Evergreening$/i,
 				],
-				[landingPlan(), "landing", /opens landing$/i],
+				[rebasingPlan(), "rebasing", /opens rebasing$/i],
 			] as const) {
 				const props = panelProps([plan], null);
 				const { unmount } = render(<PlansPanel {...props} />);
@@ -290,12 +290,12 @@ describe("plans panel", () => {
 			).toBeNull();
 		});
 
-		test("evergreening and landing menus skip the evergreen row", async () => {
+		test("evergreening and rebasing menus skip the evergreen row", async () => {
 			const user = userEvent.setup();
-			for (const plan of [evergreeningPlan(), landingPlan()]) {
+			for (const plan of [evergreeningPlan(), rebasingPlan()]) {
 				const props = panelProps([plan], {
 					plan: plan.name,
-					role: plan.phase === "landing" ? "landing" : "evergreening",
+					role: plan.phase === "rebasing" ? "rebasing" : "evergreening",
 				});
 				const { unmount } = render(<PlansPanel {...props} />);
 				await openMenu(user, "Shiny");
@@ -680,17 +680,17 @@ describe("plans panel", () => {
 			expect(group.querySelector(".hbar-in")?.className).toContain("paused");
 		});
 
-		test("landing partial shows an ETA and a green bar", () => {
+		test("rebasing partial shows an ETA and a green bar", () => {
 			const plan = testEntryWith(
-				"2026-09-25.10-54-59.landing",
-				"landing",
+				"2026-09-25.10-54-59.rebasing",
+				"rebasing",
 				"Shiny",
 				true,
 				[
 					testStatus("scoping"),
 					testStatus("executing"),
 					testStatus("evergreening"),
-					testStatus("landing", { working: true }),
+					testStatus("rebasing", { working: true }),
 				],
 				false,
 				true,
@@ -700,7 +700,7 @@ describe("plans panel", () => {
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
 			const header = screen.getByRole("button", {
-				name: "Shiny, landing, opens Landing",
+				name: "Shiny, rebasing, opens Rebasing",
 			});
 			expect(header).toHaveAttribute("data-full", "Shiny");
 			const group = header.closest(".plan-group") as HTMLElement;
@@ -710,17 +710,17 @@ describe("plans panel", () => {
 			expect(bar.querySelector("i")?.getAttribute("style")).toContain("50%");
 		});
 
-		test("landing estimating shows no ETA and an empty track", () => {
+		test("rebasing estimating shows no ETA and an empty track", () => {
 			const plan = testEntryWith(
-				"2026-09-25.10-54-59.landing",
-				"landing",
+				"2026-09-25.10-54-59.rebasing",
+				"rebasing",
 				"Shiny",
 				true,
 				[
 					testStatus("scoping"),
 					testStatus("executing"),
 					testStatus("evergreening"),
-					testStatus("landing", { working: true }),
+					testStatus("rebasing", { working: true }),
 				],
 				false,
 				true,
@@ -730,7 +730,7 @@ describe("plans panel", () => {
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
 			const header = screen.getByRole("button", {
-				name: "Shiny, landing, opens Landing",
+				name: "Shiny, rebasing, opens Rebasing",
 			});
 			expect(header).toHaveAttribute("data-full", "Shiny");
 			const group = header.closest(".plan-group") as HTMLElement;
@@ -740,17 +740,17 @@ describe("plans panel", () => {
 			).toContain("0%");
 		});
 
-		test("landing ready shows a full green bar with no ETA", () => {
+		test("rebasing ready shows a full green bar with no ETA", () => {
 			const plan = testEntryWith(
-				"2026-09-25.10-54-59.landing",
-				"landing",
+				"2026-09-25.10-54-59.rebasing",
+				"rebasing",
 				"Shiny",
 				true,
 				[
 					testStatus("scoping"),
 					testStatus("executing"),
 					testStatus("evergreening"),
-					testStatus("landing", { working: true }),
+					testStatus("rebasing", { working: true }),
 				],
 				false,
 				true,
@@ -760,7 +760,7 @@ describe("plans panel", () => {
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
 			const header = screen.getByRole("button", {
-				name: "Shiny, landing, opens Landing",
+				name: "Shiny, rebasing, opens Rebasing",
 			});
 			expect(header).toHaveAttribute("data-full", "Shiny");
 			const group = header.closest(".plan-group") as HTMLElement;
@@ -790,17 +790,17 @@ describe("plans panel", () => {
 			expect(screen.getByText("Executing")).toBeInTheDocument();
 		});
 
-		test("expanded landing plans list four sessions without buttons", () => {
-			const plan = landingPlan();
+		test("expanded rebasing plans list four sessions without buttons", () => {
+			const plan = rebasingPlan();
 			const { container } = render(
 				<PlansPanel
-					{...panelProps([plan], { plan: plan.name, role: "landing" })}
+					{...panelProps([plan], { plan: plan.name, role: "rebasing" })}
 				/>,
 			);
 			expect(screen.getByText("Scoping")).toBeInTheDocument();
 			expect(screen.getByText("Executing")).toBeInTheDocument();
 			expect(screen.getByText("Evergreening")).toBeInTheDocument();
-			expect(screen.getByText("Landing")).toBeInTheDocument();
+			expect(screen.getByText("Rebasing")).toBeInTheDocument();
 			expect(container.querySelectorAll(".sbody .sbtn").length).toBe(0);
 		});
 
@@ -814,7 +814,7 @@ describe("plans panel", () => {
 			expect(screen.getByText("Scoping")).toBeInTheDocument();
 			expect(screen.getByText("Executing")).toBeInTheDocument();
 			expect(screen.getByText("Evergreening")).toBeInTheDocument();
-			expect(screen.queryByText("Landing")).toBeNull();
+			expect(screen.queryByText("Rebasing")).toBeNull();
 		});
 
 		test("shows session rows only on the expanded plan", () => {
@@ -977,7 +977,7 @@ describe("plans panel", () => {
 			expect(screen.getByText("Executing")).toBeInTheDocument();
 			expect(container.querySelectorAll(".sbody .sbtn").length).toBe(0);
 			expect(
-				screen.queryByRole("button", { name: /Land|Start landing/i }),
+				screen.queryByRole("button", { name: /Land|Start rebasing/i }),
 			).toBeNull();
 		});
 

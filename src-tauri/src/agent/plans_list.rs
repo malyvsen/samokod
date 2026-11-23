@@ -14,7 +14,7 @@ use crate::types::{
 };
 
 use super::AgentManager;
-use super::landing_queue;
+use super::rebasing_queue;
 use super::scoping_preview_for;
 use super::session::LiveSession;
 use super::{BackendState, WindowState, emit_event, lock_backend};
@@ -149,7 +149,7 @@ fn branch_state_for(
         plans::Phase::Scoping | plans::Phase::Completed | plans::Phase::Cancelled => {
             return (Vec::new(), false);
         }
-        plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Landing => {}
+        plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Rebasing => {}
     }
     if checkout_branch.is_empty() {
         return (Vec::new(), false);
@@ -215,12 +215,12 @@ pub(crate) fn sorted_entries(
                     .then_with(|| right.0.name.cmp(&left.0.name))
             })
     });
-    let landing_queue = landing_queue::sorted_landing_names(repo_root);
+    let rebasing_queue = rebasing_queue::sorted_rebasing_names(repo_root);
     rows.iter()
         .map(|(plan, state, _)| {
             let (commits, ffable) = branch_state_for(repo_root, checkout_branch, plan);
-            let queued = landing_queue::is_queued_in(&landing_queue, &plan.name);
-            let landing_progress = landing_progress_for(repo_root, plan, state, &commits, ffable);
+            let queued = rebasing_queue::is_queued_in(&rebasing_queue, &plan.name);
+            let rebasing_progress = rebasing_progress_for(repo_root, plan, state, &commits, ffable);
             PlanEntry {
                 name: plan.name.clone(),
                 phase: plan.phase,
@@ -231,7 +231,7 @@ pub(crate) fn sorted_entries(
                 evergreen: state.evergreen,
                 commits,
                 queued,
-                landing_progress,
+                rebasing_progress,
             }
         })
         .collect()
@@ -256,18 +256,18 @@ fn progress_view(
     }
 }
 
-/// Landing commit progress for one plan row. `Some` for landing plans
+/// Rebasing commit progress for one plan row. `Some` for rebasing plans
 /// only: rebase `done/total` while a `rebase -i` is in flight, else the
 /// commit fallback (`ffable ? n : 0` over `n`). The ETA runs from the
 /// phase-entry time. Pure except the file and clock reads.
-fn landing_progress_for(
+fn rebasing_progress_for(
     repo_root: &Path,
     plan: &plans::PlanRef,
     state: &plans::PlanState,
     commits: &[String],
     ffable: bool,
 ) -> Option<ProgressView> {
-    if plan.phase != plans::Phase::Landing {
+    if plan.phase != plans::Phase::Rebasing {
         return None;
     }
     let worktree_path = crate::worktrees::worktree_path(repo_root, &plan.name);
@@ -305,7 +305,7 @@ fn entry_title(
 
 /// One status row per session a plan owns, from `roles_for`: scoping
 /// always, executing once approved, evergreening on the cleanup path,
-/// landing on the conflict path, finished plans keeping their rows as
+/// rebasing on the conflict path, finished plans keeping their rows as
 /// history from the stored session IDs. Spend falls back to the stored
 /// cost once the live session is gone, so relaunched apps still show the
 /// real total.
@@ -377,16 +377,16 @@ fn defaults_for(repo_root: &Path) -> RepoDefaults {
     }
 }
 
-/// Most-recent session across the sorted plans: the landing session when
+/// Most-recent session across the sorted plans: the rebasing session when
 /// the plan owns one, else evergreening, else executing, else scoping.
 pub(crate) fn most_recent_key(plans: &[PlanEntry]) -> Option<SessionKey> {
     plans.first().map(|entry| {
         let role = if entry
             .sessions
             .iter()
-            .any(|status| status.role == SessionRole::Landing)
+            .any(|status| status.role == SessionRole::Rebasing)
         {
-            SessionRole::Landing
+            SessionRole::Rebasing
         } else if entry
             .sessions
             .iter()
@@ -615,7 +615,7 @@ mod tests {
         let name = "2026-09-26.14-53-26.branch-check";
         let plan = plans::PlanRef {
             name: name.to_string(),
-            phase: plans::Phase::Landing,
+            phase: plans::Phase::Rebasing,
         };
         let record = crate::worktrees::create(root, name, &base).expect("create");
         commit_file(&record.path, "work.txt", "work\n", "plan work");
@@ -639,7 +639,7 @@ mod tests {
         let name = "2026-09-26.14-53-27.ready-check";
         let plan = plans::PlanRef {
             name: name.to_string(),
-            phase: plans::Phase::Landing,
+            phase: plans::Phase::Rebasing,
         };
         let record = crate::worktrees::create(root, name, &base).expect("create");
         commit_file(&record.path, "work.txt", "work\n", "plan work");
@@ -671,10 +671,10 @@ mod tests {
         assert!(!ffable);
     }
 
-    fn landing_plan(name: &str) -> plans::PlanRef {
+    fn rebasing_plan(name: &str) -> plans::PlanRef {
         plans::PlanRef {
             name: name.to_string(),
-            phase: plans::Phase::Landing,
+            phase: plans::Phase::Rebasing,
         }
     }
 
@@ -697,59 +697,59 @@ mod tests {
     }
 
     #[test]
-    fn landing_falls_back_to_diverged_commits_without_rebase() {
+    fn rebasing_falls_back_to_diverged_commits_without_rebase() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let plan = landing_plan("2026-09-26.14-53-26.branch-check");
+        let plan = rebasing_plan("2026-09-26.14-53-26.branch-check");
         let state = plans::PlanState::default();
         let commits = vec!["abc plan work".to_string(), "def more work".to_string()];
-        let progress = landing_progress_for(dir.path(), &plan, &state, &commits, false)
-            .expect("landing progress");
+        let progress = rebasing_progress_for(dir.path(), &plan, &state, &commits, false)
+            .expect("rebasing progress");
         assert_eq!(progress.done, 0);
         assert_eq!(progress.total, 2);
         assert_eq!(progress.eta_secs, None);
     }
 
     #[test]
-    fn landing_falls_back_to_full_when_ffable_without_rebase() {
+    fn rebasing_falls_back_to_full_when_ffable_without_rebase() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let plan = landing_plan("2026-09-26.14-53-27.ready-check");
+        let plan = rebasing_plan("2026-09-26.14-53-27.ready-check");
         let state = plans::PlanState::default();
         let commits = vec!["abc plan work".to_string(), "def more work".to_string()];
-        let progress = landing_progress_for(dir.path(), &plan, &state, &commits, true)
-            .expect("landing progress");
+        let progress = rebasing_progress_for(dir.path(), &plan, &state, &commits, true)
+            .expect("rebasing progress");
         assert_eq!(progress.done, 2);
         assert_eq!(progress.total, 2);
         assert_eq!(progress.eta_secs, None);
     }
 
     #[test]
-    fn landing_empty_commits_show_empty_track() {
+    fn rebasing_empty_commits_show_empty_track() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let plan = landing_plan("2026-09-26.14-53-28.empty-check");
+        let plan = rebasing_plan("2026-09-26.14-53-28.empty-check");
         let state = plans::PlanState::default();
-        let progress =
-            landing_progress_for(dir.path(), &plan, &state, &[], false).expect("landing progress");
+        let progress = rebasing_progress_for(dir.path(), &plan, &state, &[], false)
+            .expect("rebasing progress");
         assert_eq!(progress.done, 0);
         assert_eq!(progress.total, 0);
         assert_eq!(progress.eta_secs, None);
     }
 
     #[test]
-    fn landing_rebase_without_entered_at_has_no_eta() {
+    fn rebasing_rebase_without_entered_at_has_no_eta() {
         let dir = tempfile::tempdir().expect("tempdir");
         let name = "2026-09-26.14-53-29.rebase-check";
         fake_rebase(dir.path(), name, "2\n", "2\n");
-        let plan = landing_plan(name);
+        let plan = rebasing_plan(name);
         let state = plans::PlanState::default();
         let commits = vec!["abc plan work".to_string(), "def more work".to_string()];
         let progress =
-            landing_progress_for(dir.path(), &plan, &state, &commits, false).expect("landing");
+            rebasing_progress_for(dir.path(), &plan, &state, &commits, false).expect("rebasing");
         assert_eq!((progress.done, progress.total), (1, 2));
         assert_eq!(progress.eta_secs, None);
     }
 
     #[test]
-    fn landing_rebase_with_entered_at_scales_eta() {
+    fn rebasing_rebase_with_entered_at_scales_eta() {
         let dir = tempfile::tempdir().expect("tempdir");
         let name = "2026-09-26.14-53-30.eta-check";
         fake_rebase(dir.path(), name, "2\n", "2\n");
@@ -758,10 +758,10 @@ mod tests {
             entered_at: Some(entered_at_ms(started)),
             ..Default::default()
         };
-        let plan = landing_plan(name);
+        let plan = rebasing_plan(name);
         let commits = vec!["abc plan work".to_string(), "def more work".to_string()];
         let progress =
-            landing_progress_for(dir.path(), &plan, &state, &commits, false).expect("landing");
+            rebasing_progress_for(dir.path(), &plan, &state, &commits, false).expect("rebasing");
         assert_eq!((progress.done, progress.total), (1, 2));
         let eta = progress.eta_secs.expect("eta");
         let expected = estimate_remaining(1, 2, started, std::time::SystemTime::now())
@@ -774,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn non_landing_phases_send_no_landing_progress() {
+    fn non_rebasing_phases_send_no_rebasing_progress() {
         let dir = tempfile::tempdir().expect("tempdir");
         let state = plans::PlanState::default();
         let commits = vec!["abc plan work".to_string()];
@@ -790,7 +790,7 @@ mod tests {
                 phase,
             };
             assert_eq!(
-                landing_progress_for(dir.path(), &plan, &state, &commits, false),
+                rebasing_progress_for(dir.path(), &plan, &state, &commits, false),
                 None,
                 "{phase:?}"
             );

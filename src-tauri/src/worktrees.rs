@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 /// One plan checkout: where it lives and which branch it spans. The
-/// landing target is never stored: callers resolve the live checkout branch
+/// rebasing target is never stored: callers resolve the live checkout branch
 /// at decision time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeRecord {

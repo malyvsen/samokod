@@ -13,9 +13,9 @@ use crate::types::{AgentError, AppEvent, OpenRepoResult, PlansUpdate, SessionKey
 
 mod advance;
 mod config;
-mod landing_queue;
 mod permissions;
 mod plans_list;
+mod rebasing_queue;
 mod session;
 mod session_ids;
 mod start;
@@ -56,7 +56,7 @@ pub(crate) struct WindowState {
     /// re-replay on reselect.
     history_loaded: HashSet<SessionKey>,
     /// Worktree checkouts per executing plan: path and branch. Rebuilt
-    /// from disk on open. The landing target is never stored: it always
+    /// from disk on open. The rebasing target is never stored: it always
     /// resolves live from `checkout_branch` at decision time.
     worktrees: HashMap<String, crate::worktrees::WorktreeRecord>,
 }
@@ -499,7 +499,7 @@ impl AgentManager {
             state.checkout_branch =
                 crate::branch::current_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string());
             // Crash recovery: surviving worktrees rejoin the map with
-            // derived names; the landing target stays live.
+            // derived names; the rebasing target stays live.
             let scanned = plans::scan_plans(&repo_root);
             for plan in &scanned {
                 if !matches!(
@@ -597,7 +597,7 @@ impl AgentManager {
 
     /// Re-check the branch for the open repo. Failures keep the last value.
     /// A moved target re-resolves `ffable` and may unblock finishes or
-    /// re-run a landing rebase, so a move pumps at once.
+    /// re-run a rebasing rebase, so a move pumps at once.
     pub async fn refresh_branch(&self, window: &str) -> Result<String, AgentError> {
         let repo_root = lock_backend(&self.state)
             .and_then(|backend| backend.windows.get(window)?.repo_root.clone())
@@ -644,7 +644,7 @@ impl AgentManager {
     /// `state.checkout_branch` per event so execute/retry snapshots go
     /// fresh free. Branch moves also push a refreshed plans list so
     /// `ffable` recomputes against the new live target, then pump so a
-    /// moved target unblocks finishes or re-runs a landing rebase.
+    /// moved target unblocks finishes or re-runs a rebasing rebase.
     fn watch_branch(&self, window: &str, repo_root: &Path) {
         let root = repo_root.to_path_buf();
         let label = window.to_string();
@@ -707,9 +707,9 @@ impl AgentManager {
 
     /// Cancel an active plan. An empty scoping session vanishes without a
     /// `cancelled/` trace; otherwise the plan moves to `cancelled/`,
-    /// force-removing the worktree and branch for executing and landing
+    /// force-removing the worktree and branch for executing and rebasing
     /// plans. The selection follows only when the cancelled plan is viewed,
-    /// landing on the cancelled (now read-only) session.
+    /// rebasing on the cancelled (now read-only) session.
     pub async fn cancel_plan(
         &self,
         window: &str,
@@ -773,7 +773,7 @@ impl AgentManager {
         }
         if matches!(
             phase,
-            plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Landing
+            plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Rebasing
         ) {
             self.remove_worktree(window, &repo_root, &from.name, true)?;
         }
@@ -921,7 +921,7 @@ impl AgentManager {
         plan_md_text_for(&repo_root, &session).map_err(|raw| AgentError::RequestFailed { raw })
     }
 
-    /// Live worktree coordinates plus landing state for one plan. The
+    /// Live worktree coordinates plus rebasing state for one plan. The
     /// target always resolves live from `checkout_branch` at call time, so
     /// a branch switch mid-flight retargets in-flight plans.
     fn worktree_status_for(
@@ -966,7 +966,7 @@ impl AgentManager {
         for role in [
             SessionRole::Executing,
             SessionRole::Evergreening,
-            SessionRole::Landing,
+            SessionRole::Rebasing,
         ] {
             self.drop_live(
                 window,
@@ -1014,7 +1014,7 @@ impl AgentManager {
         Ok(())
     }
 
-    /// Announce an eager executing/landing first prompt as a live YOU
+    /// Announce an eager executing/rebasing first prompt as a live YOU
     /// bubble, matching what history replay shows. Shared so the two
     /// call sites cannot drift apart; retries never call here.
     fn announce_first_prompt(&self, window: &str, key: &SessionKey, text: &str) {
@@ -1074,7 +1074,7 @@ impl AgentManager {
     }
 }
 
-/// Live worktree coordinates plus landing state for one plan. `commits`
+/// Live worktree coordinates plus rebasing state for one plan. `commits`
 /// lists the worktree branch commits on top of the target, oldest first;
 /// empty means nothing changed.
 pub(crate) struct WorktreeLive {
@@ -1086,27 +1086,27 @@ pub(crate) struct WorktreeLive {
     pub commits: Vec<String>,
 }
 
-/// Which landing step the user asked for. `Begin` moves a diverged work
+/// Which rebasing step the user asked for. `Begin` moves a diverged work
 /// plan into the queue; `Start` spawns the head's agent fresh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LandingStep {
+enum RebasingStep {
     Begin,
     Start,
     Finish,
 }
 
-/// Refuse a landing step that cannot run. A dirty worktree never lands;
+/// Refuse a rebasing step that cannot run. A dirty worktree never lands;
 /// an already fast-forwardable branch finishes directly instead of
-/// moving or starting landing; a diverged branch moves and starts before
+/// moving or starting rebasing; a diverged branch moves and starts before
 /// finishing. Pure.
-fn gate_landing(dirty: bool, ffable: bool, step: LandingStep) -> Result<(), AgentError> {
+fn gate_rebasing(dirty: bool, ffable: bool, step: RebasingStep) -> Result<(), AgentError> {
     if dirty {
         return Err(AgentError::RequestFailed {
             raw: "commit or discard worktree changes first".to_string(),
         });
     }
     match step {
-        LandingStep::Begin | LandingStep::Start => {
+        RebasingStep::Begin | RebasingStep::Start => {
             if ffable {
                 return Err(AgentError::RequestFailed {
                     raw: "already fast-forwardable, land it directly".to_string(),
@@ -1114,10 +1114,10 @@ fn gate_landing(dirty: bool, ffable: bool, step: LandingStep) -> Result<(), Agen
             }
             Ok(())
         }
-        LandingStep::Finish => {
+        RebasingStep::Finish => {
             if !ffable {
                 return Err(AgentError::RequestFailed {
-                    raw: "target moved on, start landing first".to_string(),
+                    raw: "target moved on, start rebasing first".to_string(),
                 });
             }
             Ok(())
@@ -1783,7 +1783,7 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Cancelled, "c", Some("C"));
         write_plan_dir(root, plans::Phase::Completed, "b", Some("B"));
-        write_plan_dir(root, plans::Phase::Landing, "m", Some("M"));
+        write_plan_dir(root, plans::Phase::Rebasing, "m", Some("M"));
         write_plan_dir(root, plans::Phase::Evergreening, "g", Some("G"));
         write_plan_dir(root, plans::Phase::Executing, "a", Some("A"));
         write_plan_dir(root, plans::Phase::Scoping, "s", Some("S"));
@@ -1795,7 +1795,7 @@ mod tests {
                 plans::Phase::Scoping,
                 plans::Phase::Executing,
                 plans::Phase::Evergreening,
-                plans::Phase::Landing,
+                plans::Phase::Rebasing,
                 plans::Phase::Completed,
                 plans::Phase::Cancelled,
             ]
@@ -1860,11 +1860,11 @@ mod tests {
     }
 
     #[test]
-    fn most_recent_prefers_landing_session() {
+    fn most_recent_prefers_rebasing_session() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
-        write_plan_dir(root, plans::Phase::Landing, "m", Some("M"));
+        write_plan_dir(root, plans::Phase::Rebasing, "m", Some("M"));
         let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 4);
@@ -1872,7 +1872,7 @@ mod tests {
             most_recent_key(&entries),
             Some(SessionKey {
                 plan: "m".to_string(),
-                role: SessionRole::Landing,
+                role: SessionRole::Rebasing,
             })
         );
     }
@@ -1896,16 +1896,16 @@ mod tests {
     }
 
     #[test]
-    fn landing_gate_refuses_dirty_and_misplaced_steps() {
-        assert!(gate_landing(false, true, LandingStep::Finish).is_ok());
-        assert!(gate_landing(false, false, LandingStep::Begin).is_ok());
-        assert!(gate_landing(false, false, LandingStep::Start).is_ok());
-        assert!(gate_landing(true, true, LandingStep::Finish).is_err());
-        assert!(gate_landing(true, false, LandingStep::Begin).is_err());
-        assert!(gate_landing(true, false, LandingStep::Start).is_err());
-        assert!(gate_landing(false, false, LandingStep::Finish).is_err());
-        assert!(gate_landing(false, true, LandingStep::Begin).is_err());
-        assert!(gate_landing(false, true, LandingStep::Start).is_err());
+    fn rebasing_gate_refuses_dirty_and_misplaced_steps() {
+        assert!(gate_rebasing(false, true, RebasingStep::Finish).is_ok());
+        assert!(gate_rebasing(false, false, RebasingStep::Begin).is_ok());
+        assert!(gate_rebasing(false, false, RebasingStep::Start).is_ok());
+        assert!(gate_rebasing(true, true, RebasingStep::Finish).is_err());
+        assert!(gate_rebasing(true, false, RebasingStep::Begin).is_err());
+        assert!(gate_rebasing(true, false, RebasingStep::Start).is_err());
+        assert!(gate_rebasing(false, false, RebasingStep::Finish).is_err());
+        assert!(gate_rebasing(false, true, RebasingStep::Begin).is_err());
+        assert!(gate_rebasing(false, true, RebasingStep::Start).is_err());
     }
 
     #[test]

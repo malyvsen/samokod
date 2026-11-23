@@ -104,14 +104,14 @@ impl AgentManager {
         // A prompt never races a replay: it waits for an in-flight load
         // rather than interleaving live chunks with history chunks.
         self.wait_for_history(window, &session).await?;
-        // Queued landings hold with no live session: prompting one fails
+        // Queued rebasings hold with no live session: prompting one fails
         // fast instead of minting a second rebase. Cancel and finish paths
         // stay allowed.
         if let Some((repo_root, _)) = self.reopen_snapshot(window)
-            && super::landing_queue::is_held(&repo_root, &session)
+            && super::rebasing_queue::is_held(&repo_root, &session)
         {
             return Err(AgentError::RequestFailed {
-                raw: "landing is queued, waiting its turn".to_string(),
+                raw: "rebasing is queued, waiting its turn".to_string(),
             });
         }
         let (connection, session_id) = self.ensure_live(window, &session).await?;
@@ -275,7 +275,7 @@ impl AgentManager {
     /// Claim the one-time role prefix for the first message of one ACP
     /// conversation. One locked check-and-mark, so a retried turn never
     /// prefixes twice. Scoping uses the repo-relative display path since it
-    /// runs with cwd at the repo root, while executing and landing use
+    /// runs with cwd at the repo root, while executing and rebasing use
     /// absolute paths into the checkout. Evergreening never prefixes here:
     /// the transition core sends its full first turn at spawn.
     fn claim_role_prefix(&self, window: &str, key: &SessionKey, user_text: &str) -> Option<String> {
@@ -300,7 +300,7 @@ impl AgentManager {
                     .to_string();
                 prefixed_first_message(&opencode::executing_first_message(&plan_dir_abs), user_text)
             }
-            plans::Phase::Landing => {
+            plans::Phase::Rebasing => {
                 let path = match state.worktrees.get(&plan.name) {
                     Some(record) => record.path.clone(),
                     None => crate::worktrees::worktree_path(&repo_root, &plan.name),
@@ -313,7 +313,7 @@ impl AgentManager {
                     .to_string_lossy()
                     .to_string();
                 prefixed_first_message(
-                    &opencode::landing_first_message(
+                    &opencode::rebasing_first_message(
                         &worktree_branch,
                         &target_branch,
                         &path.to_string_lossy(),
@@ -428,7 +428,7 @@ pub(crate) fn handle_notification(
     }
     // User messages only surface here while history replays. Live turns
     // already show their bubble (scoping appends optimistically, eager
-    // executing/landing first prompts arrive as their own event), so
+    // executing/rebasing first prompts arrive as their own event), so
     // mapping them outside a replay would double-add every prompt.
     if let Some(chunk) = crate::updates::user_text_of(&notification.update)
         && lock_backend(state)
@@ -701,7 +701,7 @@ fn prefixed_first_message(template: &str, user_text: &str) -> String {
 /// Replayed user text as display bubbles: a scoping first prompt carries
 /// its template, so it splits back into template and message; anything
 /// else is one bubble. Pure.
-/// Executing and landing intentionally stay combined: no lead preview
+/// Executing and rebasing intentionally stay combined: no lead preview
 /// exists for them, so no duplicate is possible. Their live-versus-reload
 /// asymmetry is server-side prefixing, which stays out of scope.
 fn replay_bubbles(key: &SessionKey, chunk: &str) -> Vec<String> {
@@ -857,17 +857,17 @@ mod tests {
     }
 
     #[test]
-    fn landing_replay_stays_single_bubble() {
-        let template = opencode::landing_first_message(
+    fn rebasing_replay_stays_single_bubble() {
+        let template = opencode::rebasing_first_message(
             "samokod-ts",
             "main",
             "/repo/.samokod/worktrees/ts",
-            "/repo/.samokod/plans/landing/ts/plan.md",
+            "/repo/.samokod/plans/rebasing/ts/plan.md",
         );
         let full = prefixed_first_message(&template, "do things");
         let key = SessionKey {
             plan: "ts".to_string(),
-            role: SessionRole::Landing,
+            role: SessionRole::Rebasing,
         };
         assert_eq!(replay_bubbles(&key, &full), vec![full]);
     }
@@ -1076,7 +1076,7 @@ mod tests {
     #[test]
     fn stop_holds_work_and_holds_pump() {
         use super::super::advance::{PlanView, next_action};
-        use super::super::landing_queue::LandingPosition;
+        use super::super::rebasing_queue::RebasingPosition;
         use crate::plans::Phase;
 
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1102,7 +1102,7 @@ mod tests {
             dirty: false,
             ffable: true,
             has_commits: true,
-            landing: LandingPosition::NotLanding,
+            rebasing: RebasingPosition::NotRebasing,
             started: true,
         };
         assert_eq!(next_action(&held), None);

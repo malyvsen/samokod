@@ -10,7 +10,7 @@ export const PHASES: Phase[] = [
 	"scoping",
 	"executing",
 	"evergreening",
-	"landing",
+	"rebasing",
 	"completed",
 	"cancelled",
 ];
@@ -19,8 +19,8 @@ export type AttentionKind = "idle" | "approval" | "failed";
 
 export function latestRole(plan: PlanEntry): SessionRole {
 	const roles = new Set(plan.sessions.map((status) => status.role));
-	if (roles.has("landing")) {
-		return "landing";
+	if (roles.has("rebasing")) {
+		return "rebasing";
 	}
 	if (roles.has("evergreening")) {
 		return "evergreening";
@@ -39,7 +39,7 @@ export function attentionFor(plan: PlanEntry): AttentionKind | null {
 	if (plan.phase === "completed" || plan.phase === "cancelled") {
 		return null;
 	}
-	if (plan.phase === "landing" && plan.queued) {
+	if (plan.phase === "rebasing" && plan.queued) {
 		return null;
 	}
 	const role = latestRole(plan);
@@ -87,8 +87,8 @@ export function todoProgress(plan: PlanEntry): HeaderProgress | null {
 	return toHeaderProgress(progress);
 }
 
-function landingProgress(plan: PlanEntry): HeaderProgress {
-	const progress = plan.landing_progress ?? null;
+function rebasingProgress(plan: PlanEntry): HeaderProgress {
+	const progress = plan.rebasing_progress ?? null;
 	if (progress === null) {
 		return { done: 0, total: 0, etaSecs: null };
 	}
@@ -96,8 +96,8 @@ function landingProgress(plan: PlanEntry): HeaderProgress {
 }
 
 export function headerProgress(plan: PlanEntry): HeaderProgress | null {
-	if (plan.phase === "landing") {
-		return landingProgress(plan);
+	if (plan.phase === "rebasing") {
+		return rebasingProgress(plan);
 	}
 	return todoProgress(plan);
 }
@@ -174,7 +174,7 @@ const ROLE_LABELS: Record<SessionRole, string> = {
 	scoping: "Scoping",
 	executing: "Executing",
 	evergreening: "Evergreening",
-	landing: "Landing",
+	rebasing: "Rebasing",
 };
 
 export function roleLabel(role: SessionRole): string {

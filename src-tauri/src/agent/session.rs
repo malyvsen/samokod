@@ -36,7 +36,7 @@ pub(crate) fn role_phase(role: SessionRole) -> plans::Phase {
         SessionRole::Scoping => plans::Phase::Scoping,
         SessionRole::Executing => plans::Phase::Executing,
         SessionRole::Evergreening => plans::Phase::Evergreening,
-        SessionRole::Landing => plans::Phase::Landing,
+        SessionRole::Rebasing => plans::Phase::Rebasing,
     }
 }
 
@@ -46,7 +46,7 @@ pub(crate) struct ActivePlan {
     pub(crate) name: String,
     pub(crate) phase: plans::Phase,
     /// Role already delivered for this ACP conversation. Executing,
-    /// evergreening, and landing send once, as the full first turn or
+    /// evergreening, and rebasing send once, as the full first turn or
     /// prefixed to it; scoping prefixes its template server-side to the
     /// first prompt. In-memory only: history replay re-derives it from any
     /// user message, so no cross-restart memory can go stale.
@@ -70,10 +70,10 @@ impl ActivePlan {
         }
     }
 
-    pub(crate) fn landing(name: String) -> Self {
+    pub(crate) fn rebasing(name: String) -> Self {
         ActivePlan {
             name,
-            phase: plans::Phase::Landing,
+            phase: plans::Phase::Rebasing,
             prefixed: false,
         }
     }
@@ -92,7 +92,7 @@ impl ActivePlan {
             SessionRole::Scoping => ActivePlan::scoping(session.plan.clone()),
             SessionRole::Executing => ActivePlan::executing(session.plan.clone()),
             SessionRole::Evergreening => ActivePlan::evergreening(session.plan.clone()),
-            SessionRole::Landing => ActivePlan::landing(session.plan.clone()),
+            SessionRole::Rebasing => ActivePlan::rebasing(session.plan.clone()),
         }
     }
 
@@ -101,7 +101,7 @@ impl ActivePlan {
             plans::Phase::Scoping => SessionRole::Scoping,
             plans::Phase::Executing => SessionRole::Executing,
             plans::Phase::Evergreening => SessionRole::Evergreening,
-            plans::Phase::Landing => SessionRole::Landing,
+            plans::Phase::Rebasing => SessionRole::Rebasing,
             plans::Phase::Completed | plans::Phase::Cancelled => return None,
         };
         Some(SessionKey {
@@ -111,12 +111,12 @@ impl ActivePlan {
     }
 
     /// Working directory for the session: the plan worktree for executing,
-    /// evergreening, and landing plans, the main root for scoping plans.
+    /// evergreening, and rebasing plans, the main root for scoping plans.
     /// Plan files always stay in the main checkout; only the agent's cwd
     /// moves.
     pub(crate) fn cwd(&self, repo_root: &Path) -> PathBuf {
         match self.phase {
-            plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Landing => {
+            plans::Phase::Executing | plans::Phase::Evergreening | plans::Phase::Rebasing => {
                 crate::worktrees::worktree_path(repo_root, &self.name)
             }
             plans::Phase::Scoping | plans::Phase::Completed | plans::Phase::Cancelled => {
@@ -468,7 +468,7 @@ impl AgentManager {
         let mut plan = ActivePlan::for_session(key);
         // A known session keeps its prefix state across transport deaths;
         // anything without an entry starts with the caller's flag.
-        // Eager executing, evergreening, and landing sessions bypass this
+        // Eager executing, evergreening, and rebasing sessions bypass this
         // path: the transition core marks their prefixed flag, since their
         // role already went out as the full first turn.
         plan.prefixed = stored_prefixed.unwrap_or(plan.prefixed);
@@ -653,7 +653,7 @@ impl AgentManager {
     /// bar, going straight to `ConfigOptions` + `HistoryDone` without ever
     /// emitting `HistoryBegin`. Finished plans never say "plan is gone":
     /// with no saved past they fail with an honest non-retryable
-    /// reason instead. Queued landings finish with `HistoryDone` and no
+    /// reason instead. Queued rebasings finish with `HistoryDone` and no
     /// live session, so selection never mints a second rebase.
     ///
     /// Holds both guards explicitly and spawns without polling: the history
@@ -677,7 +677,7 @@ impl AgentManager {
             return Err(AgentError::RequestFailed { raw });
         }
         if let Some((repo_root, _)) = self.reopen_snapshot(window)
-            && super::landing_queue::is_held(&repo_root, &session)
+            && super::rebasing_queue::is_held(&repo_root, &session)
         {
             history_guard.finish();
             log::info!(

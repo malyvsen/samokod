@@ -1,6 +1,6 @@
-// Landing queue order: oldest-first waiters in `landing/`, one agent.
-// The pump moves diverged plans into `landing/` in arrival order; only the
-// head runs the landing agent, the rest hold with no live session. This
+// Rebasing queue order: oldest-first waiters in `rebasing/`, one agent.
+// The pump moves diverged plans into `rebasing/` in arrival order; only the
+// head runs the rebasing agent, the rest hold with no live session. This
 // module owns that order plus the shared held-guard: moves, spawns,
 // rebases, and all no-spawn guards branch on it.
 use std::path::Path;
@@ -8,43 +8,43 @@ use std::path::Path;
 use crate::plans::{self, Phase};
 use crate::types::{SessionKey, SessionRole};
 
-/// Where one plan sits in the landing queue. No bools: callers match.
+/// Where one plan sits in the rebasing queue. No bools: callers match.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LandingPosition {
-    NotLanding,
+pub(crate) enum RebasingPosition {
+    NotRebasing,
     Head,
     Queued,
 }
 
-/// Queue position for one plan name. Scans `landing/` once, resolves
+/// Queue position for one plan name. Scans `rebasing/` once, resolves
 /// arrivals via `plans::arrival_ms`, oldest first.
-pub(crate) fn position(repo_root: &Path, plan_name: &str) -> LandingPosition {
-    position_in(&sorted_landing_names(repo_root), plan_name)
+pub(crate) fn position(repo_root: &Path, plan_name: &str) -> RebasingPosition {
+    position_in(&sorted_rebasing_names(repo_root), plan_name)
 }
 
 /// True when the plan waits behind the head.
 pub(crate) fn is_queued(repo_root: &Path, plan_name: &str) -> bool {
-    is_queued_in(&sorted_landing_names(repo_root), plan_name)
+    is_queued_in(&sorted_rebasing_names(repo_root), plan_name)
 }
 
-/// True when a landing session must not mint a live agent: it waits behind
+/// True when a rebasing session must not mint a live agent: it waits behind
 /// the head. Warm, prompts, and history share this instead of ad-hoc
 /// role-plus-scan checks.
 pub(crate) fn is_held(repo_root: &Path, session: &SessionKey) -> bool {
-    session.role == SessionRole::Landing && is_queued(repo_root, &session.plan)
+    session.role == SessionRole::Rebasing && is_queued(repo_root, &session.plan)
 }
 
-/// Landing names oldest first: `(arrival, name)` order, unstamped last.
-pub(crate) fn sorted_landing_names(repo_root: &Path) -> Vec<String> {
+/// Rebasing names oldest first: `(arrival, name)` order, unstamped last.
+pub(crate) fn sorted_rebasing_names(repo_root: &Path) -> Vec<String> {
     let entries: Vec<(String, i64)> = plans::scan_plans(repo_root)
         .into_iter()
-        .filter(|plan| plan.phase == Phase::Landing)
+        .filter(|plan| plan.phase == Phase::Rebasing)
         .map(|plan| {
             let arrival = plans::arrival_ms(
                 repo_root,
                 &plans::PlanRef {
                     name: plan.name.clone(),
-                    phase: Phase::Landing,
+                    phase: Phase::Rebasing,
                 },
             )
             .unwrap_or(i64::MAX);
@@ -55,19 +55,19 @@ pub(crate) fn sorted_landing_names(repo_root: &Path) -> Vec<String> {
 }
 
 /// Position inside a precomputed queue. Pure.
-pub(crate) fn position_in(queue: &[String], plan_name: &str) -> LandingPosition {
+pub(crate) fn position_in(queue: &[String], plan_name: &str) -> RebasingPosition {
     if head(queue) == Some(plan_name) {
-        return LandingPosition::Head;
+        return RebasingPosition::Head;
     }
     if queue.iter().any(|name| name == plan_name) {
-        return LandingPosition::Queued;
+        return RebasingPosition::Queued;
     }
-    LandingPosition::NotLanding
+    RebasingPosition::NotRebasing
 }
 
 /// True when the plan waits behind the head of a precomputed queue. Pure.
 pub(crate) fn is_queued_in(queue: &[String], plan_name: &str) -> bool {
-    position_in(queue, plan_name) == LandingPosition::Queued
+    position_in(queue, plan_name) == RebasingPosition::Queued
 }
 
 /// Oldest first by `(arrival, name)`. Pure.
@@ -85,10 +85,10 @@ fn head(queue: &[String]) -> Option<&str> {
 mod tests {
     use super::*;
 
-    fn landing_dir(root: &Path, name: &str, entered_at: i64) {
+    fn rebasing_dir(root: &Path, name: &str, entered_at: i64) {
         let plan = plans::PlanRef {
             name: name.to_string(),
-            phase: plans::Phase::Landing,
+            phase: plans::Phase::Rebasing,
         };
         std::fs::create_dir_all(plan.path(root)).expect("mkdir");
         std::fs::write(plan.path(root).join("plan.md"), "# T\n").expect("write");
@@ -97,10 +97,10 @@ mod tests {
         plans::store_state(&plan.path(root), &state);
     }
 
-    fn landing_session(plan: &str) -> SessionKey {
+    fn rebasing_session(plan: &str) -> SessionKey {
         SessionKey {
             plan: plan.to_string(),
-            role: SessionRole::Landing,
+            role: SessionRole::Rebasing,
         }
     }
 
@@ -110,17 +110,17 @@ mod tests {
         assert_eq!(head(&queue), None);
         assert_eq!(
             position_in(&queue, "2026-10-11.02-00-00"),
-            LandingPosition::NotLanding
+            RebasingPosition::NotRebasing
         );
     }
 
     #[test]
-    fn single_landing_is_head() {
+    fn single_rebasing_is_head() {
         let queue = sort_names(vec![("2026-10-11.02-00-00".to_string(), 100)]);
         assert_eq!(head(&queue), Some("2026-10-11.02-00-00"));
         assert_eq!(
             position_in(&queue, "2026-10-11.02-00-00"),
-            LandingPosition::Head
+            RebasingPosition::Head
         );
     }
 
@@ -128,8 +128,8 @@ mod tests {
     fn oldest_arrival_wins() {
         let queue = sort_names(vec![("newer".to_string(), 200), ("older".to_string(), 100)]);
         assert_eq!(queue, vec!["older".to_string(), "newer".to_string()]);
-        assert_eq!(position_in(&queue, "older"), LandingPosition::Head);
-        assert_eq!(position_in(&queue, "newer"), LandingPosition::Queued);
+        assert_eq!(position_in(&queue, "older"), RebasingPosition::Head);
+        assert_eq!(position_in(&queue, "newer"), RebasingPosition::Queued);
     }
 
     #[test]
@@ -139,16 +139,16 @@ mod tests {
             ("a-plan".to_string(), 100),
         ]);
         assert_eq!(queue, vec!["a-plan".to_string(), "b-plan".to_string()]);
-        assert_eq!(position_in(&queue, "a-plan"), LandingPosition::Head);
-        assert_eq!(position_in(&queue, "b-plan"), LandingPosition::Queued);
+        assert_eq!(position_in(&queue, "a-plan"), RebasingPosition::Head);
+        assert_eq!(position_in(&queue, "b-plan"), RebasingPosition::Queued);
     }
 
     #[test]
-    fn non_landing_is_not_landing() {
+    fn non_rebasing_is_not_rebasing() {
         let queue = sort_names(vec![("a-plan".to_string(), 100)]);
         assert_eq!(
             position_in(&queue, "other-plan"),
-            LandingPosition::NotLanding
+            RebasingPosition::NotRebasing
         );
     }
 
@@ -157,9 +157,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
-        landing_dir(root, "2026-10-11.02-00-00.old", 100);
-        landing_dir(root, "2026-10-11.02-00-01.new", 200);
-        let queue = sorted_landing_names(root);
+        rebasing_dir(root, "2026-10-11.02-00-00.old", 100);
+        rebasing_dir(root, "2026-10-11.02-00-01.new", 200);
+        let queue = sorted_rebasing_names(root);
         assert_eq!(
             queue,
             vec![
@@ -169,18 +169,18 @@ mod tests {
         );
         assert_eq!(
             position(root, "2026-10-11.02-00-00.old"),
-            LandingPosition::Head
+            RebasingPosition::Head
         );
         assert_eq!(
             position(root, "2026-10-11.02-00-01.new"),
-            LandingPosition::Queued
+            RebasingPosition::Queued
         );
-        assert_eq!(position(root, "missing"), LandingPosition::NotLanding);
+        assert_eq!(position(root, "missing"), RebasingPosition::NotRebasing);
         assert!(!is_queued(root, "2026-10-11.02-00-00.old"));
         assert!(is_queued(root, "2026-10-11.02-00-01.new"));
         assert!(is_queued_in(&queue, "2026-10-11.02-00-01.new"));
-        assert!(!is_held(root, &landing_session("2026-10-11.02-00-00.old")));
-        assert!(is_held(root, &landing_session("2026-10-11.02-00-01.new")));
+        assert!(!is_held(root, &rebasing_session("2026-10-11.02-00-00.old")));
+        assert!(is_held(root, &rebasing_session("2026-10-11.02-00-01.new")));
         assert!(!is_held(
             root,
             &SessionKey {

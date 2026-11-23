@@ -1,6 +1,6 @@
 // Background warm: eager `ensure_live` so MODEL/EFFORT pickers turn
 // interactive before the first prompt. Single-flight per session key.
-// Queued landings never warm: only the head runs the agent.
+// Queued rebasings never warm: only the head runs the agent.
 use crate::plans;
 use crate::types::{AgentError, SessionKey};
 
@@ -34,9 +34,9 @@ impl AgentManager {
             );
             return Ok(());
         }
-        if super::landing_queue::is_held(&repo_root, &session) {
+        if super::rebasing_queue::is_held(&repo_root, &session) {
             log::debug!(
-                "skipping warm window={window} for {} {:?}: queued behind landing head",
+                "skipping warm window={window} for {} {:?}: queued behind rebasing head",
                 session.plan,
                 session.role
             );

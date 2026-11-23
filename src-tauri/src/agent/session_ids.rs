@@ -91,7 +91,7 @@ mod tests {
         assert_eq!(state.session(SessionRole::Scoping), None);
         assert_eq!(state.session(SessionRole::Executing), None);
         assert_eq!(state.session(SessionRole::Evergreening), None);
-        assert_eq!(state.session(SessionRole::Landing), None);
+        assert_eq!(state.session(SessionRole::Rebasing), None);
     }
 
     #[test]
@@ -106,7 +106,11 @@ mod tests {
             &key(name, SessionRole::Executing),
             "ses_executing",
         );
-        record_session(dir.path(), &key(name, SessionRole::Landing), "ses_landing");
+        record_session(
+            dir.path(),
+            &key(name, SessionRole::Rebasing),
+            "ses_rebasing",
+        );
         let plan = PlanRef {
             name: name.to_string(),
             phase: Phase::Scoping,
@@ -114,7 +118,7 @@ mod tests {
         let state = plans::load_state(&plan.path(dir.path()));
         assert_eq!(state.session(SessionRole::Scoping), Some("ses_scoping"));
         assert_eq!(state.session(SessionRole::Executing), Some("ses_executing"));
-        assert_eq!(state.session(SessionRole::Landing), Some("ses_landing"));
+        assert_eq!(state.session(SessionRole::Rebasing), Some("ses_rebasing"));
     }
 
     #[test]
@@ -249,7 +253,7 @@ mod tests {
             SessionRole::Scoping,
             SessionRole::Executing,
             SessionRole::Evergreening,
-            SessionRole::Landing,
+            SessionRole::Rebasing,
         ];
         for (index, role) in roles.iter().enumerate() {
             record_cost(dir.path(), &key(name, *role), 1.5 * (index as f64 + 1.0));
@@ -283,7 +287,7 @@ mod tests {
         assert_eq!(kept.session(SessionRole::Executing), Some("ses_exec"));
         assert_eq!(kept.cost(SessionRole::Scoping), 1.24);
         assert_eq!(kept.cost(SessionRole::Executing), 2.5);
-        assert_eq!(kept.cost(SessionRole::Landing), 0.0);
+        assert_eq!(kept.cost(SessionRole::Rebasing), 0.0);
     }
 
     #[test]
