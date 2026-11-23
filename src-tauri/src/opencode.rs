@@ -70,7 +70,7 @@ pub fn agent_config(plan: &PlanRef) -> String {
             },
             REBASING_AGENT: {
                 "mode": "primary",
-                "description": "Lands one plan branch onto its target branch.",
+                "description": "Rebases one plan branch onto its target branch.",
                 "permissions": rebasing_permissions(),
             },
         },
@@ -166,7 +166,7 @@ const WORK_EDIT_RULES: [(&str, &str); 5] = [
 ];
 
 /// Rebasing resolves one plan branch onto its target, so every worktree
-/// file is editable except state and attachments: a landed commit must
+/// file is editable except state and attachments: a rebased commit must
 /// cover files the target branch added on top. No permission questions
 /// and no subagent research: rebasing is a focused conflict-resolution
 /// task.

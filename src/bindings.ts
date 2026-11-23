@@ -237,8 +237,8 @@ export type PlanEntry_Deserialize = {
 	 */
 	manual: boolean,
 	/**
-	 *  Evergreen intent: true cleans up after executing, false lands
-	 *  straight from executing. The single copy lives in `PlanState`.
+	 *  Evergreen intent: true cleans up after rebasing, false rebases then
+	 *  finishes directly. The single copy lives in `PlanState`.
 	 */
 	evergreen: boolean,
 	/**
@@ -247,8 +247,8 @@ export type PlanEntry_Deserialize = {
 	 */
 	commits: string[],
 	/**
-	 *  True when the rebasing waits behind the head. The head runs the
-	 *  agent; queued rebasings hold with no live session and no idle dot.
+	 *  Mirror of `phase == queued`: queued plans hold with no live session
+	 *  and no idle dot. Kept on the wire so rows stay self-describing.
 	 */
 	queued: boolean,
 	/**  Rebasing commit progress with ETA. `Some` for rebasing plans only. */
@@ -268,8 +268,8 @@ export type PlanEntry_Serialize = {
 	 */
 	manual: boolean,
 	/**
-	 *  Evergreen intent: true cleans up after executing, false lands
-	 *  straight from executing. The single copy lives in `PlanState`.
+	 *  Evergreen intent: true cleans up after rebasing, false rebases then
+	 *  finishes directly. The single copy lives in `PlanState`.
 	 */
 	evergreen: boolean,
 	/**
@@ -278,8 +278,8 @@ export type PlanEntry_Serialize = {
 	 */
 	commits: string[],
 	/**
-	 *  True when the rebasing waits behind the head. The head runs the
-	 *  agent; queued rebasings hold with no live session and no idle dot.
+	 *  Mirror of `phase == queued`: queued plans hold with no live session
+	 *  and no idle dot. Kept on the wire so rows stay self-describing.
 	 */
 	queued: boolean,
 	/**  Rebasing commit progress with ETA. `Some` for rebasing plans only. */

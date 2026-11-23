@@ -40,10 +40,7 @@ export function attentionFor(plan: PlanEntry): AttentionKind | null {
 	if (plan.phase === "completed" || plan.phase === "cancelled") {
 		return null;
 	}
-	if (plan.phase === "rebasing" && plan.queued) {
-		return null;
-	}
-	if (plan.phase === "queued") {
+	if (plan.queued) {
 		return null;
 	}
 	const role = latestRole(plan);

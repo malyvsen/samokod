@@ -163,8 +163,8 @@ pub struct PlanState {
     /// it advance on its own. Travels with renames inside `state.json`.
     #[serde(default)]
     pub manual: bool,
-    /// Evergreen intent: true (the default) cleans up after executing,
-    /// false lands straight from executing. Travels with renames inside
+    /// Evergreen intent: true (the default) cleans up after rebasing,
+    /// false rebases then finishes directly. Travels with renames inside
     /// `state.json` from scoping onward.
     #[serde(default = "default_evergreen")]
     pub evergreen: bool,
@@ -390,7 +390,7 @@ pub fn queue(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
     Ok(next)
 }
 
-/// Finish a landed rebasing plan. Name travels unchanged.
+/// Finish a rebased plan. Name travels unchanged.
 pub fn finish_rebasing(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
     require_phase(plan, Phase::Rebasing)?;
     let next = PlanRef {
@@ -1014,9 +1014,9 @@ mod tests {
         let back = back_to_rebasing(root, &greened).expect("diverge back");
         assert_eq!(back.phase, Phase::Rebasing);
         assert_eq!(stored_roles(root, &back), all);
-        let landed = finish_rebasing(root, &back).expect("finish");
-        assert_eq!(landed.phase, Phase::Completed);
-        assert_eq!(stored_roles(root, &landed), all);
+        let done = finish_rebasing(root, &back).expect("finish");
+        assert_eq!(done.phase, Phase::Completed);
+        assert_eq!(stored_roles(root, &done), all);
         let third = materialize_scoping(root, "2026-09-26.08-41-05").expect("third");
         std::fs::write(third.plan_md(root), "# Third\n").expect("write");
         let diverged = execute(root, &third).expect("execute");

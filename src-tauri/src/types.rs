@@ -207,14 +207,14 @@ pub struct PlanEntry {
     /// Manual mode: true holds the plan in place, false lets it advance on
     /// its own. The single copy lives in `PlanState`; this is its view.
     pub manual: bool,
-    /// Evergreen intent: true cleans up after executing, false lands
-    /// straight from executing. The single copy lives in `PlanState`.
+    /// Evergreen intent: true cleans up after rebasing, false rebases then
+    /// finishes directly. The single copy lives in `PlanState`.
     pub evergreen: bool,
     /// Branch commits ahead of the target, oldest first. Empty when the
     /// plan owns no worktree.
     pub commits: Vec<String>,
-    /// True when the rebasing waits behind the head. The head runs the
-    /// agent; queued rebasings hold with no live session and no idle dot.
+    /// Mirror of `phase == queued`: queued plans hold with no live session
+    /// and no idle dot. Kept on the wire so rows stay self-describing.
     pub queued: bool,
     /// Rebasing commit progress with ETA. `Some` for rebasing plans only.
     pub rebasing_progress: Option<ProgressView>,

@@ -190,61 +190,6 @@ impl AgentManager {
         }
     }
 
-    /// Clean ffable check for a rebasing plan: true when a rebase that
-    /// finds its rebasing ffable after all should hand off instead. Dirty or
-    /// missing plans report false so the caller falls through to the
-    /// normal branch, which refuses loud with the usual message.
-    fn rebasing_is_ffable(&self, window: &str, plan: &str) -> Result<bool, AgentError> {
-        let Some((repo_root, _)) = self.reopen_snapshot(window) else {
-            return Err(AgentError::NoSession {
-                raw: "open a repository first".to_string(),
-            });
-        };
-        let from = plans::PlanRef {
-            name: plan.to_string(),
-            phase: Phase::Rebasing,
-        };
-        if !from.path(&repo_root).is_dir() {
-            return Ok(false);
-        }
-        match self.worktree_status_for(window, &repo_root, plan) {
-            Ok(status) => Ok(!status.dirty && status.ffable),
-            Err(_) => Ok(false),
-        }
-    }
-
-    /// Handoff for a rebasing plan that finds itself ffable after all:
-    /// evergreening when cleanup is still due, else finishing. Probe
-    /// failures yield `None` so the caller falls through to the normal
-    /// branch, which refuses loud without moving anything.
-    fn ffable_redirect(&self, window: &str, plan: &str) -> Option<Transition> {
-        if !self.rebasing_is_ffable(window, plan).ok()? {
-            return None;
-        }
-        let (repo_root, _) = self.reopen_snapshot(window)?;
-        let from = plans::PlanRef {
-            name: plan.to_string(),
-            phase: Phase::Rebasing,
-        };
-        if !from.path(&repo_root).is_dir() {
-            return None;
-        }
-        let stored = plans::load_state(&from.path(&repo_root));
-        let status = self.worktree_status_for(window, &repo_root, plan).ok()?;
-        if status.dirty {
-            return None;
-        }
-        if stored.evergreen && !status.commits.is_empty() {
-            Some(Transition::BeginEvergreening {
-                plan: plan.to_string(),
-            })
-        } else {
-            Some(Transition::FinishRebasing {
-                plan: plan.to_string(),
-            })
-        }
-    }
-
     /// Shared transition core: idle gate, repo snapshot, `PlanRef` build,
     /// existence check, live-session drop, prompted carry, follow-own-move
     /// selection, and plans update happen once here for every entry point.
@@ -255,19 +200,10 @@ impl AgentManager {
         window: &str,
         action: Transition,
     ) -> Result<PlansUpdate, AgentError> {
-        // A rebasing that finds itself ffable after all hands off instead:
-        // evergreening when cleanup is still due, else finishing.
-        // Redirected up front so the core below stays a single straight
-        // match with no recursion.
-        let action = match action {
-            Transition::StartRebasing { plan } | Transition::RebaseRebasing { plan }
-                if self.rebasing_is_ffable(window, &plan)? =>
-            {
-                self.ffable_redirect(window, &plan)
-                    .unwrap_or(Transition::FinishRebasing { plan })
-            }
-            action => action,
-        };
+        // A rebasing that finds itself ffable after all hands off on the next
+        // pass: the pure decision already routes ffable rebasing plans to
+        // evergreening or finishing, so a stale spawn or re-run refuses loud
+        // in its core and heals on the following pass.
         match action {
             Transition::Execute { plan } => {
                 let session = SessionKey {

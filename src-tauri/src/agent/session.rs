@@ -656,7 +656,7 @@ impl AgentManager {
     /// bar, going straight to `ConfigOptions` + `HistoryDone` without ever
     /// emitting `HistoryBegin`. Finished plans never say "plan is gone":
     /// with no saved past they fail with an honest non-retryable
-    /// reason instead. Queued rebasings finish with `HistoryDone` and no
+    /// reason instead. Queued plans finish with `HistoryDone` and no
     /// live session, so selection never mints a second rebase.
     ///
     /// Holds both guards explicitly and spawns without polling: the history

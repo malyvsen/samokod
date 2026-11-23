@@ -707,9 +707,10 @@ impl AgentManager {
 
     /// Cancel an active plan. An empty scoping session vanishes without a
     /// `cancelled/` trace; otherwise the plan moves to `cancelled/`,
-    /// force-removing the worktree and branch for executing and rebasing
-    /// plans. The selection follows only when the cancelled plan is viewed,
-    /// rebasing on the cancelled (now read-only) session.
+    /// force-removing the worktree and branch for executing, queued,
+    /// rebasing, and evergreening plans. The selection follows only when
+    /// the cancelled plan is viewed, rebasing on the cancelled (now
+    /// read-only) session.
     pub async fn cancel_plan(
         &self,
         window: &str,

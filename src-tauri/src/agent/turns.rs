@@ -104,7 +104,7 @@ impl AgentManager {
         // A prompt never races a replay: it waits for an in-flight load
         // rather than interleaving live chunks with history chunks.
         self.wait_for_history(window, &session).await?;
-        // Queued rebasings hold with no live session: prompting one fails
+        // Queued plans hold with no live session: prompting one fails
         // fast instead of minting a second rebase. Cancel and finish paths
         // stay allowed.
         if let Some((repo_root, _)) = self.reopen_snapshot(window)
