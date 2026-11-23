@@ -220,7 +220,6 @@ pub(crate) fn sorted_entries(
     rows.iter()
         .map(|(plan, state, _)| {
             let (commits, ffable) = branch_state_for(repo_root, checkout_branch, plan);
-            let queued = plan.phase == plans::Phase::Queued;
             let rebasing_progress = rebasing_progress_for(repo_root, plan, state, &commits, ffable);
             PlanEntry {
                 name: plan.name.clone(),
@@ -231,7 +230,6 @@ pub(crate) fn sorted_entries(
                 manual: state.manual,
                 evergreen: state.evergreen,
                 commits,
-                queued,
                 rebasing_progress,
             }
         })
@@ -889,7 +887,6 @@ mod tests {
         let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].phase, plans::Phase::Queued);
-        assert!(entries[0].queued);
         assert_eq!(entries[0].rebasing_progress, None);
         assert_eq!(
             entries[0]

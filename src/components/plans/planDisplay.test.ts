@@ -24,26 +24,26 @@ function plan(
 }
 
 describe("latestRole", () => {
-	test("prefers rebasing over evergreening over executing over scoping", () => {
-		expect(
-			latestRole(
-				plan("a", "rebasing", [
-					testStatus("scoping"),
-					testStatus("executing"),
-					testStatus("evergreening"),
-					testStatus("rebasing"),
-				]),
-			),
-		).toBe("rebasing");
+	test("prefers evergreening over rebasing over executing over scoping", () => {
 		expect(
 			latestRole(
 				plan("a", "evergreening", [
 					testStatus("scoping"),
 					testStatus("executing"),
+					testStatus("rebasing"),
 					testStatus("evergreening"),
 				]),
 			),
 		).toBe("evergreening");
+		expect(
+			latestRole(
+				plan("a", "rebasing", [
+					testStatus("scoping"),
+					testStatus("executing"),
+					testStatus("rebasing"),
+				]),
+			),
+		).toBe("rebasing");
 		expect(
 			latestRole(
 				plan("a", "executing", [
@@ -180,38 +180,10 @@ describe("attentionFor", () => {
 			false,
 			true,
 			["abc plan work"],
-			true,
 		);
 		expect(attentionFor(queued)).toBeNull();
 		expect(todoProgress(queued)).toBeNull();
 		expect(headerProgress(queued)).toBeNull();
-	});
-
-	test("suppresses idle for queued rebasings", () => {
-		const queued = testEntryWith(
-			"queued",
-			"rebasing",
-			"Queued",
-			true,
-			[testStatus("scoping"), testStatus("rebasing")],
-			false,
-			true,
-			[],
-			true,
-		);
-		expect(attentionFor(queued)).toBeNull();
-		const head = testEntryWith(
-			"head",
-			"rebasing",
-			"Head",
-			true,
-			[testStatus("scoping"), testStatus("rebasing")],
-			false,
-			true,
-			[],
-			false,
-		);
-		expect(attentionFor(head)).toBe("idle");
 	});
 });
 
@@ -296,7 +268,6 @@ describe("todoProgress", () => {
 				plan("a", "rebasing", [
 					testStatus("scoping"),
 					testStatus("executing"),
-					testStatus("evergreening"),
 					testStatus("rebasing"),
 				]),
 			),
@@ -317,6 +288,7 @@ describe("todoProgress", () => {
 				plan("a", "evergreening", [
 					testStatus("scoping"),
 					testStatus("executing"),
+					testStatus("rebasing"),
 					testStatus("evergreening"),
 				]),
 			),
@@ -341,6 +313,7 @@ describe("todoProgress", () => {
 		const entry = plan("a", "evergreening", [
 			testStatus("scoping"),
 			testStatus("executing"),
+			testStatus("rebasing"),
 			testStatus("evergreening", {
 				progress: { done: 1, total: 4, eta_secs: 120 },
 			}),
@@ -386,7 +359,6 @@ describe("headerProgress", () => {
 			false,
 			true,
 			["abc plan work", "def more work"],
-			false,
 			{ done: 0, total: 2, eta_secs: null },
 		);
 		expect(headerProgress(entry)).toEqual({
@@ -406,7 +378,6 @@ describe("headerProgress", () => {
 			false,
 			true,
 			["abc plan work", "def more work"],
-			false,
 			{ done: 2, total: 2, eta_secs: null },
 		);
 		expect(headerProgress(entry)).toEqual({
@@ -438,7 +409,6 @@ describe("headerProgress", () => {
 			false,
 			true,
 			["abc plan work", "def more work"],
-			false,
 			{ done: 1, total: 2, eta_secs: 600 },
 		);
 		expect(headerProgress(entry)).toEqual({

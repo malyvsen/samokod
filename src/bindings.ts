@@ -246,11 +246,6 @@ export type PlanEntry_Deserialize = {
 	 *  plan owns no worktree.
 	 */
 	commits: string[],
-	/**
-	 *  Mirror of `phase == queued`: queued plans hold with no live session
-	 *  and no idle dot. Kept on the wire so rows stay self-describing.
-	 */
-	queued: boolean,
 	/**  Rebasing commit progress with ETA. `Some` for rebasing plans only. */
 	rebasing_progress?: ProgressView_Deserialize | null,
 };
@@ -277,11 +272,6 @@ export type PlanEntry_Serialize = {
 	 *  plan owns no worktree.
 	 */
 	commits: string[],
-	/**
-	 *  Mirror of `phase == queued`: queued plans hold with no live session
-	 *  and no idle dot. Kept on the wire so rows stay self-describing.
-	 */
-	queued: boolean,
 	/**  Rebasing commit progress with ETA. `Some` for rebasing plans only. */
 	rebasing_progress: ProgressView_Serialize | null,
 };

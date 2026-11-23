@@ -213,9 +213,6 @@ pub struct PlanEntry {
     /// Branch commits ahead of the target, oldest first. Empty when the
     /// plan owns no worktree.
     pub commits: Vec<String>,
-    /// Mirror of `phase == queued`: queued plans hold with no live session
-    /// and no idle dot. Kept on the wire so rows stay self-describing.
-    pub queued: bool,
     /// Rebasing commit progress with ETA. `Some` for rebasing plans only.
     pub rebasing_progress: Option<ProgressView>,
 }
@@ -578,7 +575,6 @@ mod tests {
             manual: false,
             evergreen: true,
             commits: Vec::new(),
-            queued: false,
             rebasing_progress: None,
         };
         let value = serde_json::to_value(&entry).expect("serializes");
@@ -593,7 +589,6 @@ mod tests {
             "manual",
             "evergreen",
             "commits",
-            "queued",
             "rebasing_progress",
         ]
         .into_iter()

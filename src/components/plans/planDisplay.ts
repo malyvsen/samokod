@@ -20,11 +20,11 @@ export type AttentionKind = "idle" | "approval" | "failed";
 
 export function latestRole(plan: PlanEntry): SessionRole {
 	const roles = new Set(plan.sessions.map((status) => status.role));
-	if (roles.has("rebasing")) {
-		return "rebasing";
-	}
 	if (roles.has("evergreening")) {
 		return "evergreening";
+	}
+	if (roles.has("rebasing")) {
+		return "rebasing";
 	}
 	if (roles.has("executing")) {
 		return "executing";
@@ -40,7 +40,7 @@ export function attentionFor(plan: PlanEntry): AttentionKind | null {
 	if (plan.phase === "completed" || plan.phase === "cancelled") {
 		return null;
 	}
-	if (plan.queued) {
+	if (plan.phase === "queued") {
 		return null;
 	}
 	const role = latestRole(plan);

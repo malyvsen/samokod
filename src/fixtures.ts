@@ -46,24 +46,23 @@ export function testEntry(
 	manual = false,
 	evergreen = true,
 	commits: string[] = [],
-	queued = false,
 	rebasing_progress: ProgressView | null = null,
 ): PlanEntry {
 	const sessions =
 		phase === "scoping"
 			? [testStatus("scoping")]
-			: phase === "evergreening"
+			: phase === "rebasing"
 				? [
 						testStatus("scoping"),
 						testStatus("executing"),
-						testStatus("evergreening"),
+						testStatus("rebasing"),
 					]
-				: phase === "rebasing"
+				: phase === "evergreening"
 					? [
 							testStatus("scoping"),
 							testStatus("executing"),
-							testStatus("evergreening"),
 							testStatus("rebasing"),
+							testStatus("evergreening"),
 						]
 					: [testStatus("scoping"), testStatus("executing")];
 	return {
@@ -75,7 +74,6 @@ export function testEntry(
 		manual,
 		evergreen,
 		commits,
-		queued,
 		rebasing_progress,
 	};
 }
@@ -89,7 +87,6 @@ export function testEntryWith(
 	manual = false,
 	evergreen = true,
 	commits: string[] = [],
-	queued = false,
 	rebasing_progress: ProgressView | null = null,
 ): PlanEntry {
 	return {
@@ -101,7 +98,6 @@ export function testEntryWith(
 		manual,
 		evergreen,
 		commits,
-		queued,
 		rebasing_progress,
 	};
 }

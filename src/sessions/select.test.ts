@@ -145,7 +145,6 @@ function rebasingEntry(
 		false,
 		true,
 		["abc plan work", "def more work"],
-		false,
 		progress,
 	);
 }

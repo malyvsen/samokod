@@ -86,12 +86,7 @@ function rebasingPlan() {
 		"rebasing",
 		"Shiny",
 		true,
-		[
-			testStatus("scoping"),
-			testStatus("executing"),
-			testStatus("evergreening"),
-			testStatus("rebasing"),
-		],
+		[testStatus("scoping"), testStatus("executing"), testStatus("rebasing")],
 	);
 }
 
@@ -104,6 +99,7 @@ function evergreeningPlan() {
 		[
 			testStatus("scoping"),
 			testStatus("executing"),
+			testStatus("rebasing"),
 			testStatus("evergreening"),
 		],
 	);
@@ -690,13 +686,11 @@ describe("plans panel", () => {
 				[
 					testStatus("scoping"),
 					testStatus("executing"),
-					testStatus("evergreening"),
 					testStatus("rebasing", { working: true }),
 				],
 				false,
 				true,
 				["abc plan work", "def more work"],
-				false,
 				{ done: 1, total: 2, eta_secs: 600 },
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
@@ -720,13 +714,11 @@ describe("plans panel", () => {
 				[
 					testStatus("scoping"),
 					testStatus("executing"),
-					testStatus("evergreening"),
 					testStatus("rebasing", { working: true }),
 				],
 				false,
 				true,
 				["abc plan work", "def more work"],
-				false,
 				{ done: 0, total: 2, eta_secs: null },
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
@@ -750,13 +742,11 @@ describe("plans panel", () => {
 				[
 					testStatus("scoping"),
 					testStatus("executing"),
-					testStatus("evergreening"),
 					testStatus("rebasing", { working: true }),
 				],
 				false,
 				true,
 				["abc plan work", "def more work"],
-				false,
 				{ done: 2, total: 2, eta_secs: null },
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
@@ -791,7 +781,7 @@ describe("plans panel", () => {
 			expect(screen.getByText("Executing")).toBeInTheDocument();
 		});
 
-		test("expanded rebasing plans list four sessions without buttons", () => {
+		test("expanded rebasing plans list three sessions without buttons", () => {
 			const plan = rebasingPlan();
 			const { container } = render(
 				<PlansPanel
@@ -800,12 +790,12 @@ describe("plans panel", () => {
 			);
 			expect(screen.getByText("Scoping")).toBeInTheDocument();
 			expect(screen.getByText("Executing")).toBeInTheDocument();
-			expect(screen.getByText("Evergreening")).toBeInTheDocument();
 			expect(screen.getByText("Rebasing")).toBeInTheDocument();
+			expect(screen.queryByText("Evergreening")).toBeNull();
 			expect(container.querySelectorAll(".sbody .sbtn").length).toBe(0);
 		});
 
-		test("expanded evergreening plans list three sessions", () => {
+		test("expanded evergreening plans list four sessions", () => {
 			const plan = evergreeningPlan();
 			render(
 				<PlansPanel
@@ -814,8 +804,8 @@ describe("plans panel", () => {
 			);
 			expect(screen.getByText("Scoping")).toBeInTheDocument();
 			expect(screen.getByText("Executing")).toBeInTheDocument();
+			expect(screen.getByText("Rebasing")).toBeInTheDocument();
 			expect(screen.getByText("Evergreening")).toBeInTheDocument();
-			expect(screen.queryByText("Rebasing")).toBeNull();
 		});
 
 		test("shows session rows only on the expanded plan", () => {

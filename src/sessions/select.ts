@@ -1,4 +1,5 @@
-import type { PlanEntry, SessionKey, SessionRole, TodoView } from "../bindings";
+import type { PlanEntry, SessionKey, TodoView } from "../bindings";
+import { latestRole } from "../components/plans/planDisplay";
 import type { AgentStatus } from "../types";
 import { sessionKeyOf } from "../types";
 import type { ChatState } from "./store";
@@ -78,18 +79,9 @@ export function isReadOnly(entry: PlanEntry | undefined): boolean {
 	return entry?.phase === "completed" || entry?.phase === "cancelled";
 }
 
-/// Latest role one plan owns, mirroring the header target: rebasing wins
-/// over evergreening over executing over scoping.
-function latestRoleFor(entry: PlanEntry): SessionRole {
-	const roles = new Set(entry.sessions.map((status) => status.role));
-	if (roles.has("rebasing")) return "rebasing";
-	if (roles.has("evergreening")) return "evergreening";
-	if (roles.has("executing")) return "executing";
-	return "scoping";
-}
-
+/// Latest role one plan owns, mirroring the header target.
 function headerKeyFor(entry: PlanEntry): SessionKey {
-	return { plan: entry.name, role: latestRoleFor(entry) };
+	return { plan: entry.name, role: latestRole(entry) };
 }
 
 function mostRecentKeyFor(plans: PlanEntry[]): SessionKey | null {

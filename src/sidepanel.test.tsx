@@ -116,12 +116,7 @@ describe("rebasing sidebar", () => {
 			"rebasing",
 			"Shiny",
 			true,
-			[
-				testStatus("scoping"),
-				testStatus("executing"),
-				testStatus("evergreening"),
-				testStatus("rebasing"),
-			],
+			[testStatus("scoping"), testStatus("executing"), testStatus("rebasing")],
 			false,
 			true,
 			["abc plan work", "def more work"],
