@@ -303,9 +303,11 @@ fn entry_title(
 }
 
 /// One status row per session a plan owns, from `roles_for`: scoping
-/// always, executing once approved, evergreening on the cleanup path,
-/// rebasing on the conflict path, finished plans keeping their rows as
-/// history from the stored session IDs. Spend falls back to the stored
+/// always, executing once approved, finished plans keeping their rows as
+/// history from the stored session IDs. Rebasing and evergreening rows are
+/// emitted only once that agent actually started — a stored session ID or
+/// a live session in the map — so a plan that only passes through the phase
+/// never shows a phantom row. Spend falls back to the stored
 /// cost once the live session is gone, so relaunched apps still show the
 /// real total.
 pub(crate) fn session_statuses(
@@ -315,6 +317,18 @@ pub(crate) fn session_statuses(
 ) -> Vec<SessionStatusView> {
     plans::roles_for(stored, plan.phase)
         .into_iter()
+        .filter(|role| {
+            if !matches!(role, SessionRole::Rebasing | SessionRole::Evergreening) {
+                return true;
+            }
+            if stored.session(*role).is_some() {
+                return true;
+            }
+            sessions.contains_key(&SessionKey {
+                plan: plan.name.clone(),
+                role: *role,
+            })
+        })
         .map(|role| {
             let key = SessionKey {
                 plan: plan.name.clone(),
@@ -895,6 +909,250 @@ mod tests {
                 .map(|status| status.role)
                 .collect::<Vec<_>>(),
             vec![SessionRole::Scoping, SessionRole::Executing]
+        );
+    }
+
+    fn seed_ids(root: &Path, name: &str, ids: &[(SessionRole, &str)]) {
+        for (role, id) in ids {
+            super::super::session_ids::record_session(
+                root,
+                &SessionKey {
+                    plan: name.to_string(),
+                    role: *role,
+                },
+                id,
+            );
+        }
+    }
+
+    fn entry_roles(entry: &PlanEntry) -> Vec<SessionRole> {
+        entry.sessions.iter().map(|status| status.role).collect()
+    }
+
+    #[test]
+    fn rebasing_without_agent_shows_no_rebasing_row_but_keeps_progress() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03.slug";
+        let plan = plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Rebasing,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        seed_ids(
+            root,
+            name,
+            &[
+                (SessionRole::Scoping, "ses_scoping"),
+                (SessionRole::Executing, "ses_executing"),
+            ],
+        );
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entry_roles(&entries[0]),
+            vec![SessionRole::Scoping, SessionRole::Executing]
+        );
+        assert!(entries[0].rebasing_progress.is_some());
+        assert_eq!(
+            most_recent_key(&entries),
+            Some(SessionKey {
+                plan: name.to_string(),
+                role: SessionRole::Executing,
+            })
+        );
+    }
+
+    #[test]
+    fn rebasing_with_started_agent_keeps_rebasing_row() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03.slug";
+        let plan = plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Rebasing,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        seed_ids(
+            root,
+            name,
+            &[
+                (SessionRole::Scoping, "ses_scoping"),
+                (SessionRole::Executing, "ses_executing"),
+                (SessionRole::Rebasing, "ses_rebasing"),
+            ],
+        );
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entry_roles(&entries[0]),
+            vec![
+                SessionRole::Scoping,
+                SessionRole::Executing,
+                SessionRole::Rebasing
+            ]
+        );
+        assert_eq!(
+            most_recent_key(&entries),
+            Some(SessionKey {
+                plan: name.to_string(),
+                role: SessionRole::Rebasing,
+            })
+        );
+    }
+
+    #[test]
+    fn rebasing_with_live_session_keeps_rebasing_row() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03.slug";
+        let plan = plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Rebasing,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        seed_ids(
+            root,
+            name,
+            &[
+                (SessionRole::Scoping, "ses_scoping"),
+                (SessionRole::Executing, "ses_executing"),
+            ],
+        );
+        let key = SessionKey {
+            plan: name.to_string(),
+            role: SessionRole::Rebasing,
+        };
+        let sessions = HashMap::from([(
+            key,
+            LiveSession::fresh(
+                super::super::session::ActivePlan::rebasing(name.to_string()),
+                crate::repo_state::RepoState::default(),
+            ),
+        )]);
+        let entries = sorted_entries(root, "", &sessions, &HashMap::new());
+        assert_eq!(
+            entry_roles(&entries[0]),
+            vec![
+                SessionRole::Scoping,
+                SessionRole::Executing,
+                SessionRole::Rebasing
+            ]
+        );
+    }
+
+    #[test]
+    fn evergreening_without_cleanup_shows_no_evergreening_row() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03.slug";
+        let plan = plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Evergreening,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        seed_ids(
+            root,
+            name,
+            &[
+                (SessionRole::Scoping, "ses_scoping"),
+                (SessionRole::Executing, "ses_executing"),
+                (SessionRole::Rebasing, "ses_rebasing"),
+            ],
+        );
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entry_roles(&entries[0]),
+            vec![
+                SessionRole::Scoping,
+                SessionRole::Executing,
+                SessionRole::Rebasing
+            ]
+        );
+        assert_eq!(
+            most_recent_key(&entries),
+            Some(SessionKey {
+                plan: name.to_string(),
+                role: SessionRole::Rebasing,
+            })
+        );
+    }
+
+    #[test]
+    fn evergreening_with_cleanup_keeps_evergreening_row() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03.slug";
+        let plan = plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Evergreening,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        seed_ids(
+            root,
+            name,
+            &[
+                (SessionRole::Scoping, "ses_scoping"),
+                (SessionRole::Executing, "ses_executing"),
+                (SessionRole::Rebasing, "ses_rebasing"),
+                (SessionRole::Evergreening, "ses_evergreening"),
+            ],
+        );
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entry_roles(&entries[0]),
+            vec![
+                SessionRole::Scoping,
+                SessionRole::Executing,
+                SessionRole::Rebasing,
+                SessionRole::Evergreening
+            ]
+        );
+        assert_eq!(
+            most_recent_key(&entries),
+            Some(SessionKey {
+                plan: name.to_string(),
+                role: SessionRole::Evergreening,
+            })
+        );
+    }
+
+    #[test]
+    fn completed_keeps_stored_id_rows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        let name = "2026-09-26.08-41-03.slug";
+        let plan = plans::PlanRef {
+            name: name.to_string(),
+            phase: plans::Phase::Completed,
+        };
+        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+        seed_ids(
+            root,
+            name,
+            &[
+                (SessionRole::Scoping, "ses_scoping"),
+                (SessionRole::Executing, "ses_executing"),
+                (SessionRole::Rebasing, "ses_rebasing"),
+            ],
+        );
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entry_roles(&entries[0]),
+            vec![
+                SessionRole::Scoping,
+                SessionRole::Executing,
+                SessionRole::Rebasing
+            ]
         );
     }
 }

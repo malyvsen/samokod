@@ -86,6 +86,20 @@ describe("headerKey", () => {
 		).toEqual({ plan: "a", role: "executing" });
 	});
 
+	test("rebasing entry without a rebasing status falls back to executing", () => {
+		const entry = plan("a", "rebasing", [
+			testStatus("scoping"),
+			testStatus("executing"),
+		]);
+		expect(latestRole(entry)).toBe("executing");
+		expect(headerKey(entry)).toEqual({ plan: "a", role: "executing" });
+		const working = plan("a", "rebasing", [
+			testStatus("scoping"),
+			testStatus("executing", { working: true }),
+		]);
+		expect(attentionFor(working)).toBeNull();
+	});
+
 	test("falls back to scoping without sessions", () => {
 		expect(headerKey(plan("empty", "scoping", []))).toEqual({
 			plan: "empty",

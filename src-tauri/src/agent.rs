@@ -1894,6 +1894,14 @@ mod tests {
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Rebasing, "m", Some("M"));
+        super::session_ids::record_session(
+            root,
+            &SessionKey {
+                plan: "m".to_string(),
+                role: SessionRole::Rebasing,
+            },
+            "ses_rebasing",
+        );
         let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 3);
@@ -1907,11 +1915,42 @@ mod tests {
     }
 
     #[test]
+    fn most_recent_falls_back_to_executing_without_rebasing_agent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        plans::ensure_structure(root).expect("ensure");
+        write_plan_dir(root, plans::Phase::Rebasing, "m", Some("M"));
+        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].sessions.len(), 2);
+        assert_eq!(
+            most_recent_key(&entries),
+            Some(SessionKey {
+                plan: "m".to_string(),
+                role: SessionRole::Executing,
+            })
+        );
+    }
+
+    #[test]
     fn most_recent_prefers_evergreening_session() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         write_plan_dir(root, plans::Phase::Evergreening, "g", Some("G"));
+        for (role, id) in [
+            (SessionRole::Rebasing, "ses_rebasing"),
+            (SessionRole::Evergreening, "ses_evergreening"),
+        ] {
+            super::session_ids::record_session(
+                root,
+                &SessionKey {
+                    plan: "g".to_string(),
+                    role,
+                },
+                id,
+            );
+        }
         let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].sessions.len(), 4);

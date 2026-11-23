@@ -692,6 +692,27 @@ impl AgentManager {
             emit_event(&self.app, window, AppEvent::HistoryDone { session });
             return Ok(());
         }
+        // A rebasing plan with no stored session never minted its rebase
+        // agent (move-only `BeginRebasing`, spawn comes later): finish with
+        // `HistoryDone` and no live session instead of spawning a phantom.
+        // Keys with a stored ID replay through `ensure_live_claimed` below.
+        if let Some((repo_root, _)) = self.reopen_snapshot(window)
+            && (plans::PlanRef {
+                name: session.plan.clone(),
+                phase: plans::Phase::Rebasing,
+            })
+            .path(&repo_root)
+            .is_dir()
+        {
+            history_guard.finish();
+            log::info!(
+                "HistoryDone window={window} session={}::{:?} rebasing with no session yet",
+                session.plan,
+                session.role
+            );
+            emit_event(&self.app, window, AppEvent::HistoryDone { session });
+            return Ok(());
+        }
         let Some(warm_guard) = WarmGuard::claim(&self.state, window, &session) else {
             let raw = "agent is still starting, try again".to_string();
             history_guard.fail();
