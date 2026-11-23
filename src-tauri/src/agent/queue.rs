@@ -1,8 +1,9 @@
 // Waiting line for finished work: oldest-first waiters in `queued/`,
 // at most one plan in `rebasing/` or `evergreening/` at a time. The pump
-// promotes queued plans while the mutex is free; queued plans hold with no
-// live session. This module owns that order plus the shared queued-guard:
-// warm, prompts, and history share it instead of ad-hoc phase checks.
+// lands queued plans while the mutex is free and holds them with no live
+// session until then. This module owns that order plus the shared
+// phase guards: warm, prompts, and history share them instead of ad-hoc
+// phase checks.
 use std::path::Path;
 
 use crate::plans::{self, Phase};
@@ -26,12 +27,24 @@ pub(crate) fn is_queued(repo_root: &Path, session: &SessionKey) -> bool {
     .is_dir()
 }
 
+/// True when a session must not mint a live agent: its plan sits in
+/// `rebasing/` before the rebase agent spawned (move-only `BeginRebasing`,
+/// spawn comes later). History replays empty instead of spawning a phantom.
+pub(crate) fn is_rebasing(repo_root: &Path, session: &SessionKey) -> bool {
+    plans::PlanRef {
+        name: session.plan.clone(),
+        phase: Phase::Rebasing,
+    }
+    .path(repo_root)
+    .is_dir()
+}
+
 /// True when any plan sits in `rebasing/` or `evergreening/`. Every
-/// promote and every direct finish is gated on this, so at most one plan
-/// rebases, evergreens, or fast-forwards at a time. Two concurrent rebases
-/// diverge from each other instead of stacking linearly, two concurrent
-/// `merge --ff-only` race the target so the second source stops being
-/// ffable, and a target move landing mid-rebase forces a re-rebase.
+/// landing is gated on this, so at most one plan rebases, evergreens, or
+/// fast-forwards at a time. Concurrent rebases diverge from each other,
+/// concurrent `merge --ff-only` race the target so the second source stops
+/// being fast-forwardable, and a target move landing mid-rebase forces a
+/// re-rebase.
 pub(crate) fn mutex_held(repo_root: &Path) -> bool {
     plans::scan_plans(repo_root)
         .iter()

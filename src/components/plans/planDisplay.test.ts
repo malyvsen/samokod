@@ -86,7 +86,7 @@ describe("headerKey", () => {
 		).toEqual({ plan: "a", role: "executing" });
 	});
 
-	test("rebasing entry without a rebasing status falls back to executing", () => {
+	test("rebasing entry without a rebasing row behaves like executing", () => {
 		const entry = plan("a", "rebasing", [
 			testStatus("scoping"),
 			testStatus("executing"),

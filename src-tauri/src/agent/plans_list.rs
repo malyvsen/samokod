@@ -306,10 +306,10 @@ fn entry_title(
 /// always, executing once approved, finished plans keeping their rows as
 /// history from the stored session IDs. Rebasing and evergreening rows are
 /// emitted only once that agent actually started — a stored session ID or
-/// a live session in the map — so a plan that only passes through the phase
-/// never shows a phantom row. Spend falls back to the stored
-/// cost once the live session is gone, so relaunched apps still show the
-/// real total.
+/// a live session in the map — so a plan that only passes through the
+/// phase never shows a row for work that never ran. Spend falls back to
+/// the stored cost once the live session is gone, so relaunched apps still
+/// show the real total.
 pub(crate) fn session_statuses(
     plan: &plans::PlanRef,
     sessions: &HashMap<SessionKey, LiveSession>,
@@ -317,18 +317,7 @@ pub(crate) fn session_statuses(
 ) -> Vec<SessionStatusView> {
     plans::roles_for(stored, plan.phase)
         .into_iter()
-        .filter(|role| {
-            if !matches!(role, SessionRole::Rebasing | SessionRole::Evergreening) {
-                return true;
-            }
-            if stored.session(*role).is_some() {
-                return true;
-            }
-            sessions.contains_key(&SessionKey {
-                plan: plan.name.clone(),
-                role: *role,
-            })
-        })
+        .filter(|role| row_started(plan, sessions, stored, *role))
         .map(|role| {
             let key = SessionKey {
                 plan: plan.name.clone(),
@@ -347,6 +336,29 @@ pub(crate) fn session_statuses(
             }
         })
         .collect()
+}
+
+/// True when a session row should render: scoping, executing, and finished
+/// history always show; rebasing and evergreening show only once that
+/// agent started (stored ID or live session), so a plan passing through
+/// the phase shows no row for work that never ran. Pure except the map
+/// lookup.
+fn row_started(
+    plan: &plans::PlanRef,
+    sessions: &HashMap<SessionKey, LiveSession>,
+    stored: &plans::PlanState,
+    role: SessionRole,
+) -> bool {
+    if !matches!(role, SessionRole::Rebasing | SessionRole::Evergreening) {
+        return true;
+    }
+    if stored.session(role).is_some() {
+        return true;
+    }
+    sessions.contains_key(&SessionKey {
+        plan: plan.name.clone(),
+        role,
+    })
 }
 
 /// Spend for one session row: the live totals while the session runs, else
@@ -929,36 +941,69 @@ mod tests {
         entry.sessions.iter().map(|status| status.role).collect()
     }
 
-    #[test]
-    fn rebasing_without_agent_shows_no_rebasing_row_but_keeps_progress() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
+    fn listed_entry(
+        root: &Path,
+        phase: plans::Phase,
+        ids: &[(SessionRole, &str)],
+        with_live_rebasing: bool,
+    ) -> PlanEntry {
         let name = "2026-09-26.08-41-03.slug";
         let plan = plans::PlanRef {
             name: name.to_string(),
-            phase: plans::Phase::Rebasing,
+            phase,
         };
         std::fs::create_dir_all(plan.path(root)).expect("mkdir");
-        seed_ids(
-            root,
-            name,
-            &[
-                (SessionRole::Scoping, "ses_scoping"),
-                (SessionRole::Executing, "ses_executing"),
-            ],
-        );
-        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
+        seed_ids(root, name, ids);
+        let sessions = if with_live_rebasing {
+            let key = SessionKey {
+                plan: name.to_string(),
+                role: SessionRole::Rebasing,
+            };
+            HashMap::from([(
+                key,
+                LiveSession::fresh(
+                    super::super::session::ActivePlan::rebasing(name.to_string()),
+                    crate::repo_state::RepoState::default(),
+                ),
+            )])
+        } else {
+            HashMap::new()
+        };
+        let entries = sorted_entries(root, "", &sessions, &HashMap::new());
         assert_eq!(entries.len(), 1);
+        entries.into_iter().next().expect("entry")
+    }
+
+    const BASE_IDS: [(SessionRole, &str); 2] = [
+        (SessionRole::Scoping, "ses_scoping"),
+        (SessionRole::Executing, "ses_executing"),
+    ];
+    const REBASING_IDS: [(SessionRole, &str); 3] = [
+        (SessionRole::Scoping, "ses_scoping"),
+        (SessionRole::Executing, "ses_executing"),
+        (SessionRole::Rebasing, "ses_rebasing"),
+    ];
+    const GREENING_IDS: [(SessionRole, &str); 4] = [
+        (SessionRole::Scoping, "ses_scoping"),
+        (SessionRole::Executing, "ses_executing"),
+        (SessionRole::Rebasing, "ses_rebasing"),
+        (SessionRole::Evergreening, "ses_evergreening"),
+    ];
+
+    #[test]
+    fn rebasing_without_agent_hides_row_but_keeps_progress() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        plans::ensure_structure(dir.path()).expect("ensure");
+        let entry = listed_entry(dir.path(), plans::Phase::Rebasing, &BASE_IDS, false);
         assert_eq!(
-            entry_roles(&entries[0]),
+            entry_roles(&entry),
             vec![SessionRole::Scoping, SessionRole::Executing]
         );
-        assert!(entries[0].rebasing_progress.is_some());
+        assert!(entry.rebasing_progress.is_some());
         assert_eq!(
-            most_recent_key(&entries),
+            most_recent_key(std::slice::from_ref(&entry)),
             Some(SessionKey {
-                plan: name.to_string(),
+                plan: entry.name.clone(),
                 role: SessionRole::Executing,
             })
         );
@@ -967,27 +1012,10 @@ mod tests {
     #[test]
     fn rebasing_with_started_agent_keeps_rebasing_row() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        let name = "2026-09-26.08-41-03.slug";
-        let plan = plans::PlanRef {
-            name: name.to_string(),
-            phase: plans::Phase::Rebasing,
-        };
-        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
-        seed_ids(
-            root,
-            name,
-            &[
-                (SessionRole::Scoping, "ses_scoping"),
-                (SessionRole::Executing, "ses_executing"),
-                (SessionRole::Rebasing, "ses_rebasing"),
-            ],
-        );
-        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
-        assert_eq!(entries.len(), 1);
+        plans::ensure_structure(dir.path()).expect("ensure");
+        let entry = listed_entry(dir.path(), plans::Phase::Rebasing, &REBASING_IDS, false);
         assert_eq!(
-            entry_roles(&entries[0]),
+            entry_roles(&entry),
             vec![
                 SessionRole::Scoping,
                 SessionRole::Executing,
@@ -995,9 +1023,9 @@ mod tests {
             ]
         );
         assert_eq!(
-            most_recent_key(&entries),
+            most_recent_key(std::slice::from_ref(&entry)),
             Some(SessionKey {
-                plan: name.to_string(),
+                plan: entry.name.clone(),
                 role: SessionRole::Rebasing,
             })
         );
@@ -1006,36 +1034,10 @@ mod tests {
     #[test]
     fn rebasing_with_live_session_keeps_rebasing_row() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        let name = "2026-09-26.08-41-03.slug";
-        let plan = plans::PlanRef {
-            name: name.to_string(),
-            phase: plans::Phase::Rebasing,
-        };
-        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
-        seed_ids(
-            root,
-            name,
-            &[
-                (SessionRole::Scoping, "ses_scoping"),
-                (SessionRole::Executing, "ses_executing"),
-            ],
-        );
-        let key = SessionKey {
-            plan: name.to_string(),
-            role: SessionRole::Rebasing,
-        };
-        let sessions = HashMap::from([(
-            key,
-            LiveSession::fresh(
-                super::super::session::ActivePlan::rebasing(name.to_string()),
-                crate::repo_state::RepoState::default(),
-            ),
-        )]);
-        let entries = sorted_entries(root, "", &sessions, &HashMap::new());
+        plans::ensure_structure(dir.path()).expect("ensure");
+        let entry = listed_entry(dir.path(), plans::Phase::Rebasing, &BASE_IDS, true);
         assert_eq!(
-            entry_roles(&entries[0]),
+            entry_roles(&entry),
             vec![
                 SessionRole::Scoping,
                 SessionRole::Executing,
@@ -1047,27 +1049,10 @@ mod tests {
     #[test]
     fn evergreening_without_cleanup_shows_no_evergreening_row() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        let name = "2026-09-26.08-41-03.slug";
-        let plan = plans::PlanRef {
-            name: name.to_string(),
-            phase: plans::Phase::Evergreening,
-        };
-        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
-        seed_ids(
-            root,
-            name,
-            &[
-                (SessionRole::Scoping, "ses_scoping"),
-                (SessionRole::Executing, "ses_executing"),
-                (SessionRole::Rebasing, "ses_rebasing"),
-            ],
-        );
-        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
-        assert_eq!(entries.len(), 1);
+        plans::ensure_structure(dir.path()).expect("ensure");
+        let entry = listed_entry(dir.path(), plans::Phase::Evergreening, &REBASING_IDS, false);
         assert_eq!(
-            entry_roles(&entries[0]),
+            entry_roles(&entry),
             vec![
                 SessionRole::Scoping,
                 SessionRole::Executing,
@@ -1075,9 +1060,9 @@ mod tests {
             ]
         );
         assert_eq!(
-            most_recent_key(&entries),
+            most_recent_key(std::slice::from_ref(&entry)),
             Some(SessionKey {
-                plan: name.to_string(),
+                plan: entry.name.clone(),
                 role: SessionRole::Rebasing,
             })
         );
@@ -1086,28 +1071,10 @@ mod tests {
     #[test]
     fn evergreening_with_cleanup_keeps_evergreening_row() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        let name = "2026-09-26.08-41-03.slug";
-        let plan = plans::PlanRef {
-            name: name.to_string(),
-            phase: plans::Phase::Evergreening,
-        };
-        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
-        seed_ids(
-            root,
-            name,
-            &[
-                (SessionRole::Scoping, "ses_scoping"),
-                (SessionRole::Executing, "ses_executing"),
-                (SessionRole::Rebasing, "ses_rebasing"),
-                (SessionRole::Evergreening, "ses_evergreening"),
-            ],
-        );
-        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
-        assert_eq!(entries.len(), 1);
+        plans::ensure_structure(dir.path()).expect("ensure");
+        let entry = listed_entry(dir.path(), plans::Phase::Evergreening, &GREENING_IDS, false);
         assert_eq!(
-            entry_roles(&entries[0]),
+            entry_roles(&entry),
             vec![
                 SessionRole::Scoping,
                 SessionRole::Executing,
@@ -1116,9 +1083,9 @@ mod tests {
             ]
         );
         assert_eq!(
-            most_recent_key(&entries),
+            most_recent_key(std::slice::from_ref(&entry)),
             Some(SessionKey {
-                plan: name.to_string(),
+                plan: entry.name.clone(),
                 role: SessionRole::Evergreening,
             })
         );
@@ -1127,27 +1094,10 @@ mod tests {
     #[test]
     fn completed_keeps_stored_id_rows() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        let name = "2026-09-26.08-41-03.slug";
-        let plan = plans::PlanRef {
-            name: name.to_string(),
-            phase: plans::Phase::Completed,
-        };
-        std::fs::create_dir_all(plan.path(root)).expect("mkdir");
-        seed_ids(
-            root,
-            name,
-            &[
-                (SessionRole::Scoping, "ses_scoping"),
-                (SessionRole::Executing, "ses_executing"),
-                (SessionRole::Rebasing, "ses_rebasing"),
-            ],
-        );
-        let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
-        assert_eq!(entries.len(), 1);
+        plans::ensure_structure(dir.path()).expect("ensure");
+        let entry = listed_entry(dir.path(), plans::Phase::Completed, &REBASING_IDS, false);
         assert_eq!(
-            entry_roles(&entries[0]),
+            entry_roles(&entry),
             vec![
                 SessionRole::Scoping,
                 SessionRole::Executing,

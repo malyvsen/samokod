@@ -1110,8 +1110,8 @@ pub(crate) struct WorktreeLive {
     pub commits: Vec<String>,
 }
 
-/// Which rebasing step the user asked for. `Begin` promotes an executing
-/// or queued plan into rebasing; `Start` spawns the rebasing agent fresh.
+/// Which rebasing step the user asked for. `Begin` moves an executing or
+/// queued plan into rebasing; `Start` spawns the rebasing agent fresh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RebasingStep {
     Begin,
@@ -1120,11 +1120,12 @@ enum RebasingStep {
 }
 
 /// Refuse a rebasing step that cannot run. A dirty worktree never rebases.
-/// `Begin` has no fast-forwardable gate and neither do direct finishes
-/// bypass the mutex: ffable plans still serialize through it, they just
-/// skip phases. An already fast-forwardable branch still finishes directly
-/// instead of starting the rebase agent, and a diverged branch starts
-/// before finishing. Pure.
+/// `Begin` needs no fast-forwardable gate: divergent plans rebase while
+/// fast-forwardable ones land without ever starting the agent. Every
+/// landing still serializes through the mutex, it just skips phases. An
+/// already fast-forwardable branch still finishes directly instead of
+/// starting the rebase agent, and a diverged branch starts before
+/// finishing. Pure.
 fn gate_rebasing(dirty: bool, ffable: bool, step: RebasingStep) -> Result<(), AgentError> {
     if dirty {
         return Err(AgentError::RequestFailed {
@@ -1967,8 +1968,8 @@ mod tests {
     fn rebasing_gate_refuses_dirty_and_misplaced_steps() {
         assert!(gate_rebasing(false, true, RebasingStep::Finish).is_ok());
         assert!(gate_rebasing(false, false, RebasingStep::Begin).is_ok());
-        // Promotion has no fast-forwardable gate: ffable plans queue and
-        // promote like any other, then hand to evergreening or finishing.
+        // Begin needs no fast-forwardable gate: divergent plans rebase while
+        // fast-forwardable ones land without starting the agent.
         assert!(gate_rebasing(false, true, RebasingStep::Begin).is_ok());
         assert!(gate_rebasing(false, false, RebasingStep::Start).is_ok());
         assert!(gate_rebasing(true, true, RebasingStep::Finish).is_err());

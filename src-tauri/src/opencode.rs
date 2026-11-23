@@ -20,7 +20,7 @@ const STATE_DENY_GLOB: &str = ".samokod/plans/**/state.json";
 const ATTACHMENTS_DENY_GLOB: &str = ".samokod/plans/**/attachments/**";
 
 /// Agent id for a session role. Queued plans carry the executing role
-/// until promotion, so no queued case exists here. Pure.
+/// until landing, so no queued case exists here. Pure.
 pub fn agent_for(role: SessionRole) -> &'static str {
     match role {
         SessionRole::Scoping => SCOPING_AGENT,

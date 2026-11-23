@@ -657,8 +657,9 @@ impl AgentManager {
     /// bar, going straight to `ConfigOptions` + `HistoryDone` without ever
     /// emitting `HistoryBegin`. Finished plans never say "plan is gone":
     /// with no saved past they fail with an honest non-retryable
-    /// reason instead. Queued plans finish with `HistoryDone` and no
-    /// live session, so selection never mints a second rebase.
+    /// reason instead. Queued plans and rebasing plans before their agent
+    /// spawned finish with `HistoryDone` and no live session, so viewing
+    /// them never mints a phantom agent.
     ///
     /// Holds both guards explicitly and spawns without polling: the history
     /// guard arrives held from `load_history`, the warm guard is taken here
@@ -671,47 +672,29 @@ impl AgentManager {
         session: SessionKey,
         history_guard: HistoryGuard,
     ) -> Result<(), AgentError> {
-        if let Some((repo_root, _)) = self.reopen_snapshot(window)
-            && crate::plans::is_finished(&repo_root, &session.plan)
-        {
-            let raw = "no saved session found for this plan - it predates session recording or its session was pruned"
-                .to_string();
-            history_guard.fail();
-            self.emit_history_failed(window, &session, raw.clone());
-            return Err(AgentError::RequestFailed { raw });
-        }
-        if let Some((repo_root, _)) = self.reopen_snapshot(window)
-            && super::queue::is_queued(&repo_root, &session)
-        {
-            history_guard.finish();
-            log::info!(
-                "HistoryDone window={window} session={}::{:?} queued",
-                session.plan,
-                session.role
-            );
-            emit_event(&self.app, window, AppEvent::HistoryDone { session });
-            return Ok(());
-        }
-        // A rebasing plan with no stored session never minted its rebase
-        // agent (move-only `BeginRebasing`, spawn comes later): finish with
-        // `HistoryDone` and no live session instead of spawning a phantom.
-        // Keys with a stored ID replay through `ensure_live_claimed` below.
-        if let Some((repo_root, _)) = self.reopen_snapshot(window)
-            && (plans::PlanRef {
-                name: session.plan.clone(),
-                phase: plans::Phase::Rebasing,
-            })
-            .path(&repo_root)
-            .is_dir()
-        {
-            history_guard.finish();
-            log::info!(
-                "HistoryDone window={window} session={}::{:?} rebasing with no session yet",
-                session.plan,
-                session.role
-            );
-            emit_event(&self.app, window, AppEvent::HistoryDone { session });
-            return Ok(());
+        if let Some((repo_root, _)) = self.reopen_snapshot(window) {
+            if crate::plans::is_finished(&repo_root, &session.plan) {
+                let raw = "no saved session found for this plan - it predates session recording or its session was pruned"
+                    .to_string();
+                history_guard.fail();
+                self.emit_history_failed(window, &session, raw.clone());
+                return Err(AgentError::RequestFailed { raw });
+            }
+            // Queued owns no session; rebasing is move-only until its agent
+            // spawns. Keys with a stored ID replay through
+            // `ensure_live_claimed` below.
+            if super::queue::is_queued(&repo_root, &session)
+                || super::queue::is_rebasing(&repo_root, &session)
+            {
+                history_guard.finish();
+                log::info!(
+                    "HistoryDone window={window} session={}::{:?} held with no session yet",
+                    session.plan,
+                    session.role
+                );
+                emit_event(&self.app, window, AppEvent::HistoryDone { session });
+                return Ok(());
+            }
         }
         let Some(warm_guard) = WarmGuard::claim(&self.state, window, &session) else {
             let raw = "agent is still starting, try again".to_string();

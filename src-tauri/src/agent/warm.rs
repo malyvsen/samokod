@@ -1,6 +1,6 @@
 // Background warm: eager `ensure_live` so MODEL/EFFORT pickers turn
 // interactive before the first prompt. Single-flight per session key.
-// Queued plans never warm: they own no live session until promoted.
+// Queued plans never warm: they own no live session until landed.
 use crate::plans;
 use crate::types::{AgentError, SessionKey};
 

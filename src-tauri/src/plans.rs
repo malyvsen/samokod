@@ -328,17 +328,15 @@ pub fn execute(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
     Ok(next)
 }
 
-/// Move an executing or queued plan to rebasing without renaming. Promotion
-/// is gated by the rebase mutex (see `agent::queue::mutex_held` and
-/// `agent::advance::next_action`), so at most one plan sits in rebasing
-/// or evergreening at a time; this move itself does not check the mutex.
+/// Move an executing or queued plan to rebasing without renaming. Gated by
+/// the rebase mutex (see `agent::queue::mutex_held` and
+/// `agent::advance::next_action`); this move itself does not check it.
 pub fn begin_rebasing(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
-    if !matches!(plan.phase, Phase::Executing | Phase::Queued) {
-        return Err(PlanError::WrongPhase {
-            expected: "executing or queued",
-            actual: plan.phase.dir_name(),
-        });
-    }
+    require_one_of(
+        plan,
+        &[Phase::Executing, Phase::Queued],
+        "executing or queued",
+    )?;
     let next = PlanRef {
         name: plan.name.clone(),
         phase: Phase::Rebasing,
@@ -348,20 +346,16 @@ pub fn begin_rebasing(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanE
 }
 
 /// Move an executing, queued, or rebasing plan to evergreening without
-/// renaming. The worktree stays put: the cleanup agent runs where the
-/// rebasing agent left off. Gated by the rebase mutex for executing/queued
-/// sources (see `agent::queue::mutex_held`); the rebasing source already
-/// holds it. This move itself does not check the mutex.
+/// renaming. The worktree stays put: the cleanup agent runs where the plan
+/// left off. Gated by the rebase mutex for executing/queued sources (see
+/// `agent::queue::mutex_held`); the rebasing source already holds it. This
+/// move itself does not check the mutex.
 pub fn begin_evergreening(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
-    if !matches!(
-        plan.phase,
-        Phase::Executing | Phase::Queued | Phase::Rebasing
-    ) {
-        return Err(PlanError::WrongPhase {
-            expected: "executing, queued, or rebasing",
-            actual: plan.phase.dir_name(),
-        });
-    }
+    require_one_of(
+        plan,
+        &[Phase::Executing, Phase::Queued, Phase::Rebasing],
+        "executing, queued, or rebasing",
+    )?;
     let next = PlanRef {
         name: plan.name.clone(),
         phase: Phase::Evergreening,
@@ -384,19 +378,20 @@ pub fn back_to_rebasing(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, Pla
 }
 
 /// Finish an executing, queued, rebasing, or evergreening plan. Name
-/// travels unchanged. Fast paths finish directly from executing/queued
-/// while gated by the rebase mutex (see `agent::queue::mutex_held` and
+/// travels unchanged. Direct finishes from executing/queued are gated by
+/// the rebase mutex (see `agent::queue::mutex_held` and
 /// `agent::advance::next_action`); this move itself does not check it.
 pub fn complete(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
-    if !matches!(
-        plan.phase,
-        Phase::Executing | Phase::Queued | Phase::Rebasing | Phase::Evergreening
-    ) {
-        return Err(PlanError::WrongPhase {
-            expected: "executing, queued, rebasing, or evergreening",
-            actual: plan.phase.dir_name(),
-        });
-    }
+    require_one_of(
+        plan,
+        &[
+            Phase::Executing,
+            Phase::Queued,
+            Phase::Rebasing,
+            Phase::Evergreening,
+        ],
+        "executing, queued, rebasing, or evergreening",
+    )?;
     let next = PlanRef {
         name: plan.name.clone(),
         phase: Phase::Completed,
@@ -405,9 +400,9 @@ pub fn complete(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> 
     Ok(next)
 }
 
-/// Move an executing plan to queued without renaming. The pump promotes
-/// queued plans into rebasing one at a time; the queued plan holds with
-/// no live session until then.
+/// Move an executing plan to queued without renaming. Queued plans hold
+/// with no live session until the pump lands them one at a time while the
+/// mutex is free.
 pub fn queue(repo_root: &Path, plan: &PlanRef) -> Result<PlanRef, PlanError> {
     require_phase(plan, Phase::Executing)?;
     let next = PlanRef {
@@ -574,9 +569,10 @@ pub fn phase_rank(phase: Phase) -> u8 {
 
 /// Session roles one plan owns: scoping always, executing once approved,
 /// queued keeps the executing row with no live session of its own,
-/// rebasing on the conflict path, evergreening on the cleanup path.
-/// Completed and cancelled plans keep their rows as history from the
-/// stored session IDs. Pure.
+/// rebasing while landing through a rebase, evergreening while cleaning
+/// up. Completed and cancelled plans keep their rows as history from the
+/// stored session IDs. The list hides unstarted rebasing/evergreening rows
+/// (see `agent::plans_list::session_statuses`). Pure.
 pub fn roles_for(state: &PlanState, phase: Phase) -> Vec<SessionRole> {
     match phase {
         Phase::Scoping => vec![SessionRole::Scoping],
@@ -706,13 +702,21 @@ fn phase_dir(repo_root: &Path, phase: Phase) -> PathBuf {
 }
 
 fn require_phase(plan: &PlanRef, expected: Phase) -> Result<(), PlanError> {
-    if plan.phase != expected {
-        return Err(PlanError::WrongPhase {
-            expected: expected.dir_name(),
-            actual: plan.phase.dir_name(),
-        });
+    require_one_of(plan, &[expected], expected.dir_name())
+}
+
+fn require_one_of(
+    plan: &PlanRef,
+    allowed: &[Phase],
+    expected: &'static str,
+) -> Result<(), PlanError> {
+    if allowed.contains(&plan.phase) {
+        return Ok(());
     }
-    Ok(())
+    Err(PlanError::WrongPhase {
+        expected,
+        actual: plan.phase.dir_name(),
+    })
 }
 
 fn rename(repo_root: &Path, from: &PlanRef, to: &PlanRef) -> Result<(), PlanError> {
@@ -743,6 +747,24 @@ mod tests {
     fn stored_roles(root: &Path, plan: &PlanRef) -> Vec<SessionRole> {
         let state = load_state(&plan.path(root));
         roles_for(&state, plan.phase)
+    }
+
+    fn titled_executing(root: &Path, stamp: &str, title: &str) -> PlanRef {
+        let scoping = materialize_scoping(root, stamp).expect("create");
+        std::fs::write(scoping.plan_md(root), format!("# {title}\n")).expect("write");
+        execute(root, &scoping).expect("execute")
+    }
+
+    fn titled_queued(root: &Path, stamp: &str, title: &str) -> PlanRef {
+        let executing = titled_executing(root, stamp, title);
+        queue(root, &executing).expect("queue")
+    }
+
+    fn wrong_phase(name: &str, phase: Phase) -> PlanRef {
+        PlanRef {
+            name: name.to_string(),
+            phase,
+        }
     }
 
     #[test]
@@ -1050,7 +1072,7 @@ mod tests {
     }
 
     #[test]
-    fn evergreening_moves_without_renaming() {
+    fn begin_evergreening_accepts_landing_sources() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
@@ -1059,148 +1081,113 @@ mod tests {
         let executing = execute(root, &scoping).expect("execute");
         let queued = queue(root, &executing).expect("queue");
         let rebasing = begin_rebasing(root, &queued).expect("rebase");
+        let name = rebasing.name.clone();
         let greening = begin_evergreening(root, &rebasing).expect("evergreen");
         assert_eq!(greening.phase, Phase::Evergreening);
-        assert_eq!(greening.name, rebasing.name);
+        assert_eq!(greening.name, name);
         assert!(!rebasing.path(root).exists());
         assert!(greening.path(root).is_dir());
+        assert!(load_state(&greening.path(root)).entered_at.is_some());
         assert!(matches!(
             begin_evergreening(root, &greening),
             Err(PlanError::WrongPhase { .. })
         ));
-        // Fast paths keep the name and stamp state too.
-        let direct_scoping =
-            materialize_scoping(root, "2026-09-26.08-41-04").expect("direct scoping");
-        std::fs::write(direct_scoping.plan_md(root), "# Direct\n").expect("write");
-        let direct_exec = execute(root, &direct_scoping).expect("execute");
-        let direct_name = direct_exec.name.clone();
-        let direct_green = begin_evergreening(root, &direct_exec).expect("evergreen direct");
-        assert_eq!(direct_green.phase, Phase::Evergreening);
-        assert_eq!(direct_green.name, direct_name);
-        assert!(!direct_exec.path(root).exists());
-        assert!(load_state(&direct_green.path(root)).entered_at.is_some());
-        let queued_scoping =
-            materialize_scoping(root, "2026-09-26.08-41-05").expect("queued scoping");
-        std::fs::write(queued_scoping.plan_md(root), "# Queued\n").expect("write");
-        let queued_exec = execute(root, &queued_scoping).expect("execute");
-        let queued_plan = queue(root, &queued_exec).expect("queue");
-        let queued_name = queued_plan.name.clone();
-        let queued_green = begin_evergreening(root, &queued_plan).expect("evergreen queued");
-        assert_eq!(queued_green.phase, Phase::Evergreening);
-        assert_eq!(queued_green.name, queued_name);
-        assert!(load_state(&queued_green.path(root)).entered_at.is_some());
-        let scoping_ref = PlanRef {
-            name: "x".to_string(),
-            phase: Phase::Scoping,
-        };
-        assert!(matches!(
-            begin_evergreening(root, &scoping_ref),
-            Err(PlanError::WrongPhase { .. })
-        ));
-    }
-
-    #[test]
-    fn finishes_accept_executing_queued_rebasing_evergreening() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        ensure_structure(root).expect("ensure");
-        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
-        std::fs::write(scoping.plan_md(root), "# Shiny\n").expect("write");
-        let executing = execute(root, &scoping).expect("execute");
-        let executing_name = executing.name.clone();
-        let done_direct = complete(root, &executing).expect("complete from executing");
-        assert_eq!(done_direct.phase, Phase::Completed);
-        assert_eq!(done_direct.name, executing_name);
-        let queued_scoping =
-            materialize_scoping(root, "2026-09-26.08-41-06").expect("queued scoping");
-        std::fs::write(queued_scoping.plan_md(root), "# Queued\n").expect("write");
-        let queued_exec = execute(root, &queued_scoping).expect("execute");
-        let queued_plan = queue(root, &queued_exec).expect("queue");
-        let queued_name = queued_plan.name.clone();
-        let done_queued = complete(root, &queued_plan).expect("complete from queued");
-        assert_eq!(done_queued.phase, Phase::Completed);
-        assert_eq!(done_queued.name, queued_name);
-        let rebase_scoping =
-            materialize_scoping(root, "2026-09-26.08-41-07").expect("rebase scoping");
-        std::fs::write(rebase_scoping.plan_md(root), "# Rebase\n").expect("write");
-        let rebase_exec = execute(root, &rebase_scoping).expect("execute");
-        let queued = queue(root, &rebase_exec).expect("queue");
-        let rebasing = begin_rebasing(root, &queued).expect("rebase from queued");
-        assert_eq!(rebasing.phase, Phase::Rebasing);
-        let done = complete(root, &rebasing).expect("complete from rebasing");
-        assert_eq!(done.phase, Phase::Completed);
-        let second = materialize_scoping(root, "2026-09-26.08-41-04").expect("second");
-        std::fs::write(second.plan_md(root), "# Second\n").expect("write");
-        let running = execute(root, &second).expect("execute");
-        let queued = queue(root, &running).expect("queue");
-        let rebasing = begin_rebasing(root, &queued).expect("rebase second");
-        let greening = begin_evergreening(root, &rebasing).expect("evergreen from rebasing");
-        assert_eq!(greening.phase, Phase::Evergreening);
-        let back = back_to_rebasing(root, &greening).expect("diverge back");
-        assert_eq!(back.phase, Phase::Rebasing);
-        let redone = complete(root, &back).expect("complete diverged rebasing");
-        assert_eq!(redone.phase, Phase::Completed);
-        let third = materialize_scoping(root, "2026-09-26.08-41-05").expect("third");
-        std::fs::write(third.plan_md(root), "# Third\n").expect("write");
-        let third_exec = execute(root, &third).expect("execute");
-        let third_queued = queue(root, &third_exec).expect("queue third");
-        let third_rebasing = begin_rebasing(root, &third_queued).expect("rebase third");
-        let third_green = begin_evergreening(root, &third_rebasing).expect("evergreen third");
-        let third_done = complete(root, &third_green).expect("complete from evergreening");
-        assert_eq!(third_done.phase, Phase::Completed);
-        let scoping_ref = PlanRef {
-            name: "x".to_string(),
-            phase: Phase::Scoping,
-        };
-        assert!(matches!(
-            complete(root, &scoping_ref),
-            Err(PlanError::WrongPhase { .. })
-        ));
-        assert!(matches!(
-            begin_rebasing(root, &scoping_ref),
-            Err(PlanError::WrongPhase { .. })
-        ));
-        assert!(matches!(
-            begin_evergreening(root, &scoping_ref),
-            Err(PlanError::WrongPhase { .. })
-        ));
-        assert!(matches!(
-            back_to_rebasing(root, &scoping_ref),
-            Err(PlanError::WrongPhase { .. })
-        ));
-        for phase in [Phase::Completed, Phase::Cancelled] {
-            let finished_ref = PlanRef {
-                name: "x".to_string(),
-                phase,
+        for (stamp, title, via_queue) in [
+            ("2026-09-26.08-41-04", "Direct", false),
+            ("2026-09-26.08-41-05", "Queued", true),
+        ] {
+            let source = if via_queue {
+                titled_queued(root, stamp, title)
+            } else {
+                titled_executing(root, stamp, title)
             };
+            let name = source.name.clone();
+            let greening = begin_evergreening(root, &source).expect("evergreen");
+            assert_eq!(greening.phase, Phase::Evergreening);
+            assert_eq!(greening.name, name);
+            assert!(!source.path(root).exists());
+            assert!(load_state(&greening.path(root)).entered_at.is_some());
+        }
+        for phase in [Phase::Scoping, Phase::Completed, Phase::Cancelled] {
             assert!(matches!(
-                complete(root, &finished_ref),
-                Err(PlanError::WrongPhase { .. })
-            ));
-            assert!(matches!(
-                begin_rebasing(root, &finished_ref),
-                Err(PlanError::WrongPhase { .. })
-            ));
-            assert!(matches!(
-                begin_evergreening(root, &finished_ref),
+                begin_evergreening(root, &wrong_phase("x", phase)),
                 Err(PlanError::WrongPhase { .. })
             ));
         }
     }
 
     #[test]
-    fn rebasing_moves_through_rebasing_without_renaming() {
+    fn complete_accepts_every_landing_phase() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
-        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
-        std::fs::write(scoping.plan_md(root), "# Shiny\n").expect("write");
-        let executing = execute(root, &scoping).expect("execute");
-        let executing_name = executing.name.clone();
+        let direct = titled_executing(root, "2026-09-26.08-41-03", "Shiny");
+        let name = direct.name.clone();
+        let done = complete(root, &direct).expect("complete executing");
+        assert_eq!(
+            (done.phase, done.name.as_str()),
+            (Phase::Completed, name.as_str())
+        );
+        let queued = titled_queued(root, "2026-09-26.08-41-06", "Queued");
+        let name = queued.name.clone();
+        let done = complete(root, &queued).expect("complete queued");
+        assert_eq!(
+            (done.phase, done.name.as_str()),
+            (Phase::Completed, name.as_str())
+        );
+        let rebasing = begin_rebasing(root, &titled_queued(root, "2026-09-26.08-41-07", "Rebase"))
+            .expect("rebase");
+        let done = complete(root, &rebasing).expect("complete rebasing");
+        assert_eq!(done.phase, Phase::Completed);
+        let greening = begin_evergreening(
+            root,
+            &titled_executing(root, "2026-09-26.08-41-09", "Green"),
+        )
+        .expect("evergreen");
+        let done = complete(root, &greening).expect("complete evergreening");
+        assert_eq!(done.phase, Phase::Completed);
+        let diverged = back_to_rebasing(
+            root,
+            &begin_evergreening(
+                root,
+                &titled_executing(root, "2026-09-26.08-41-04", "Second"),
+            )
+            .expect("evergreen"),
+        )
+        .expect("diverge back");
+        let done = complete(root, &diverged).expect("complete diverged rebasing");
+        assert_eq!(done.phase, Phase::Completed);
+        for phase in [Phase::Scoping, Phase::Completed, Phase::Cancelled] {
+            assert!(matches!(
+                complete(root, &wrong_phase("x", phase)),
+                Err(PlanError::WrongPhase { .. })
+            ));
+            assert!(matches!(
+                begin_rebasing(root, &wrong_phase("x", phase)),
+                Err(PlanError::WrongPhase { .. })
+            ));
+            assert!(matches!(
+                begin_evergreening(root, &wrong_phase("x", phase)),
+                Err(PlanError::WrongPhase { .. })
+            ));
+            assert!(matches!(
+                back_to_rebasing(root, &wrong_phase("x", phase)),
+                Err(PlanError::WrongPhase { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn begin_rebasing_accepts_executing_and_queued() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        let executing = titled_executing(root, "2026-09-26.08-41-03", "Shiny");
+        let name = executing.name.clone();
         let before = load_state(&executing.path(root)).entered_at;
         let rebasing = begin_rebasing(root, &executing).expect("begin from executing");
         assert_eq!(rebasing.phase, Phase::Rebasing);
-        assert_eq!(rebasing.name, executing_name);
+        assert_eq!(rebasing.name, name);
         assert!(!executing.path(root).exists());
         assert!(rebasing.path(root).is_dir());
         assert!(load_state(&rebasing.path(root)).entered_at.is_some());
@@ -1216,23 +1203,14 @@ mod tests {
             complete(root, &done),
             Err(PlanError::WrongPhase { .. })
         ));
-        // Queued still promotes too.
-        let second = materialize_scoping(root, "2026-09-26.08-41-04").expect("second");
-        std::fs::write(second.plan_md(root), "# Second\n").expect("write");
-        let running = execute(root, &second).expect("execute");
-        let queued = queue(root, &running).expect("queue");
-        let queued_name = queued.name.clone();
+        let queued = titled_queued(root, "2026-09-26.08-41-04", "Second");
+        let name = queued.name.clone();
         let rebasing = begin_rebasing(root, &queued).expect("begin from queued");
         assert_eq!(rebasing.phase, Phase::Rebasing);
-        assert_eq!(rebasing.name, queued_name);
-        // Wrong phases still refuse.
+        assert_eq!(rebasing.name, name);
         for phase in [Phase::Scoping, Phase::Completed, Phase::Cancelled] {
-            let wrong = PlanRef {
-                name: "x".to_string(),
-                phase,
-            };
             assert!(matches!(
-                begin_rebasing(root, &wrong),
+                begin_rebasing(root, &wrong_phase("x", phase)),
                 Err(PlanError::WrongPhase { .. })
             ));
         }
@@ -1243,9 +1221,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         ensure_structure(root).expect("ensure");
-        let scoping = materialize_scoping(root, "2026-09-26.08-41-03").expect("create");
-        std::fs::write(scoping.plan_md(root), "# Shiny\n").expect("write");
-        let executing = execute(root, &scoping).expect("execute");
+        let executing = titled_executing(root, "2026-09-26.08-41-03", "Shiny");
         let queued = queue(root, &executing).expect("queue");
         assert_eq!(queued.phase, Phase::Queued);
         assert_eq!(queued.name, executing.name);
@@ -1262,20 +1238,8 @@ mod tests {
         let rebasing = begin_rebasing(root, &queued).expect("begin");
         assert_eq!(rebasing.phase, Phase::Rebasing);
         assert_eq!(rebasing.name, queued.name);
-        // Completing from queued keeps the name.
-        let scoping2 = materialize_scoping(root, "2026-09-26.08-41-04").expect("second");
-        std::fs::write(scoping2.plan_md(root), "# Second\n").expect("write");
-        let executing2 = execute(root, &scoping2).expect("execute second");
-        let queued2 = queue(root, &executing2).expect("queue second");
-        let queued2_name = queued2.name.clone();
-        let done2 = complete(root, &queued2).expect("complete queued");
-        assert_eq!(done2.phase, Phase::Completed);
-        assert_eq!(done2.name, queued2_name);
-        let scoping3 = materialize_scoping(root, "2026-09-26.08-41-05").expect("third");
-        std::fs::write(scoping3.plan_md(root), "# Third\n").expect("write");
-        let executing3 = execute(root, &scoping3).expect("execute third");
-        let queued3 = queue(root, &executing3).expect("queue third");
-        let cancelled = cancel(root, &queued3).expect("cancel queued");
+        let cancelled = cancel(root, &titled_queued(root, "2026-09-26.08-41-05", "Third"))
+            .expect("cancel queued");
         assert_eq!(cancelled.phase, Phase::Cancelled);
     }
 
