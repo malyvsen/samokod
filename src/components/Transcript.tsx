@@ -127,7 +127,18 @@ function WorkBox({
 	onStop?: (() => void) | null;
 	session: SessionKey | null;
 }) {
-	const [open, setOpen] = useState(false);
+	const hasUnresolvedApproval = items.some(
+		(item) => item.kind === "approval" && !item.resolved,
+	);
+	const unresolvedCount = items.filter(
+		(item) => item.kind === "approval" && !item.resolved,
+	).length;
+	const [open, setOpen] = useState(hasUnresolvedApproval);
+	useEffect(() => {
+		if (unresolvedCount > 0) {
+			setOpen(true);
+		}
+	}, [unresolvedCount]);
 	const workRef = useRef<HTMLDivElement>(null);
 	const summary = summarizeRun(items, isLive ? now : undefined);
 	const duration =
@@ -137,11 +148,8 @@ function WorkBox({
 	const verb = isLive ? "Working" : "Worked";
 	const prefix =
 		duration === null ? `${verb} · ` : `${verb} for ${duration} · `;
-	const hasUnresolvedApproval = items.some(
-		(item) => item.kind === "approval" && !item.resolved,
-	);
 	const showReview = isLive && hasUnresolvedApproval;
-	const showStop = isLive && !hasUnresolvedApproval && onStop !== null;
+	const showStop = isLive && onStop !== null;
 
 	function focusFirstApproval() {
 		const button = workRef.current?.querySelector(".drow.appr button");

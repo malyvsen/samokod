@@ -761,7 +761,7 @@ describe("transcript grouping", () => {
 				session={SESSION}
 			/>,
 		);
-		fireEvent.click(screen.getByTitle("Expand"));
+		expect(screen.getByTitle("Collapse")).toBeInTheDocument();
 		expect(container.querySelector(".approval")).toBeNull();
 		const detail = container.querySelector(".work .detail");
 		expect(detail?.textContent).toContain("bash: run tests");
@@ -1080,7 +1080,7 @@ describe("transcript approval sessions", () => {
 				session={first}
 			/>,
 		);
-		fireEvent.click(screen.getByTitle("Expand"));
+		expect(screen.getByTitle("Collapse")).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("button", { name: "allow once" }));
 		expect(onAnswer).toHaveBeenCalledWith(first, "tc-a1", "allow-a1");
 		unmount();
@@ -1095,7 +1095,7 @@ describe("transcript approval sessions", () => {
 				session={second}
 			/>,
 		);
-		fireEvent.click(screen.getByTitle("Expand"));
+		expect(screen.getByTitle("Collapse")).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("button", { name: "allow once" }));
 		expect(onAnswer).toHaveBeenCalledWith(second, "tc-b1", "allow-b1");
 	});
@@ -1128,11 +1128,8 @@ describe("transcript approval sessions", () => {
 				</div>
 			</>,
 		);
-		const expands = screen.getAllByTitle("Expand");
-		expect(expands).toHaveLength(2);
-		for (const button of expands) {
-			fireEvent.click(button);
-		}
+		const collapses = screen.getAllByTitle("Collapse");
+		expect(collapses).toHaveLength(2);
 		const allows = screen.getAllByRole("button", { name: "allow once" });
 		expect(allows).toHaveLength(2);
 		const backgroundAllow = allows[1];
@@ -1140,5 +1137,57 @@ describe("transcript approval sessions", () => {
 		fireEvent.click(backgroundAllow);
 		expect(onAnswer).toHaveBeenCalledTimes(1);
 		expect(onAnswer).toHaveBeenCalledWith(background, "tc-b1", "allow-b1");
+	});
+
+	test("unresolved approval run renders expanded with both controls", () => {
+		const { container } = render(
+			<Transcript
+				items={[approvalItem("a1")]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				session={SESSION}
+				working
+				onStop={vi.fn()}
+			/>,
+		);
+		const detail = container.querySelector(".work .detail");
+		expect(detail?.getAttribute("hidden")).toBeNull();
+		expect(
+			screen.getByRole("button", { name: "allow once" }),
+		).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "reject" })).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Review the permission request" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Stop this turn" }),
+		).toBeInTheDocument();
+	});
+
+	test("resolved approval collapses back to stop-only", () => {
+		const resolved = { ...approvalItem("a1"), resolved: true as const };
+		const { container } = render(
+			<Transcript
+				items={[resolved]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				session={SESSION}
+				working
+				onStop={vi.fn()}
+			/>,
+		);
+		expect(screen.getByTitle("Expand")).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "Review the permission request" }),
+		).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Stop this turn" }),
+		).toBeInTheDocument();
+		const detail = container.querySelector(".work .detail");
+		expect(detail?.getAttribute("hidden")).not.toBeNull();
 	});
 });

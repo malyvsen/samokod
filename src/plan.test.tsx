@@ -508,7 +508,6 @@ describe("plan", () => {
 				rule_hint: "hint",
 			},
 		});
-		await user.click(screen.getByTitle("Expand"));
 		await user.click(screen.getByRole("button", { name: "allow once" }));
 		expect(api.answerPermission).toHaveBeenCalledWith(key, "tc1", "allow1");
 	});
@@ -569,7 +568,6 @@ describe("plan", () => {
 			screen.getByRole("button", { name: "Beta, scoping, opens Scoping" }),
 		);
 		await screen.findByText("Run background");
-		await user.click(screen.getByTitle("Expand"));
 		await user.click(screen.getByRole("button", { name: "allow once" }));
 		expect(api.answerPermission).toHaveBeenCalledWith(
 			bbb,
