@@ -1110,8 +1110,8 @@ pub(crate) struct WorktreeLive {
     pub commits: Vec<String>,
 }
 
-/// Which rebasing step the user asked for. `Begin` promotes a queued plan
-/// into rebasing; `Start` spawns the rebasing agent fresh.
+/// Which rebasing step the user asked for. `Begin` promotes an executing
+/// or queued plan into rebasing; `Start` spawns the rebasing agent fresh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RebasingStep {
     Begin,
@@ -1120,10 +1120,11 @@ enum RebasingStep {
 }
 
 /// Refuse a rebasing step that cannot run. A dirty worktree never rebases.
-/// Promotion has no fast-forwardable gate: ffable plans queue and promote
-/// like any other, then hand to evergreening or finishing. An already
-/// fast-forwardable branch still finishes directly instead of starting the
-/// rebase agent, and a diverged branch starts before finishing. Pure.
+/// `Begin` has no fast-forwardable gate and neither do direct finishes
+/// bypass the mutex: ffable plans still serialize through it, they just
+/// skip phases. An already fast-forwardable branch still finishes directly
+/// instead of starting the rebase agent, and a diverged branch starts
+/// before finishing. Pure.
 fn gate_rebasing(dirty: bool, ffable: bool, step: RebasingStep) -> Result<(), AgentError> {
     if dirty {
         return Err(AgentError::RequestFailed {

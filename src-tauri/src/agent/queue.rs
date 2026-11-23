@@ -26,8 +26,12 @@ pub(crate) fn is_queued(repo_root: &Path, session: &SessionKey) -> bool {
     .is_dir()
 }
 
-/// True when any plan sits in `rebasing/` or `evergreening/`. Promotion
-/// from queued is gated on this, so at most one plan rebases at a time.
+/// True when any plan sits in `rebasing/` or `evergreening/`. Every
+/// promote and every direct finish is gated on this, so at most one plan
+/// rebases, evergreens, or fast-forwards at a time. Two concurrent rebases
+/// diverge from each other instead of stacking linearly, two concurrent
+/// `merge --ff-only` race the target so the second source stops being
+/// ffable, and a target move landing mid-rebase forces a re-rebase.
 pub(crate) fn mutex_held(repo_root: &Path) -> bool {
     plans::scan_plans(repo_root)
         .iter()

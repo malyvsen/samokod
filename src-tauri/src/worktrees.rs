@@ -139,7 +139,10 @@ pub fn remove(
 
 /// Fast-forward the live checkout branch to `worktree_branch` with
 /// `git merge --ff-only`. Refuses a diverged branch loud. The target is
-/// always the live checkout branch the caller passes in.
+/// always the live checkout branch the caller passes in. Callers serialize
+/// through the rebase mutex (see `agent::queue::mutex_held`): concurrent
+/// fast-forwards race the target so the second source stops being ffable,
+/// and a target move landing mid-rebase forces that rebase to re-run.
 pub fn fast_forward(
     repo_root: &Path,
     target_branch: &str,

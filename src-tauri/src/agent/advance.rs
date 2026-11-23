@@ -1,14 +1,20 @@
 // Automatic plan progression: one pump, one pure decision, one shared core.
 // The pump scans automatic idle plans in phase then arrival order and fires
-// at most one transition per plan. Finished executing plans serialize
-// through `queued/`, and at most one plan sits in `rebasing/` or
-// `evergreening/` at a time: promotion from queued is gated on the rebase
-// mutex, so no two rebases ever run together.
+// at most one transition per plan. Finished executing plans with commits
+// either queue (diverged or mutex held) or fast-path past `queued/` and
+// `rebasing/` when ffable and the mutex is free; empty plans hold for
+// input and never auto-advance. At most one plan sits in `rebasing/` or
+// `evergreening/` at a time: every promote and every direct finish is
+// gated on the rebase mutex, so no two rebases ever run together and no
+// two `merge --ff-only` race the target.
 // Scoping never rides the pump: approving a plan stays a manual `>` click,
 // and only executing, queued, rebasing, and evergreening plans carry the
-// auto-manual switch. Executing plans always queue first; queued plans
-// promote while the mutex is free; rebasing plans with evergreen intent and
-// fresh commits clean up in evergreening, otherwise they finish directly.
+// auto-manual switch. Executing plans with commits queue when diverged or
+// held, else evergreen or finish directly when ffable and free; queued
+// plans with commits promote while the mutex is free (rebase when
+// diverged, evergreen or finish directly when ffable); rebasing plans with
+// evergreen intent and fresh commits clean up in evergreening, otherwise
+// they finish directly.
 // `next_action` is pure over a plain view plus the mutex snapshot
 // (unit-tested with no git repo); `transition` is the single effectful core
 // that the manual approve and the pump go through, so the pump adds no
@@ -28,7 +34,8 @@ use super::{AgentManager, lock_backend};
 /// transition per plan per pass. Scoping plans always wait for the manual
 /// `>` click and never fire here. Queued plans promote oldest first while
 /// the rebase mutex is free; at most one plan sits in rebasing or
-/// evergreening, so promotions never race a running rebase.
+/// evergreening, so promotions and direct finishes never race a running
+/// rebase or each other.
 // Dirty or diverged plans hold and are skipped until a later trigger,
 // showing only their existing markers. A rebasing whose target moved under
 // it re-rebases automatically while still on A. Selection never moves here
@@ -141,7 +148,7 @@ impl AgentManager {
             })
             .unwrap_or(true);
         let (dirty, ffable, has_commits) = match plan.phase {
-            Phase::Executing | Phase::Evergreening | Phase::Rebasing => {
+            Phase::Executing | Phase::Evergreening | Phase::Rebasing | Phase::Queued => {
                 match self.worktree_status_for(window, repo_root, &plan.name) {
                     Ok(status) => (status.dirty, status.ffable, !status.commits.is_empty()),
                     Err(error) => {
@@ -150,13 +157,6 @@ impl AgentManager {
                     }
                 }
             }
-            Phase::Queued => match self.worktree_status_for(window, repo_root, &plan.name) {
-                Ok(status) => (status.dirty, false, false),
-                Err(error) => {
-                    log::warn!("automatic view for {} held: {error}", plan.name);
-                    (true, false, false)
-                }
-            },
             Phase::Scoping | Phase::Completed | Phase::Cancelled => (false, false, false),
         };
         let queue_position = match plan.phase {
@@ -294,29 +294,43 @@ impl AgentManager {
                 Ok(self.plans_update(window))
             }
             Transition::BeginEvergreening { plan } => {
-                let session = SessionKey {
-                    plan: plan.clone(),
-                    role: SessionRole::Rebasing,
-                };
-                super::ensure_idle(&self.state, window, &session)?;
                 let (repo_root, branch) =
                     self.reopen_snapshot(window)
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
-                let from = plans::PlanRef {
-                    name: plan.clone(),
-                    phase: Phase::Rebasing,
-                };
-                if !from.path(&repo_root).is_dir() {
+                // Fast paths skip queued/rebasing but still serialize through
+                // the mutex: only the rebasing source already holds it.
+                let from = [Phase::Executing, Phase::Queued, Phase::Rebasing]
+                    .into_iter()
+                    .map(|phase| plans::PlanRef {
+                        name: plan.clone(),
+                        phase,
+                    })
+                    .find(|candidate| candidate.path(&repo_root).is_dir())
+                    .ok_or_else(|| AgentError::RequestFailed {
+                        raw: "no executing, queued, or rebasing plan to evergreen".to_string(),
+                    })?;
+                let direct = !matches!(from.phase, Phase::Rebasing);
+                if direct && queue::mutex_held(&repo_root) {
                     return Err(AgentError::RequestFailed {
-                        raw: "no rebasing plan to evergreen".to_string(),
+                        raw: "another plan is already rebasing".to_string(),
                     });
                 }
-                // Same worktree, so no mutex gate: the plan already holds
-                // it. A dirty tree still refuses so user edits never mix
+                let session = SessionKey {
+                    plan: plan.clone(),
+                    role: if direct {
+                        SessionRole::Executing
+                    } else {
+                        SessionRole::Rebasing
+                    },
+                };
+                super::ensure_idle(&self.state, window, &session)?;
+                // A dirty tree still refuses so user edits never mix
                 // into the cleanup, and a diverged tree routes back through
-                // rebasing instead of cleaning up a stale base.
+                // rebasing instead of cleaning up a stale base. The rebasing
+                // source already holds the mutex; direct sources checked it
+                // above and skip phases, not the gate.
                 let status = self.worktree_status_for(window, &repo_root, &from.name)?;
                 if status.dirty {
                     return Err(AgentError::RequestFailed {
@@ -354,21 +368,23 @@ impl AgentManager {
                 // Move-only while the mutex is free: the pump starts the
                 // plan with `StartRebasing` on a later pass. Queued plans
                 // carry no live session; the executing key below only gates
-                // a racing turn.
+                // a racing turn. Executing plans fast-path here when
+                // diverged instead of queueing first.
                 if queue::mutex_held(&repo_root) {
                     return Err(AgentError::RequestFailed {
                         raw: "another plan is already rebasing".to_string(),
                     });
                 }
-                let from = plans::PlanRef {
-                    name: plan.clone(),
-                    phase: Phase::Queued,
-                };
-                if !from.path(&repo_root).is_dir() {
-                    return Err(AgentError::RequestFailed {
-                        raw: "no queued plan to rebase".to_string(),
-                    });
-                }
+                let from = [Phase::Executing, Phase::Queued]
+                    .into_iter()
+                    .map(|phase| plans::PlanRef {
+                        name: plan.clone(),
+                        phase,
+                    })
+                    .find(|candidate| candidate.path(&repo_root).is_dir())
+                    .ok_or_else(|| AgentError::RequestFailed {
+                        raw: "no executing or queued plan to rebase".to_string(),
+                    })?;
                 let session = SessionKey {
                     plan: plan.clone(),
                     role: SessionRole::Executing,
@@ -466,21 +482,29 @@ impl AgentManager {
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
-                // Finishing holds the mutex either way: rebasing finishes
-                // directly, evergreening finishes after cleanup. Names stay
+                // Direct finishes skip phases but still serialize through
+                // the mutex: concurrent `merge --ff-only` race the target
+                // so the second source stops being ffable. Names stay
                 // unique across phases, so the plan's current phase decides
                 // the idle gate and the follow selection.
-                let from = [Phase::Rebasing, Phase::Evergreening]
-                    .into_iter()
-                    .map(|phase| plans::PlanRef {
-                        name: plan.clone(),
-                        phase,
-                    })
-                    .find(|candidate| candidate.path(&repo_root).is_dir())
-                    .ok_or_else(|| AgentError::RequestFailed {
-                        raw: "no active plan to complete".to_string(),
-                    })?;
+                let from = [
+                    Phase::Executing,
+                    Phase::Queued,
+                    Phase::Rebasing,
+                    Phase::Evergreening,
+                ]
+                .into_iter()
+                .map(|phase| plans::PlanRef {
+                    name: plan.clone(),
+                    phase,
+                })
+                .find(|candidate| candidate.path(&repo_root).is_dir())
+                .ok_or_else(|| AgentError::RequestFailed {
+                    raw: "no active plan to complete".to_string(),
+                })?;
+                let direct = matches!(from.phase, Phase::Executing | Phase::Queued);
                 let role = match from.phase {
+                    Phase::Executing | Phase::Queued => SessionRole::Executing,
                     Phase::Rebasing => SessionRole::Rebasing,
                     _ => SessionRole::Evergreening,
                 };
@@ -492,7 +516,28 @@ impl AgentManager {
                         role,
                     },
                 )?;
+                if direct {
+                    // Queued owns no live session; the executing key above
+                    // only gates a racing turn. Empty plans never finish
+                    // directly, and evergreen intent greens first.
+                    if queue::mutex_held(&repo_root) {
+                        return Err(AgentError::RequestFailed {
+                            raw: "another plan is already rebasing".to_string(),
+                        });
+                    }
+                    let stored = plans::load_state(&from.path(&repo_root));
+                    if stored.evergreen {
+                        return Err(AgentError::RequestFailed {
+                            raw: "plan needs evergreening first".to_string(),
+                        });
+                    }
+                }
                 let status = self.worktree_status_for(window, &repo_root, &from.name)?;
+                if direct && status.commits.is_empty() {
+                    return Err(AgentError::RequestFailed {
+                        raw: "no commits to finish".to_string(),
+                    });
+                }
                 super::gate_rebasing(status.dirty, status.ffable, super::RebasingStep::Finish)?;
                 crate::worktrees::fast_forward(
                     &repo_root,
@@ -584,13 +629,15 @@ impl AgentManager {
 /// One transition the pump or the manual approve can perform. At most one per
 /// plan per pump pass. `Execute` is manual-only (the header `>` click) and
 /// never fires from the pump; `Queue` moves a finished executing plan into
-/// the queue; `BeginRebasing` promotes the oldest queued plan while the
-/// rebase mutex is free; `StartRebasing` spawns the rebasing agent fresh and
-/// `RebaseRebasing` re-runs it once started; `BeginEvergreening` moves a
-/// rebasing plan into cleanup and spawns the evergreening agent;
-/// `BackToRebasing` moves a diverged evergreening plan back for another
-/// rebase; `Finish` fast-forwards the target and completes from either
-/// rebase-held phase.
+/// the queue; `BeginRebasing` promotes the oldest queued plan (or an
+/// executing plan) while the rebase mutex is free; `StartRebasing` spawns
+/// the rebasing agent fresh and `RebaseRebasing` re-runs it once started;
+/// `BeginEvergreening` moves an ffable executing, queued, or rebasing plan
+/// into cleanup and spawns the evergreening agent; `BackToRebasing` moves
+/// a diverged evergreening plan back for another rebase; `Finish`
+/// fast-forwards the target and completes from executing, queued,
+/// rebasing, or evergreening (direct finishes still serialize through the
+/// mutex, they just skip phases).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Transition {
     Execute { plan: String },
@@ -640,12 +687,20 @@ pub(crate) struct PlanView {
 /// Pure automation decision over one plan: at most one transition. Scoping
 /// always waits for the manual `>` click and never fires here. Manual
 /// plans hold; running turns hold; dirty worktrees hold. Executing plans
-/// also hold until their agent started, so a fresh approval never queues
-/// before the first turn. Executing plans always queue; queued plans promote
-/// while the rebase mutex is free; rebasing plans hand to evergreening when
-/// ffable with evergreen intent and fresh commits, else finish directly
-/// when ffable, else start or re-run the rebase agent; evergreening plans
-/// finish directly when ffable, else diverge back to rebasing. Pure.
+/// also hold until their agent started, and empty executing/queued plans
+/// hold for input (never `Queue`, `Begin`, or `Finish`). Executing plans
+/// with commits queue when diverged or mutex-held, else hand to
+/// evergreening when ffable with evergreen intent or finish directly when
+/// ffable without it. Queued plans with commits promote while the rebase
+/// mutex is free (rebase when diverged, evergreen or finish directly when
+/// ffable); rebasing plans hand to evergreening when ffable with evergreen
+/// intent and fresh commits, else finish directly when ffable, else start
+/// or re-run the rebase agent; evergreening plans finish directly when
+/// ffable, else diverge back to rebasing. Pure.
+/// Ffable plans still serialize through the mutex — they skip phases, not
+/// the gate — because concurrent rebases diverge from each other,
+/// concurrent `merge --ff-only` race the target so the second source stops
+/// being ffable, and a target move landing mid-rebase forces a re-rebase.
 pub(crate) fn next_action(view: &PlanView, rebase_mutex_held: bool) -> Option<Transition> {
     if view.manual || !view.idle {
         return None;
@@ -653,19 +708,36 @@ pub(crate) fn next_action(view: &PlanView, rebase_mutex_held: bool) -> Option<Tr
     match view.phase {
         Phase::Scoping | Phase::Completed | Phase::Cancelled => None,
         Phase::Executing => {
-            if !view.started || view.dirty {
+            if !view.started || view.dirty || !view.has_commits {
                 None
-            } else {
+            } else if !view.ffable || rebase_mutex_held {
                 Some(Transition::Queue {
+                    plan: view.name.clone(),
+                })
+            } else if view.evergreen {
+                Some(Transition::BeginEvergreening {
+                    plan: view.name.clone(),
+                })
+            } else {
+                Some(Transition::Finish {
                     plan: view.name.clone(),
                 })
             }
         }
         Phase::Queued => {
-            if view.dirty || view.queue_position.is_none() || rebase_mutex_held {
+            if view.dirty || view.queue_position.is_none() || !view.has_commits || rebase_mutex_held
+            {
                 None
-            } else {
+            } else if !view.ffable {
                 Some(Transition::BeginRebasing {
+                    plan: view.name.clone(),
+                })
+            } else if view.evergreen {
+                Some(Transition::BeginEvergreening {
+                    plan: view.name.clone(),
+                })
+            } else {
+                Some(Transition::Finish {
                     plan: view.name.clone(),
                 })
             }
@@ -840,16 +912,20 @@ mod tests {
     }
 
     #[test]
-    fn executing_always_queues() {
-        // Intent, commits, and ffable never skip the queue: every finished
-        // executing plan serializes through queued.
+    fn executing_queues_when_diverged_or_held() {
+        // Diverged plans queue even when the mutex is free; ffable plans
+        // queue while the mutex is held.
         for view in [
-            view("a", Phase::Executing),
+            PlanView {
+                has_commits: true,
+                ..view("a", Phase::Executing)
+            },
             PlanView {
                 has_commits: true,
                 ..view("b", Phase::Executing)
             },
             PlanView {
+                has_commits: true,
                 ffable: true,
                 ..view("c", Phase::Executing)
             },
@@ -861,17 +937,129 @@ mod tests {
             },
         ] {
             assert_eq!(
+                next_action(&view, true),
+                Some(Transition::Queue {
+                    plan: view.name.clone()
+                }),
+                "{} queues while held",
+                view.name
+            );
+        }
+        for view in [
+            PlanView {
+                has_commits: true,
+                ..view("a", Phase::Executing)
+            },
+            PlanView {
+                evergreen: false,
+                has_commits: true,
+                ..view("b", Phase::Executing)
+            },
+        ] {
+            assert_eq!(
                 next_action(&view, false),
                 Some(Transition::Queue {
                     plan: view.name.clone()
-                })
+                }),
+                "{} queues when diverged",
+                view.name
             );
         }
     }
 
     #[test]
-    fn queued_promotes_while_mutex_free() {
-        // No ffable gate: ffable plans queue and promote like any other.
+    fn executing_fast_paths_when_ffable_and_free() {
+        let greening = PlanView {
+            ffable: true,
+            has_commits: true,
+            ..view("a", Phase::Executing)
+        };
+        assert_eq!(
+            next_action(&greening, false),
+            Some(Transition::BeginEvergreening {
+                plan: "a".to_string()
+            })
+        );
+        let finished = PlanView {
+            evergreen: false,
+            ffable: true,
+            has_commits: true,
+            ..view("b", Phase::Executing)
+        };
+        assert_eq!(
+            next_action(&finished, false),
+            Some(Transition::Finish {
+                plan: "b".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn empty_executing_holds_for_input() {
+        // No commits: never Queue, Begin, or Finish, whatever the branch.
+        for view in [
+            view("a", Phase::Executing),
+            PlanView {
+                ffable: true,
+                ..view("b", Phase::Executing)
+            },
+            PlanView {
+                evergreen: false,
+                ffable: true,
+                ..view("c", Phase::Executing)
+            },
+        ] {
+            assert_eq!(next_action(&view, false), None, "{} holds empty", view.name);
+            assert_eq!(
+                next_action(&view, true),
+                None,
+                "{} holds empty while held",
+                view.name
+            );
+        }
+    }
+
+    #[test]
+    fn queued_promotes_or_fast_paths_when_free() {
+        // Diverged plans rebase; ffable plans skip rebasing entirely.
+        let rebasing = PlanView {
+            has_commits: true,
+            ..view("a", Phase::Queued)
+        };
+        assert_eq!(
+            next_action(&rebasing, false),
+            Some(Transition::BeginRebasing {
+                plan: "a".to_string()
+            })
+        );
+        let greening = PlanView {
+            ffable: true,
+            has_commits: true,
+            ..view("b", Phase::Queued)
+        };
+        assert_eq!(
+            next_action(&greening, false),
+            Some(Transition::BeginEvergreening {
+                plan: "b".to_string()
+            })
+        );
+        let finished = PlanView {
+            evergreen: false,
+            ffable: true,
+            has_commits: true,
+            ..view("c", Phase::Queued)
+        };
+        assert_eq!(
+            next_action(&finished, false),
+            Some(Transition::Finish {
+                plan: "c".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn empty_queued_holds_for_input() {
+        // No commits: never Begin or Finish, whatever the branch.
         for view in [
             view("a", Phase::Queued),
             PlanView {
@@ -879,23 +1067,28 @@ mod tests {
                 ..view("b", Phase::Queued)
             },
             PlanView {
+                evergreen: false,
                 ffable: true,
-                has_commits: true,
+                has_commits: false,
                 ..view("c", Phase::Queued)
             },
         ] {
+            assert_eq!(next_action(&view, false), None, "{} holds empty", view.name);
             assert_eq!(
-                next_action(&view, false),
-                Some(Transition::BeginRebasing {
-                    plan: view.name.clone()
-                })
+                next_action(&view, true),
+                None,
+                "{} holds empty while held",
+                view.name
             );
         }
     }
 
     #[test]
     fn queued_waits_on_mutex_even_when_ffable() {
-        let waiter = view("a", Phase::Queued);
+        let waiter = PlanView {
+            has_commits: true,
+            ..view("a", Phase::Queued)
+        };
         assert_eq!(next_action(&waiter, true), None);
         let ffable_waiter = PlanView {
             ffable: true,
@@ -903,17 +1096,28 @@ mod tests {
             ..view("b", Phase::Queued)
         };
         assert_eq!(next_action(&ffable_waiter, true), None);
+        let direct_waiter = PlanView {
+            evergreen: false,
+            ffable: true,
+            has_commits: true,
+            ..view("c", Phase::Queued)
+        };
+        assert_eq!(next_action(&direct_waiter, true), None);
     }
 
     #[test]
     fn queued_holds_when_dirty_or_unlisted() {
         let dirty = PlanView {
             dirty: true,
+            has_commits: true,
+            ffable: true,
             ..view("a", Phase::Queued)
         };
         assert_eq!(next_action(&dirty, false), None);
         let unlisted = PlanView {
             queue_position: None,
+            has_commits: true,
+            ffable: true,
             ..view("b", Phase::Queued)
         };
         assert_eq!(next_action(&unlisted, false), None);
