@@ -85,9 +85,7 @@ pub(crate) async fn handle_permission_request(
     responder: agent_client_protocol::Responder<acp::RequestPermissionResponse>,
     expected: &super::WindowIncarnation,
 ) {
-    if !super::check_current(state, window, expected) {
-        return;
-    }
+    let is_current = super::check_current(state, window, expected);
     let current = lock_backend(state).and_then(|backend| {
         backend
             .windows
@@ -96,18 +94,13 @@ pub(crate) async fn handle_permission_request(
             .get(key)
             .and_then(|session| session.session_id.clone())
     });
-    if let Some(current) = current
-        && request.session_id.to_string() != current
-    {
-        answer_cancelled(responder, "for stale session");
-        return;
-    }
+    let session_matches = match current {
+        Some(current) => request.session_id.to_string() == current,
+        None => true,
+    };
     let options = crate::permissions::to_view(&request.options);
-    if options.is_empty() {
-        answer_cancelled(responder, "for empty options");
-        return;
-    }
-    if lock_backend(state)
+    let has_options = !options.is_empty();
+    let is_replaying = lock_backend(state)
         .map(|backend| {
             backend
                 .windows
@@ -115,10 +108,24 @@ pub(crate) async fn handle_permission_request(
                 .map(|win| win.is_history_loading(key))
                 .unwrap_or(false)
         })
-        .unwrap_or(false)
-    {
-        emit_replayed_approval(app, window, key, &request, options, responder);
-        return;
+        .unwrap_or(false);
+    match route_permission(is_current, session_matches, has_options, is_replaying) {
+        PermissionRoute::Cancel => {
+            let context = if !is_current {
+                "for stale incarnation"
+            } else if !session_matches {
+                "for stale session"
+            } else {
+                "for empty options"
+            };
+            answer_cancelled(responder, context);
+            return;
+        }
+        PermissionRoute::Replay => {
+            emit_replayed_approval(app, window, key, &request, options, responder);
+            return;
+        }
+        PermissionRoute::Ask => {}
     }
     let permission = permission_view(&request, options);
     let tool_call_id = permission.tool_call_id.clone();
@@ -262,4 +269,79 @@ fn emit_replayed_approval(
             tool_call_id,
         },
     );
+}
+
+/// Where one permission request goes. Pure so the stall fix stays testable
+/// without an `AppHandle`.
+#[derive(Debug, PartialEq, Eq)]
+enum PermissionRoute {
+    Ask,
+    Cancel,
+    Replay,
+}
+
+fn route_permission(
+    is_current: bool,
+    session_matches: bool,
+    has_options: bool,
+    is_replaying: bool,
+) -> PermissionRoute {
+    if !is_current {
+        return PermissionRoute::Cancel;
+    }
+    if !session_matches {
+        return PermissionRoute::Cancel;
+    }
+    if !has_options {
+        return PermissionRoute::Cancel;
+    }
+    if is_replaying {
+        return PermissionRoute::Replay;
+    }
+    PermissionRoute::Ask
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stale_incarnation_cancels() {
+        assert_eq!(
+            route_permission(false, true, true, false),
+            PermissionRoute::Cancel
+        );
+    }
+
+    #[test]
+    fn session_mismatch_cancels() {
+        assert_eq!(
+            route_permission(true, false, true, false),
+            PermissionRoute::Cancel
+        );
+    }
+
+    #[test]
+    fn empty_options_cancel() {
+        assert_eq!(
+            route_permission(true, true, false, false),
+            PermissionRoute::Cancel
+        );
+    }
+
+    #[test]
+    fn replaying_auto_resolves() {
+        assert_eq!(
+            route_permission(true, true, true, true),
+            PermissionRoute::Replay
+        );
+    }
+
+    #[test]
+    fn live_request_proceeds() {
+        assert_eq!(
+            route_permission(true, true, true, false),
+            PermissionRoute::Ask
+        );
+    }
 }
