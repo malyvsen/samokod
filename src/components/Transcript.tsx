@@ -3,6 +3,7 @@ import { assertNever } from "../assert";
 import type {
 	PermissionOptionView,
 	PermissionView,
+	SessionKey,
 	ToolLineView,
 	ToolStatus,
 } from "../bindings";
@@ -29,17 +30,19 @@ export function Transcript({
 	working = false,
 	onStop = null,
 	children,
+	session,
 }: {
 	items: TranscriptItem[];
 	lead?: string | null;
 	start: SessionStart | null;
 	repoLabel: string;
 	onRetry: (() => void) | null;
-	onAnswer: (toolCallId: string, optionId: string) => void;
+	onAnswer: (session: SessionKey, toolCallId: string, optionId: string) => void;
 	onHistoryRetry?: (() => void) | null;
 	working?: boolean;
 	onStop?: (() => void) | null;
 	children?: ReactNode;
+	session: SessionKey | null;
 }) {
 	const showLead =
 		lead !== null &&
@@ -68,6 +71,7 @@ export function Transcript({
 							isLive={working && index === groups.length - 1}
 							now={now}
 							onStop={onStop}
+							session={session}
 						/>
 					) : (
 						<ItemRow
@@ -75,6 +79,7 @@ export function Transcript({
 							item={group.item}
 							onRetry={onRetry}
 							onAnswer={onAnswer}
+							session={session}
 						/>
 					),
 				)}
@@ -112,13 +117,15 @@ function WorkBox({
 	isLive = false,
 	now = Date.now(),
 	onStop = null,
+	session,
 }: {
 	items: RunItem[];
 	onRetry: (() => void) | null;
-	onAnswer: (toolCallId: string, optionId: string) => void;
+	onAnswer: (session: SessionKey, toolCallId: string, optionId: string) => void;
 	isLive?: boolean;
 	now?: number;
 	onStop?: (() => void) | null;
+	session: SessionKey | null;
 }) {
 	const [open, setOpen] = useState(false);
 	const workRef = useRef<HTMLDivElement>(null);
@@ -217,6 +224,7 @@ function WorkBox({
 							item={item}
 							onRetry={onRetry}
 							onAnswer={onAnswer}
+							session={session}
 						/>
 					),
 				)}
@@ -263,10 +271,12 @@ function ItemRow({
 	item,
 	onRetry,
 	onAnswer,
+	session,
 }: {
 	item: Exclude<TranscriptItem, { kind: "thought" }>;
 	onRetry: (() => void) | null;
-	onAnswer: (toolCallId: string, optionId: string) => void;
+	onAnswer: (session: SessionKey, toolCallId: string, optionId: string) => void;
+	session: SessionKey | null;
 }) {
 	switch (item.kind) {
 		case "user":
@@ -325,8 +335,11 @@ function ItemRow({
 							<button
 								className="tbtn primary"
 								type="button"
-								disabled={item.resolved}
-								onClick={() => onAnswer(permission.tool_call_id, allow.id)}
+								disabled={item.resolved || session === null}
+								onClick={() =>
+									session !== null &&
+									onAnswer(session, permission.tool_call_id, allow.id)
+								}
 							>
 								allow once
 							</button>
@@ -335,8 +348,11 @@ function ItemRow({
 							<button
 								className="tbtn danger"
 								type="button"
-								disabled={item.resolved}
-								onClick={() => onAnswer(permission.tool_call_id, reject.id)}
+								disabled={item.resolved || session === null}
+								onClick={() =>
+									session !== null &&
+									onAnswer(session, permission.tool_call_id, reject.id)
+								}
 							>
 								reject
 							</button>

@@ -491,6 +491,98 @@ describe("plan", () => {
 		expect(textbox()).toBeInTheDocument();
 	});
 
+	test("answering selected approval calls answerPermission with owning session", async () => {
+		const user = await openChat(api);
+		const key = testKey();
+		emitAppEvent(api, {
+			type: "permission_asked",
+			session: key,
+			permission: {
+				tool_call_id: "tc1",
+				title: "Run command",
+				tool: "bash",
+				options: [
+					{ id: "allow1", kind: "allow" },
+					{ id: "reject1", kind: "reject" },
+				],
+				rule_hint: "hint",
+			},
+		});
+		await user.click(screen.getByTitle("Expand"));
+		await user.click(screen.getByRole("button", { name: "allow once" }));
+		expect(api.answerPermission).toHaveBeenCalledWith(key, "tc1", "allow1");
+	});
+
+	test("answering background session card uses card session, not selected", async () => {
+		api.openRepo.mockResolvedValue({
+			repo_root: "/repo",
+			branch: "feature",
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb", "scoping", "Beta", true),
+			],
+			selected: { plan: "aaa", role: "scoping" },
+			config_defaults: testDefaults(),
+			scoping_preview: null,
+		});
+		api.selectPlan.mockImplementation(async (session: unknown) => ({
+			plans: [
+				testEntry("aaa", "scoping", "Alpha", true),
+				testEntry("bbb", "scoping", "Beta", true),
+			],
+			selected: session as { plan: string; role: "scoping" },
+			config_defaults: testDefaults(),
+			scoping_preview: null,
+		}));
+		const user = await openChat(api);
+		const aaa = { plan: "aaa", role: "scoping" } as const;
+		const bbb = { plan: "bbb", role: "scoping" } as const;
+		emitAppEvent(api, {
+			type: "permission_asked",
+			session: bbb,
+			permission: {
+				tool_call_id: "tc-bbb",
+				title: "Run background",
+				tool: "bash",
+				options: [
+					{ id: "allow-bbb", kind: "allow" },
+					{ id: "reject-bbb", kind: "reject" },
+				],
+				rule_hint: "hint",
+			},
+		});
+		emitAppEvent(api, {
+			type: "permission_asked",
+			session: aaa,
+			permission: {
+				tool_call_id: "tc-aaa",
+				title: "Run foreground",
+				tool: "bash",
+				options: [
+					{ id: "allow-aaa", kind: "allow" },
+					{ id: "reject-aaa", kind: "reject" },
+				],
+				rule_hint: "hint",
+			},
+		});
+		await user.click(
+			screen.getByRole("button", { name: "Beta, scoping, opens Scoping" }),
+		);
+		await screen.findByText("Run background");
+		await user.click(screen.getByTitle("Expand"));
+		await user.click(screen.getByRole("button", { name: "allow once" }));
+		expect(api.answerPermission).toHaveBeenCalledWith(
+			bbb,
+			"tc-bbb",
+			"allow-bbb",
+		);
+		expect(api.answerPermission).not.toHaveBeenCalledWith(
+			aaa,
+			"tc-bbb",
+			"allow-bbb",
+		);
+	});
+
 	test("background spend_tick refresh keeps focus", async () => {
 		await openChat(api);
 		const box = textbox();

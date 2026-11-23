@@ -8,6 +8,7 @@ import type { RunItem } from "./types";
 
 const multiline = "first line\nsecond line\n- third";
 const IDLE: SessionStart = { kind: "idle" };
+const SESSION = { plan: "a", role: "scoping" } as const;
 
 function transcript(text: string, start: SessionStart | null = IDLE) {
 	return (
@@ -17,6 +18,7 @@ function transcript(text: string, start: SessionStart | null = IDLE) {
 			repoLabel="~/repo"
 			onRetry={vi.fn()}
 			onAnswer={vi.fn()}
+			session={SESSION}
 		/>
 	);
 }
@@ -29,6 +31,7 @@ function agentTranscript(text: string, start: SessionStart | null = IDLE) {
 			repoLabel="~/repo"
 			onRetry={vi.fn()}
 			onAnswer={vi.fn()}
+			session={SESSION}
 		/>
 	);
 }
@@ -41,6 +44,7 @@ function emptyTranscript(start: SessionStart | null) {
 			repoLabel="~/repo"
 			onRetry={vi.fn()}
 			onAnswer={vi.fn()}
+			session={SESSION}
 		/>
 	);
 }
@@ -103,6 +107,7 @@ describe("transcript retry", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		fireEvent.click(screen.getByTitle("Expand"));
@@ -125,6 +130,7 @@ describe("transcript retry", () => {
 				repoLabel="~/repo"
 				onRetry={null}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		fireEvent.click(screen.getByTitle("Expand"));
@@ -210,6 +216,7 @@ describe("transcript lead", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		const bubbles = container.querySelectorAll(".msg.user");
@@ -226,6 +233,7 @@ describe("transcript lead", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		const bubbles = container.querySelectorAll(".msg.user");
@@ -298,6 +306,7 @@ describe("transcript thought rows", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		expect(screen.getByText("thinking: 8s")).toBeInTheDocument();
@@ -314,6 +323,7 @@ describe("transcript thought rows", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		const rows = container.querySelectorAll(".arow.thought");
@@ -334,6 +344,7 @@ describe("transcript thought rows", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		const rows = container.querySelectorAll(".arow.thought");
@@ -377,6 +388,7 @@ describe("transcript thought rows", () => {
 					onRetry={vi.fn()}
 					onAnswer={vi.fn()}
 					working
+					session={SESSION}
 				/>,
 			);
 			const summary = () =>
@@ -424,6 +436,7 @@ describe("transcript thought rows", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		expect(
@@ -453,6 +466,7 @@ describe("transcript thought rows", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		expect(container.querySelectorAll(".work")).toHaveLength(1);
@@ -587,6 +601,7 @@ describe("transcript grouping", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		const box = container.querySelector(".work");
@@ -678,6 +693,7 @@ describe("transcript grouping", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		expect(container.querySelector(".work.failed")).not.toBeNull();
@@ -704,6 +720,7 @@ describe("transcript grouping", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		fireEvent.click(screen.getByTitle("Expand"));
@@ -741,6 +758,7 @@ describe("transcript grouping", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		fireEvent.click(screen.getByTitle("Expand"));
@@ -773,6 +791,7 @@ describe("transcript row expansion", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		fireEvent.click(screen.getByTitle("Expand"));
@@ -814,6 +833,7 @@ describe("transcript row expansion", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		fireEvent.click(screen.getByTitle("Expand"));
@@ -854,6 +874,7 @@ describe("transcript row expansion", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		const boxToggle = screen.getByTitle("Expand");
@@ -888,6 +909,7 @@ describe("transcript tool lines", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		expect(screen.getByText("edit: edit file.md")).toBeInTheDocument();
@@ -913,6 +935,7 @@ describe("transcript tool lines", () => {
 				repoLabel="~/repo"
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
+				session={SESSION}
 			/>,
 		);
 		const row = container.querySelector(".tool");
@@ -1020,5 +1043,102 @@ describe("transcript width", () => {
 		expect(transcriptRule).not.toMatch(/align-items:\s*center/);
 		const columnRule = /\.tcol\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 		expect(columnRule).toMatch(/margin:\s*0\s+auto/);
+	});
+});
+
+describe("transcript approval sessions", () => {
+	function approvalItem(id: string) {
+		return {
+			kind: "approval" as const,
+			id,
+			permission: {
+				tool_call_id: `tc-${id}`,
+				title: `bash: run ${id}`,
+				tool: "bash",
+				options: [
+					{ id: `allow-${id}`, kind: "allow" as const },
+					{ id: `reject-${id}`, kind: "reject" as const },
+				],
+				rule_hint: "hint",
+			},
+			resolved: false as const,
+			at: 1000,
+		};
+	}
+
+	test("answering passes owning session, not selected", () => {
+		const onAnswer = vi.fn();
+		const first = { plan: "aaa", role: "scoping" } as const;
+		const second = { plan: "bbb", role: "scoping" } as const;
+		const { unmount } = render(
+			<Transcript
+				items={[approvalItem("a1")]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={onAnswer}
+				session={first}
+			/>,
+		);
+		fireEvent.click(screen.getByTitle("Expand"));
+		fireEvent.click(screen.getByRole("button", { name: "allow once" }));
+		expect(onAnswer).toHaveBeenCalledWith(first, "tc-a1", "allow-a1");
+		unmount();
+		onAnswer.mockClear();
+		render(
+			<Transcript
+				items={[approvalItem("b1")]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={onAnswer}
+				session={second}
+			/>,
+		);
+		fireEvent.click(screen.getByTitle("Expand"));
+		fireEvent.click(screen.getByRole("button", { name: "allow once" }));
+		expect(onAnswer).toHaveBeenCalledWith(second, "tc-b1", "allow-b1");
+	});
+
+	test("two sessions render and non-selected card answers owning session", () => {
+		const onAnswer = vi.fn();
+		const selected = { plan: "aaa", role: "scoping" } as const;
+		const background = { plan: "bbb", role: "scoping" } as const;
+		render(
+			<>
+				<div data-testid="selected">
+					<Transcript
+						items={[approvalItem("a1")]}
+						start={IDLE}
+						repoLabel="~/repo"
+						onRetry={vi.fn()}
+						onAnswer={onAnswer}
+						session={selected}
+					/>
+				</div>
+				<div data-testid="background">
+					<Transcript
+						items={[approvalItem("b1")]}
+						start={IDLE}
+						repoLabel="~/repo"
+						onRetry={vi.fn()}
+						onAnswer={onAnswer}
+						session={background}
+					/>
+				</div>
+			</>,
+		);
+		const expands = screen.getAllByTitle("Expand");
+		expect(expands).toHaveLength(2);
+		for (const button of expands) {
+			fireEvent.click(button);
+		}
+		const allows = screen.getAllByRole("button", { name: "allow once" });
+		expect(allows).toHaveLength(2);
+		const backgroundAllow = allows[1];
+		if (backgroundAllow === undefined) throw new Error("missing allow");
+		fireEvent.click(backgroundAllow);
+		expect(onAnswer).toHaveBeenCalledTimes(1);
+		expect(onAnswer).toHaveBeenCalledWith(background, "tc-b1", "allow-b1");
 	});
 });

@@ -574,11 +574,14 @@ export function App() {
 		}
 	}
 
-	async function handleAnswer(toolCallId: string, optionId: string) {
-		const key = selectedRef.current;
-		if (readOnly || key === null) return;
-		await answerPermission(key, toolCallId, optionId);
-		updateChat(key, (chat) => ({
+	async function handleAnswer(
+		session: SessionKey,
+		toolCallId: string,
+		optionId: string,
+	) {
+		if (readOnly) return;
+		await answerPermission(session, toolCallId, optionId);
+		updateChat(session, (chat) => ({
 			...chat,
 			approval: false,
 			working: true,
@@ -834,6 +837,7 @@ export function App() {
 									onAnswer={handleAnswer}
 									working={chat?.working ?? false}
 									onStop={readOnly ? null : handleStop}
+									session={selectedKey}
 									onHistoryRetry={
 										chat?.start.kind === "failed" && chat.start.error.retryable
 											? handleHistoryRetry
