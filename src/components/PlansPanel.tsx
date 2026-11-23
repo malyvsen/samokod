@@ -95,22 +95,18 @@ function PlanGroup({
 		openRole === null
 			? -1
 			: plan.sessions.findIndex((status) => status.role === openRole);
-	const marker = markerClassFor(attention, expanded);
-	const quiet = !expanded && marker === null;
+	const marker = markerKindFor(attention, expanded);
+	const progress = headerProgress(plan);
+	const meta = progress === null ? null : headerMeta(progress, attention);
 	return (
 		<div
-			className={`plan-group tree${expanded ? " sel" : ""}${quiet ? " quiet" : ""}`}
+			className={`plan-group tree${expanded ? " sel" : ""}${marker === null ? " quiet" : ""}`}
 		>
 			<span className="mgutter">
-				{expanded ? (
-					<i
-						className={`v${openIdx >= 0 ? ` c-${openPath}` : ""}`}
-						aria-hidden="true"
-					/>
-				) : null}
+				<Spine expanded={expanded} openIdx={openIdx} openPath={openPath} />
 				{marker === null ? null : (
 					<span
-						className={marker}
+						className={`mk mk-${marker}`}
 						title={attention === null ? undefined : attentionTitle(attention)}
 						aria-hidden="true"
 					/>
@@ -120,15 +116,23 @@ function PlanGroup({
 				plan={plan}
 				target={target}
 				attention={attention}
-				expanded={expanded}
-				openPath={openPath}
-				openIdx={openIdx}
+				eta={meta?.eta ?? null}
 				onSelect={onSelect}
 				onExecute={onExecute}
 				onCancel={onCancel}
 				onSetMode={onSetMode}
 				onSetEvergreen={onSetEvergreen}
 			/>
+			{meta === null ? null : (
+				<>
+					<span className="bgutter">
+						<Spine expanded={expanded} openIdx={openIdx} openPath={openPath} />
+					</span>
+					<div className={`hbar-in${meta.barClass ? ` ${meta.barClass}` : ""}`}>
+						<i style={{ width: `${meta.pct}%` }} />
+					</div>
+				</>
+			)}
 			{expanded
 				? plan.sessions.map((status, index) => (
 						<SessionRow
@@ -151,9 +155,7 @@ function PlanHeader({
 	plan,
 	target,
 	attention,
-	expanded,
-	openPath,
-	openIdx,
+	eta,
 	onSelect,
 	onExecute,
 	onCancel,
@@ -163,79 +165,71 @@ function PlanHeader({
 	plan: PlanEntry;
 	target: SessionKey;
 	attention: AttentionKind | null;
-	expanded: boolean;
-	openPath: AttentionKind | "sel";
-	openIdx: number;
+	eta: string | null;
 	onSelect: (session: SessionKey) => void;
 	onExecute: (session: SessionKey) => void;
 	onCancel: (session: SessionKey) => void;
 	onSetMode: (plan: string, manual: boolean) => void;
 	onSetEvergreen: (plan: string, evergreen: boolean) => void;
 }) {
-	const progress = headerProgress(plan);
-	const controls =
-		plan.phase === "completed" || plan.phase === "cancelled" ? null : (
-			<PlanMenu
-				plan={plan}
-				target={target}
-				onExecute={onExecute}
-				onCancel={onCancel}
-				onSetMode={onSetMode}
-				onSetEvergreen={onSetEvergreen}
-			/>
-		);
-	const meta = progress === null ? null : headerMeta(progress, attention);
-	const button = (
-		<button
-			className="plan-name"
-			type="button"
-			onClick={() => onSelect(target)}
-			aria-label={`${plan.title}, ${plan.phase}, opens ${roleLabel(target.role)}`}
-			data-full={plan.title}
-		>
-			<span
-				className={`ptitle${attention === null ? "" : ` sheen-${attention}`}`}
-			>
-				{plan.title}
-			</span>
-			{meta?.eta == null ? null : <span className="pmeta">{meta.eta}</span>}
-		</button>
-	);
-	const top = (
-		<div className="phead-top">
-			{button}
-			{controls}
-		</div>
-	);
-	if (meta === null) {
-		return top;
-	}
 	return (
-		<>
-			{top}
-			<span className="bgutter">
-				{expanded ? (
-					<i
-						className={`v${openIdx >= 0 ? ` c-${openPath}` : ""}`}
-						aria-hidden="true"
-					/>
-				) : null}
-			</span>
-			<div className={`hbar-in${meta.barClass ? ` ${meta.barClass}` : ""}`}>
-				<i style={{ width: `${meta.pct}%` }} />
-			</div>
-		</>
+		<div className="phead">
+			<button
+				className="plan-name"
+				type="button"
+				onClick={() => onSelect(target)}
+				aria-label={`${plan.title}, ${plan.phase}, opens ${roleLabel(target.role)}`}
+				data-full={plan.title}
+			>
+				<span
+					className={`ptitle${attention === null ? "" : ` sheen-${attention}`}`}
+				>
+					{plan.title}
+				</span>
+				{eta == null ? null : <span className="pmeta">{eta}</span>}
+			</button>
+			{plan.phase === "completed" || plan.phase === "cancelled" ? null : (
+				<PlanMenu
+					plan={plan}
+					target={target}
+					onExecute={onExecute}
+					onCancel={onCancel}
+					onSetMode={onSetMode}
+					onSetEvergreen={onSetEvergreen}
+				/>
+			)}
+		</div>
 	);
 }
 
-function markerClassFor(
+function Spine({
+	expanded,
+	openIdx,
+	openPath,
+}: {
+	expanded: boolean;
+	openIdx: number;
+	openPath: AttentionKind | "sel";
+}) {
+	if (!expanded) {
+		return null;
+	}
+	return (
+		<i
+			className={`v${openIdx >= 0 ? ` c-${openPath}` : ""}`}
+			aria-hidden="true"
+		/>
+	);
+}
+
+function markerKindFor(
 	attention: AttentionKind | null,
 	expanded: boolean,
-): string | null {
+): AttentionKind | "sel" | null {
 	if (attention !== null) {
-		return `mk mk-${attention}`;
+		return attention;
 	}
-	return expanded ? "mk mk-sel" : null;
+	return expanded ? "sel" : null;
 }
 
 function trailFor(index: number, openIdx: number): "before" | "open" | "after" {

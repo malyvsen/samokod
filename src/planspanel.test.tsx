@@ -884,7 +884,6 @@ describe("plans panel", () => {
 			expect(
 				container.querySelectorAll(".mk-idle, .mk-approval, .mk-failed").length,
 			).toBe(3);
-			expect(container.querySelector(".mk-none")).toBeNull();
 			expect(container.querySelectorAll(".mk").length).toBe(3);
 			for (const title of ["Run", "Done"]) {
 				const group = planGroupFor(title);
@@ -923,7 +922,7 @@ describe("plans panel", () => {
 			]);
 		});
 
-		test("marks the selected quiet plan white and others hollow", () => {
+		test("marks the selected quiet plan white and hides other quiet markers", () => {
 			const quiet = testEntryWith("run", "scoping", "Run", true, [
 				testStatus("scoping", { working: true }),
 			]);
@@ -1182,7 +1181,7 @@ describe("plans panel", () => {
 
 		test("plan menus anchor to their header above the title tooltip", () => {
 			const css = appCss();
-			const top = /\.phead-top\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			const top = /\.phead\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(top).toContain("position: relative");
 			const drop = /\.pdrop\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(drop).toContain("position: absolute");
@@ -1200,9 +1199,9 @@ describe("plans panel", () => {
 			expect(mark).toContain("26px");
 		});
 
-		test("executing headers stack an ETA and a 3px bar", () => {
+		test("executing headers show an ETA and a 3px bar", () => {
 			const css = appCss();
-			const top = /\.phead-top\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+			const top = /\.phead\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(top).toContain("display: flex");
 			const meta = /\.pmeta\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(meta).toContain("#6f6c66");

@@ -1222,7 +1222,7 @@ button.arow {
 	padding-top: 0;
 }
 
-.phead-top {
+.phead {
 	position: relative;
 	display: flex;
 	align-items: center;
@@ -1328,7 +1328,7 @@ button.arow {
 	background: rgba(255, 255, 255, 0.04);
 }
 
-.phead-top .plan-name {
+.phead .plan-name {
 	flex: 1;
 	min-width: 0;
 }
@@ -1422,7 +1422,9 @@ button.arow {
 	z-index: 10;
 }
 
-.mgutter {
+.mgutter,
+.bgutter,
+.ngutter {
 	position: relative;
 }
 
@@ -1435,42 +1437,29 @@ button.arow {
 	height: 8px;
 }
 
-.mgutter .v {
-	position: absolute;
-	left: 50%;
-	top: 50%;
-	bottom: -1px;
-	width: 1px;
-	margin-left: -0.5px;
-	background: rgba(255, 255, 255, 0.22);
-}
-
-.bgutter {
-	position: relative;
-}
-
-.bgutter .v {
-	position: absolute;
-	left: 50%;
-	top: -1px;
-	bottom: -1px;
-	width: 1px;
-	margin-left: -0.5px;
-	background: rgba(255, 255, 255, 0.22);
-}
-
-.ngutter {
-	position: relative;
-}
-
+.mgutter .v,
+.bgutter .v,
 .ngutter .v {
 	position: absolute;
 	left: 50%;
-	top: -1px;
-	bottom: 0;
 	width: 1px;
 	margin-left: -0.5px;
 	background: rgba(255, 255, 255, 0.22);
+}
+
+.mgutter .v {
+	top: 50%;
+	bottom: -1px;
+}
+
+.bgutter .v {
+	top: -1px;
+	bottom: -1px;
+}
+
+.ngutter .v {
+	top: -1px;
+	bottom: 0;
 }
 
 .ngutter.last .v {
@@ -1656,9 +1645,7 @@ button.arow {
 	box-shadow: 0 0 8px rgba(255, 107, 107, 0.9);
 }
 
-.mgutter .v.c-sel,
-.bgutter .v.c-sel,
-.ngutter .v.c-sel {
+.plan-group.tree .v.c-sel {
 	background: #fff;
 	box-shadow: 0 0 8px rgba(255, 255, 255, 0.45);
 }
@@ -1671,9 +1658,7 @@ button.arow {
 	);
 }
 
-.mgutter .v.c-idle,
-.bgutter .v.c-idle,
-.ngutter .v.c-idle {
+.plan-group.tree .v.c-idle {
 	background: #57c8ff;
 	box-shadow: 0 0 8px rgba(87, 200, 255, 0.7);
 }
@@ -1686,9 +1671,7 @@ button.arow {
 	);
 }
 
-.mgutter .v.c-approval,
-.bgutter .v.c-approval,
-.ngutter .v.c-approval {
+.plan-group.tree .v.c-approval {
 	background: #ffd98a;
 	box-shadow: 0 0 8px rgba(255, 217, 138, 0.7);
 }
@@ -1701,9 +1684,7 @@ button.arow {
 	);
 }
 
-.mgutter .v.c-failed,
-.bgutter .v.c-failed,
-.ngutter .v.c-failed {
+.plan-group.tree .v.c-failed {
 	background: #ff6b6b;
 	box-shadow: 0 0 8px rgba(255, 107, 107, 0.7);
 }
