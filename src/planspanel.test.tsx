@@ -884,7 +884,17 @@ describe("plans panel", () => {
 			expect(
 				container.querySelectorAll(".mk-idle, .mk-approval, .mk-failed").length,
 			).toBe(3);
-			expect(container.querySelectorAll(".mk-none").length).toBe(2);
+			expect(container.querySelector(".mk-none")).toBeNull();
+			expect(container.querySelectorAll(".mk").length).toBe(3);
+			for (const title of ["Run", "Done"]) {
+				const group = planGroupFor(title);
+				expect(group.className).toContain("quiet");
+				expect(group.querySelector(".mgutter")).not.toBeNull();
+				expect(group.querySelector(".mk")).toBeNull();
+			}
+			for (const title of ["Idle", "Wait", "Broke"]) {
+				expect(planGroupFor(title).querySelector(".mk")).not.toBeNull();
+			}
 		});
 
 		test("names the cause on markers", () => {
@@ -920,15 +930,25 @@ describe("plans panel", () => {
 			const idle = testEntryWith("idle", "scoping", "Idle", true, [
 				testStatus("scoping"),
 			]);
+			const calm = testEntryWith("calm", "scoping", "Calm", true, [
+				testStatus("scoping", { working: true }),
+			]);
 			const { container } = render(
 				<PlansPanel
-					{...panelProps([idle, quiet], { plan: "run", role: "scoping" })}
+					{...panelProps([idle, quiet, calm], { plan: "run", role: "scoping" })}
 				/>,
 			);
 			expect(
 				planGroup("Run, scoping, opens Scoping").querySelector(".mk-sel"),
 			).not.toBeNull();
 			expect(container.querySelector(".mk-sel")).not.toBeNull();
+			const calmGroup = planGroup("Calm, scoping, opens Scoping");
+			expect(calmGroup.querySelector(".mk")).toBeNull();
+			expect(calmGroup.className).toContain("quiet");
+			expect(calmGroup.querySelector(".mgutter")).not.toBeNull();
+			expect(
+				planGroup("Idle, scoping, opens Scoping").querySelector(".mk-idle"),
+			).not.toBeNull();
 		});
 
 		test("sweeps attention names with a sheen", () => {
@@ -1283,6 +1303,7 @@ describe("plans panel", () => {
 				/>,
 			);
 			const group = planGroup("Parallel sessions, scoping, opens Scoping");
+			expect(group.querySelectorAll(".mgutter").length).toBe(1);
 			expect(group.querySelectorAll(".ngutter").length).toBe(1);
 			expect(group.querySelector(".ngutter.single")).not.toBeNull();
 		});
@@ -1332,6 +1353,17 @@ describe("plans panel", () => {
 			expect(group.querySelector(".mk-sel")).not.toBeNull();
 			expect(group.querySelector(".mgutter .v.c-sel")).not.toBeNull();
 			expect(group.querySelector(".ngutter .nd.sel")).not.toBeNull();
+		});
+
+		test("keeps an empty gutter for quiet collapsed plans", () => {
+			const quiet = testEntryWith("run", "scoping", "Run", true, [
+				testStatus("scoping", { working: true }),
+			]);
+			render(<PlansPanel {...panelProps([quiet], null)} />);
+			const group = planGroup("Run, scoping, opens Scoping");
+			expect(group.querySelectorAll(".mgutter").length).toBe(1);
+			expect(group.querySelector(".mk")).toBeNull();
+			expect(group.className).toContain("quiet");
 		});
 	});
 });

@@ -1204,6 +1204,10 @@ button.arow {
 	align-items: stretch;
 }
 
+.plan-group.tree.quiet {
+	grid-template-columns: 0 minmax(0, 1fr);
+}
+
 .sect-head {
 	display: flex;
 	align-items: center;
@@ -1355,11 +1359,6 @@ button.arow {
 .mk-sel {
 	background: #fff;
 	box-shadow: 0 0 8px rgba(255, 255, 255, 0.55);
-}
-
-.mk-none {
-	background: #050508;
-	border: 1px solid rgba(255, 255, 255, 0.28);
 }
 
 /* Solid gradient edges keep the title painted across the whole sweep. */

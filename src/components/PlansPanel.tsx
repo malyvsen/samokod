@@ -95,8 +95,12 @@ function PlanGroup({
 		openRole === null
 			? -1
 			: plan.sessions.findIndex((status) => status.role === openRole);
+	const marker = markerClassFor(attention, expanded);
+	const quiet = !expanded && marker === null;
 	return (
-		<div className={`plan-group tree${expanded ? " sel" : ""}`}>
+		<div
+			className={`plan-group tree${expanded ? " sel" : ""}${quiet ? " quiet" : ""}`}
+		>
 			<span className="mgutter">
 				{expanded ? (
 					<i
@@ -104,11 +108,13 @@ function PlanGroup({
 						aria-hidden="true"
 					/>
 				) : null}
-				<span
-					className={markerClassFor(attention, expanded)}
-					title={attention === null ? undefined : attentionTitle(attention)}
-					aria-hidden="true"
-				/>
+				{marker === null ? null : (
+					<span
+						className={marker}
+						title={attention === null ? undefined : attentionTitle(attention)}
+						aria-hidden="true"
+					/>
+				)}
 			</span>
 			<PlanHeader
 				plan={plan}
@@ -225,11 +231,11 @@ function PlanHeader({
 function markerClassFor(
 	attention: AttentionKind | null,
 	expanded: boolean,
-): string {
+): string | null {
 	if (attention !== null) {
 		return `mk mk-${attention}`;
 	}
-	return expanded ? "mk mk-sel" : "mk mk-none";
+	return expanded ? "mk mk-sel" : null;
 }
 
 function trailFor(index: number, openIdx: number): "before" | "open" | "after" {
