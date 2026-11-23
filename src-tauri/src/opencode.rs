@@ -2,7 +2,7 @@
 // first-message role templates. `acp.rs` stays protocol-only.
 use std::collections::HashMap;
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::plans::{Phase, PlanRef};
 
@@ -42,87 +42,116 @@ pub fn agent_env(plan: &PlanRef) -> HashMap<String, String> {
     HashMap::from([(CONFIG_CONTENT_ENV.to_string(), agent_config(plan))])
 }
 
-/// Full agent config as inline JSON. Permissions only, no `prompt` field:
+/// Full agent config as inline JSON. Permissions only, no `system` field:
 /// role guidance travels as first-message text so OpenCode's per-model base
-/// prompt stays intact. Pure.
+/// prompt stays intact. Native V2 shape: `agents` plus an ordered
+/// `permissions` array per agent (last match wins), `shell` for shell
+/// commands, `subagent` for child agents, and `experimental.todo` so the
+/// `todowrite` tool exists (off by default in V2). Pure.
 pub fn agent_config(plan: &PlanRef) -> String {
     serde_json::json!({
-        "agent": {
+        "experimental": { "todo": true },
+        "agents": {
             SCOPING_AGENT: {
                 "mode": "primary",
                 "description": "Plans one task. Writes only inside its plan directory.",
-                "permission": scoping_permissions(plan),
+                "permissions": scoping_permissions(plan),
             },
             EXECUTING_AGENT: {
                 "mode": "primary",
                 "description": "Executes one approved plan.",
-                "permission": executing_permissions(),
+                "permissions": executing_permissions(),
             },
             EVERGREENING_AGENT: {
                 "mode": "primary",
                 "description": "Cleans up one executed plan.",
-                "permission": evergreening_permissions(),
+                "permissions": evergreening_permissions(),
             },
             LANDING_AGENT: {
                 "mode": "primary",
                 "description": "Lands one plan branch onto its target branch.",
-                "permission": landing_permissions(),
+                "permissions": landing_permissions(),
             },
         },
     })
     .to_string()
 }
 
-/// Scoping edits stay inside its plan scope, except state and
-/// attachments; the shell stays fully allowed for investigation.
-fn scoping_permissions(plan: &PlanRef) -> Value {
-    let scope = plan.scope_glob();
+/// One ordered V2 permission rule. Array order is the contract: OpenCode
+/// grants the last matching rule.
+fn rule(action: &str, resource: &str, effect: &str) -> Value {
     serde_json::json!({
-        "read": "allow",
-        "external_directory": "allow",
-        "edit": rules_object(&[
-            ("*", "deny"),
-            (scope.as_str(), "allow"),
-            (STATE_DENY_GLOB, "deny"),
-            (ATTACHMENTS_DENY_GLOB, "deny"),
-        ]),
-        "bash": "allow",
-        "question": "deny",
-        "task": rules_object(&SCOPING_TASK_RULES),
+        "action": action,
+        "resource": resource,
+        "effect": effect,
     })
 }
 
-/// Scoping may only spawn read-only researchers. Denied types vanish from
-/// the Task tool description, so the model will not attempt them.
-const SCOPING_TASK_RULES: [(&str, &str); 3] =
-    [("*", "deny"), ("explore", "allow"), ("scout", "allow")];
+/// Ordered V2 edit rules from `(resource, effect)` pairs.
+fn edit_rules(rules: &[(&str, &str)]) -> Vec<Value> {
+    rules
+        .iter()
+        .map(|(resource, effect)| rule("edit", resource, effect))
+        .collect()
+}
+
+/// Scoping edits stay inside its plan scope, except state and
+/// attachments; the shell stays fully allowed for investigation.
+fn scoping_permissions(plan: &PlanRef) -> Vec<Value> {
+    let scope = plan.scope_glob();
+    let mut permissions = vec![
+        rule("read", "*", "allow"),
+        rule("external_directory", "*", "allow"),
+    ];
+    permissions.extend(edit_rules(&[
+        ("*", "deny"),
+        (scope.as_str(), "allow"),
+        (STATE_DENY_GLOB, "deny"),
+        (ATTACHMENTS_DENY_GLOB, "deny"),
+    ]));
+    permissions.push(rule("shell", "*", "allow"));
+    permissions.push(rule("question", "*", "deny"));
+    permissions.extend(
+        SCOPING_SUBAGENT_RULES
+            .iter()
+            .map(|(resource, effect)| rule("subagent", resource, effect)),
+    );
+    permissions
+}
+
+/// Scoping may only spawn the read-only researcher. Denied agents vanish
+/// from the subagent tool description, so the model will not attempt them.
+/// V2 has no built-in `scout`, so only `explore` is allowed.
+const SCOPING_SUBAGENT_RULES: [(&str, &str); 2] = [("*", "deny"), ("explore", "allow")];
 
 /// Executing runs an approved plan, so the shell is fully allowed. Edits
 /// ask inside `.samokod` to stop casual rewrites of app state through the
-/// obvious path; `bash` bypass is accepted. The bare `.samokod` key covers
+/// obvious path; shell bypass is accepted. The bare `.samokod` key covers
 /// the directory entry itself, since `.samokod/**` only matches paths
 /// starting with `.samokod/`, and state plus attachments deny.
-fn executing_permissions() -> Value {
-    serde_json::json!({
-        "read": "allow",
-        "external_directory": "allow",
-        "edit": rules_object(&WORK_EDIT_RULES),
-        "bash": "allow",
-        "question": "deny",
-    })
+fn executing_permissions() -> Vec<Value> {
+    let mut permissions = vec![
+        rule("read", "*", "allow"),
+        rule("external_directory", "*", "allow"),
+    ];
+    permissions.extend(edit_rules(&WORK_EDIT_RULES));
+    permissions.push(rule("shell", "*", "allow"));
+    permissions.push(rule("question", "*", "deny"));
+    permissions
 }
 
 /// Evergreening runs in the same worktree as executing, so it shares the
 /// work edit shape: everything editable except state and attachments, with
 /// the `.samokod` ask guard and no permission questions.
-fn evergreening_permissions() -> Value {
-    serde_json::json!({
-        "read": "allow",
-        "external_directory": "allow",
-        "edit": rules_object(&WORK_EDIT_RULES),
-        "bash": "allow",
-        "question": "deny",
-    })
+fn evergreening_permissions() -> Vec<Value> {
+    let mut permissions = vec![
+        rule("read", "*", "allow"),
+        rule("external_directory", "*", "allow"),
+    ];
+    permissions.extend(edit_rules(&WORK_EDIT_RULES));
+    permissions.push(rule("shell", "*", "allow"));
+    permissions.push(rule("question", "*", "deny"));
+    permissions
 }
 
 /// Shared executing and evergreening edit shape. Denies land last so deny
@@ -140,15 +169,16 @@ const WORK_EDIT_RULES: [(&str, &str); 5] = [
 /// cover files the target branch added on top. No permission questions
 /// and no subagent research: landing is a focused conflict-resolution
 /// task.
-fn landing_permissions() -> Value {
-    serde_json::json!({
-        "read": "allow",
-        "external_directory": "allow",
-        "edit": rules_object(&LANDING_EDIT_RULES),
-        "bash": "allow",
-        "question": "deny",
-        "task": "deny",
-    })
+fn landing_permissions() -> Vec<Value> {
+    let mut permissions = vec![
+        rule("read", "*", "allow"),
+        rule("external_directory", "*", "allow"),
+    ];
+    permissions.extend(edit_rules(&LANDING_EDIT_RULES));
+    permissions.push(rule("shell", "*", "allow"));
+    permissions.push(rule("question", "*", "deny"));
+    permissions.push(rule("subagent", "*", "deny"));
+    permissions
 }
 
 const LANDING_EDIT_RULES: [(&str, &str); 3] = [
@@ -156,16 +186,6 @@ const LANDING_EDIT_RULES: [(&str, &str); 3] = [
     (STATE_DENY_GLOB, "deny"),
     (ATTACHMENTS_DENY_GLOB, "deny"),
 ];
-
-/// Ordered permission object from `(pattern, effect)` pairs. Insertion
-/// order is the contract: OpenCode grants the last matching rule.
-fn rules_object(rules: &[(&str, &str)]) -> Value {
-    let mut map = Map::with_capacity(rules.len());
-    for (pattern, effect) in rules {
-        map.insert((*pattern).to_string(), Value::String((*effect).to_string()));
-    }
-    Value::Object(map)
-}
 
 /// Plan dir as the agent sees it: repo-relative, forward slashes. Pure.
 pub fn plan_display(plan: &PlanRef) -> String {
@@ -235,17 +255,22 @@ mod tests {
     }
 
     /// Mirror of OpenCode's find-last wildcard match: the last rule whose
-    /// pattern matches the resource wins. String permissions apply directly.
-    fn effect_of(config: &Value, agent: &str, permission: &str, resource: &str) -> String {
-        let entry = &config["agent"][agent]["permission"][permission];
-        if let Some(effect) = entry.as_str() {
-            return effect.to_string();
-        }
-        let rules = entry.as_object().expect("permission is string or object");
+    /// action and resource match wins. Native V2 `permissions` array shape.
+    fn effect_of(config: &Value, agent: &str, action: &str, resource: &str) -> String {
+        let permissions = config["agents"][agent]["permissions"]
+            .as_array()
+            .expect("agent permissions is an array");
         let mut effect = "none";
-        for (pattern, value) in rules {
+        for entry in permissions {
+            let entry_action = entry["action"].as_str().expect("rule action is a string");
+            if entry_action != "*" && entry_action != action {
+                continue;
+            }
+            let pattern = entry["resource"]
+                .as_str()
+                .expect("rule resource is a string");
             if wildcard_match(pattern, resource) {
-                effect = value.as_str().expect("rule effect is a string");
+                effect = entry["effect"].as_str().expect("rule effect is a string");
             }
         }
         effect.to_string()
@@ -278,17 +303,29 @@ mod tests {
         pi == pattern.len()
     }
 
-    fn keys_of(config: &Value, agent: &str, permission: &str) -> Vec<String> {
-        config["agent"][agent]["permission"][permission]
-            .as_object()
-            .expect("granular permission is an object")
-            .keys()
-            .cloned()
+    fn resources_of(config: &Value, agent: &str, action: &str) -> Vec<String> {
+        config["agents"][agent]["permissions"]
+            .as_array()
+            .expect("agent permissions is an array")
+            .iter()
+            .filter(|entry| entry["action"].as_str() == Some(action))
+            .map(|entry| {
+                entry["resource"]
+                    .as_str()
+                    .expect("rule resource is a string")
+                    .to_string()
+            })
             .collect()
     }
 
     #[test]
-    fn all_agents_are_primary_without_prompt_field() {
+    fn todos_are_enabled() {
+        let config = config(&test_plan());
+        assert_eq!(config["experimental"]["todo"], true);
+    }
+
+    #[test]
+    fn all_agents_are_primary_without_system_field() {
         let config = config(&test_plan());
         for agent in [
             SCOPING_AGENT,
@@ -297,10 +334,14 @@ mod tests {
             LANDING_AGENT,
         ] {
             let entry = config
-                .pointer(&format!("/agent/{agent}"))
+                .pointer(&format!("/agents/{agent}"))
                 .expect("agent present");
             assert_eq!(entry["mode"], "primary");
-            assert!(entry.get("prompt").is_none(), "{agent} must not set prompt");
+            assert!(entry.get("system").is_none(), "{agent} must not set system");
+            assert!(
+                entry.get("prompt").is_none(),
+                "{agent} must not set legacy prompt"
+            );
         }
     }
 
@@ -317,27 +358,25 @@ mod tests {
     }
 
     #[test]
-    fn scoping_allows_bash() {
+    fn scoping_allows_shell() {
         let config = config(&test_plan());
         assert_eq!(
-            effect_of(&config, SCOPING_AGENT, "bash", "cargo test"),
+            effect_of(&config, SCOPING_AGENT, "shell", "cargo test"),
             "allow"
         );
     }
 
     #[test]
-    fn scoping_task_allows_explore_and_scout() {
+    fn scoping_subagent_allows_only_explore() {
         let config = config(&test_plan());
-        for agent_type in ["explore", "scout"] {
+        assert_eq!(
+            effect_of(&config, SCOPING_AGENT, "subagent", "explore"),
+            "allow",
+            "explore should be allowed"
+        );
+        for agent_type in ["general", "scout", "unknown-type"] {
             assert_eq!(
-                effect_of(&config, SCOPING_AGENT, "task", agent_type),
-                "allow",
-                "{agent_type} should be allowed"
-            );
-        }
-        for agent_type in ["general", "unknown-type"] {
-            assert_eq!(
-                effect_of(&config, SCOPING_AGENT, "task", agent_type),
+                effect_of(&config, SCOPING_AGENT, "subagent", agent_type),
                 "deny",
                 "{agent_type} should be denied"
             );
@@ -345,14 +384,14 @@ mod tests {
     }
 
     #[test]
-    fn executing_allows_edits_and_bash() {
+    fn executing_allows_edits_and_shell() {
         let config = config(&test_plan());
         assert_eq!(
             effect_of(&config, EXECUTING_AGENT, "edit", "src/App.tsx"),
             "allow"
         );
         assert_eq!(
-            effect_of(&config, EXECUTING_AGENT, "bash", "cargo test"),
+            effect_of(&config, EXECUTING_AGENT, "shell", "cargo test"),
             "allow"
         );
     }
@@ -382,7 +421,7 @@ mod tests {
         let config = config(&test_plan());
         let plan = test_plan();
         assert_eq!(
-            keys_of(&config, SCOPING_AGENT, "edit"),
+            resources_of(&config, SCOPING_AGENT, "edit"),
             vec![
                 "*".to_string(),
                 plan.scope_glob(),
@@ -391,11 +430,11 @@ mod tests {
             ]
         );
         assert_eq!(
-            keys_of(&config, SCOPING_AGENT, "task"),
-            vec!["*".to_string(), "explore".to_string(), "scout".to_string()]
+            resources_of(&config, SCOPING_AGENT, "subagent"),
+            vec!["*".to_string(), "explore".to_string()]
         );
         assert_eq!(
-            keys_of(&config, EXECUTING_AGENT, "edit"),
+            resources_of(&config, EXECUTING_AGENT, "edit"),
             vec![
                 "*".to_string(),
                 ".samokod".to_string(),
@@ -405,7 +444,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            keys_of(&config, EVERGREENING_AGENT, "edit"),
+            resources_of(&config, EVERGREENING_AGENT, "edit"),
             vec![
                 "*".to_string(),
                 ".samokod".to_string(),
@@ -415,7 +454,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            keys_of(&config, LANDING_AGENT, "edit"),
+            resources_of(&config, LANDING_AGENT, "edit"),
             vec![
                 "*".to_string(),
                 STATE_DENY_GLOB.to_string(),
@@ -427,22 +466,18 @@ mod tests {
     #[test]
     fn scoping_and_executing_deny_question() {
         let config = config(&test_plan());
-        assert_eq!(
-            config["agent"][SCOPING_AGENT]["permission"]["question"],
-            "deny"
-        );
-        assert_eq!(
-            config["agent"][EXECUTING_AGENT]["permission"]["question"],
-            "deny"
-        );
-        assert_eq!(
-            config["agent"][EVERGREENING_AGENT]["permission"]["question"],
-            "deny"
-        );
-        assert_eq!(
-            config["agent"][LANDING_AGENT]["permission"]["question"],
-            "deny"
-        );
+        for agent in [
+            SCOPING_AGENT,
+            EXECUTING_AGENT,
+            EVERGREENING_AGENT,
+            LANDING_AGENT,
+        ] {
+            assert_eq!(
+                effect_of(&config, agent, "question", "*"),
+                "deny",
+                "{agent} should deny questions"
+            );
+        }
     }
 
     #[test]
@@ -466,10 +501,13 @@ mod tests {
             "deny"
         );
         assert_eq!(
-            effect_of(&config, LANDING_AGENT, "bash", "git rebase -i feature"),
+            effect_of(&config, LANDING_AGENT, "shell", "git rebase -i feature"),
             "allow"
         );
-        assert_eq!(config["agent"][LANDING_AGENT]["permission"]["task"], "deny");
+        assert_eq!(
+            effect_of(&config, LANDING_AGENT, "subagent", "explore"),
+            "deny"
+        );
     }
 
     #[test]
@@ -481,14 +519,14 @@ mod tests {
     }
 
     #[test]
-    fn evergreening_allows_edits_and_bash() {
+    fn evergreening_allows_edits_and_shell() {
         let config = config(&test_plan());
         assert_eq!(
             effect_of(&config, EVERGREENING_AGENT, "edit", "src/App.tsx"),
             "allow"
         );
         assert_eq!(
-            effect_of(&config, EVERGREENING_AGENT, "bash", "cargo test"),
+            effect_of(&config, EVERGREENING_AGENT, "shell", "cargo test"),
             "allow"
         );
     }
