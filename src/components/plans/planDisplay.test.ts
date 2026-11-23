@@ -127,6 +127,21 @@ describe("attentionFor", () => {
 				]),
 			),
 		).toBeNull();
+		expect(
+			attentionFor(
+				plan("wait", "scoping", [
+					testStatus("scoping", { working: true, approval: true }),
+				]),
+			),
+		).toBe("approval");
+		expect(
+			attentionFor(
+				plan("broke", "executing", [
+					testStatus("scoping"),
+					testStatus("executing", { working: true, failed: true }),
+				]),
+			),
+		).toBe("failed");
 	});
 
 	test("ignores finished plans", () => {

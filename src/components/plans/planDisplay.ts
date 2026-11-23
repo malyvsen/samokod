@@ -44,7 +44,7 @@ export function attentionFor(plan: PlanEntry): AttentionKind | null {
 	}
 	const role = latestRole(plan);
 	const status = plan.sessions.find((candidate) => candidate.role === role);
-	if (status === undefined || status.working) {
+	if (status === undefined) {
 		return null;
 	}
 	if (status.failed) {
@@ -52,6 +52,9 @@ export function attentionFor(plan: PlanEntry): AttentionKind | null {
 	}
 	if (status.approval) {
 		return "approval";
+	}
+	if (status.working) {
+		return null;
 	}
 	return "idle";
 }
