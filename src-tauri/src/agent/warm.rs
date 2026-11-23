@@ -34,7 +34,7 @@ impl AgentManager {
             );
             return Ok(());
         }
-        if super::rebasing_queue::is_held(&repo_root, &session) {
+        if super::queue::is_queued(&repo_root, &session) {
             log::debug!(
                 "skipping warm window={window} for {} {:?}: queued plan holds",
                 session.plan,

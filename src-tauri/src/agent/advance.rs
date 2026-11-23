@@ -19,7 +19,7 @@ use crate::opencode;
 use crate::plans::{self, Phase};
 use crate::types::{AgentError, PlansUpdate, SessionKey, SessionRole};
 
-use super::rebasing_queue;
+use super::queue;
 use super::session::ActivePlan;
 use super::{AgentManager, lock_backend};
 
@@ -69,8 +69,8 @@ impl AgentManager {
                         arrival_key(&repo_root, left).cmp(&arrival_key(&repo_root, right))
                     })
             });
-            let queued = rebasing_queue::sorted_queued_names(&repo_root);
-            let mutex_held = rebasing_queue::rebase_mutex_held(&repo_root);
+            let queued = queue::sorted_names(&repo_root);
+            let mutex_held = queue::mutex_held(&repo_root);
             let mut fired = false;
             for plan in &scanned {
                 let view = self.plan_view(window, &repo_root, plan, &queued);
@@ -160,7 +160,7 @@ impl AgentManager {
             Phase::Scoping | Phase::Completed | Phase::Cancelled => (false, false, false),
         };
         let queue_position = match plan.phase {
-            Phase::Queued => rebasing_queue::position_in(queued, &plan.name),
+            Phase::Queued => queue::position_in(queued, &plan.name),
             _ => None,
         };
         let started = match plan.phase {
@@ -355,7 +355,7 @@ impl AgentManager {
                 // plan with `StartRebasing` on a later pass. Queued plans
                 // carry no live session; the executing key below only gates
                 // a racing turn.
-                if rebasing_queue::rebase_mutex_held(&repo_root) {
+                if queue::mutex_held(&repo_root) {
                     return Err(AgentError::RequestFailed {
                         raw: "another plan is already rebasing".to_string(),
                     });
@@ -460,26 +460,38 @@ impl AgentManager {
                 );
                 Ok(self.plans_update(window))
             }
-            Transition::FinishEvergreening { plan } => {
-                let session = SessionKey {
-                    plan: plan.clone(),
-                    role: SessionRole::Evergreening,
-                };
-                super::ensure_idle(&self.state, window, &session)?;
+            Transition::Finish { plan } => {
                 let (repo_root, _) =
                     self.reopen_snapshot(window)
                         .ok_or_else(|| AgentError::NoSession {
                             raw: "open a repository first".to_string(),
                         })?;
-                let from = plans::PlanRef {
-                    name: plan.clone(),
-                    phase: Phase::Evergreening,
-                };
-                if !from.path(&repo_root).is_dir() {
-                    return Err(AgentError::RequestFailed {
+                // Finishing holds the mutex either way: rebasing finishes
+                // directly, evergreening finishes after cleanup. Names stay
+                // unique across phases, so the plan's current phase decides
+                // the idle gate and the follow selection.
+                let from = [Phase::Rebasing, Phase::Evergreening]
+                    .into_iter()
+                    .map(|phase| plans::PlanRef {
+                        name: plan.clone(),
+                        phase,
+                    })
+                    .find(|candidate| candidate.path(&repo_root).is_dir())
+                    .ok_or_else(|| AgentError::RequestFailed {
                         raw: "no active plan to complete".to_string(),
-                    });
-                }
+                    })?;
+                let role = match from.phase {
+                    Phase::Rebasing => SessionRole::Rebasing,
+                    _ => SessionRole::Evergreening,
+                };
+                super::ensure_idle(
+                    &self.state,
+                    window,
+                    &SessionKey {
+                        plan: plan.clone(),
+                        role,
+                    },
+                )?;
                 let status = self.worktree_status_for(window, &repo_root, &from.name)?;
                 super::gate_rebasing(status.dirty, status.ffable, super::RebasingStep::Finish)?;
                 crate::worktrees::fast_forward(
@@ -496,48 +508,7 @@ impl AgentManager {
                     &plan,
                     SessionKey {
                         plan: next.name,
-                        role: SessionRole::Evergreening,
-                    },
-                );
-                Ok(self.plans_update(window))
-            }
-            Transition::FinishRebasing { plan } => {
-                let session = SessionKey {
-                    plan: plan.clone(),
-                    role: SessionRole::Rebasing,
-                };
-                super::ensure_idle(&self.state, window, &session)?;
-                let (repo_root, _) =
-                    self.reopen_snapshot(window)
-                        .ok_or_else(|| AgentError::NoSession {
-                            raw: "open a repository first".to_string(),
-                        })?;
-                let from = plans::PlanRef {
-                    name: plan.clone(),
-                    phase: Phase::Rebasing,
-                };
-                if !from.path(&repo_root).is_dir() {
-                    return Err(AgentError::RequestFailed {
-                        raw: "no active plan to complete".to_string(),
-                    });
-                }
-                let status = self.worktree_status_for(window, &repo_root, &from.name)?;
-                super::gate_rebasing(status.dirty, status.ffable, super::RebasingStep::Finish)?;
-                crate::worktrees::fast_forward(
-                    &repo_root,
-                    &status.target_branch,
-                    &status.worktree_branch,
-                )?;
-                self.remove_worktree(window, &repo_root, &from.name, false)?;
-                let next = plans::finish_rebasing(&repo_root, &from)?;
-                self.drop_plan_lives(window, &from.name).await;
-                self.carry_prompted(window, &from.name, &next.name);
-                self.select_if_viewed(
-                    window,
-                    &plan,
-                    SessionKey {
-                        plan: next.name,
-                        role: SessionRole::Rebasing,
+                        role,
                     },
                 );
                 Ok(self.plans_update(window))
@@ -594,7 +565,10 @@ impl AgentManager {
         text: String,
     ) -> Result<PlansUpdate, AgentError> {
         let plan_name = active.name.clone();
-        let agent = opencode::agent_for(active.phase);
+        let role = active.role().ok_or_else(|| AgentError::RequestFailed {
+            raw: "cannot open a session for a finished plan".to_string(),
+        })?;
+        let agent = opencode::agent_for(role);
         let (connection, session_id, key) = self
             .spawn_session(window, repo_root, branch, active, agent)
             .await?;
@@ -615,8 +589,8 @@ impl AgentManager {
 /// `RebaseRebasing` re-runs it once started; `BeginEvergreening` moves a
 /// rebasing plan into cleanup and spawns the evergreening agent;
 /// `BackToRebasing` moves a diverged evergreening plan back for another
-/// rebase; `FinishRebasing` and `FinishEvergreening` fast-forward the target
-/// and complete.
+/// rebase; `Finish` fast-forwards the target and completes from either
+/// rebase-held phase.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Transition {
     Execute { plan: String },
@@ -626,8 +600,7 @@ pub(crate) enum Transition {
     RebaseRebasing { plan: String },
     BeginEvergreening { plan: String },
     BackToRebasing { plan: String },
-    FinishRebasing { plan: String },
-    FinishEvergreening { plan: String },
+    Finish { plan: String },
 }
 
 impl Transition {
@@ -640,8 +613,7 @@ impl Transition {
             | Transition::RebaseRebasing { plan }
             | Transition::BeginEvergreening { plan }
             | Transition::BackToRebasing { plan }
-            | Transition::FinishRebasing { plan }
-            | Transition::FinishEvergreening { plan } => plan,
+            | Transition::Finish { plan } => plan,
         }
     }
 }
@@ -707,7 +679,7 @@ pub(crate) fn next_action(view: &PlanView, rebase_mutex_held: bool) -> Option<Tr
                         plan: view.name.clone(),
                     })
                 } else {
-                    Some(Transition::FinishRebasing {
+                    Some(Transition::Finish {
                         plan: view.name.clone(),
                     })
                 }
@@ -725,7 +697,7 @@ pub(crate) fn next_action(view: &PlanView, rebase_mutex_held: bool) -> Option<Tr
             if !view.started || view.dirty {
                 None
             } else if view.ffable {
-                Some(Transition::FinishEvergreening {
+                Some(Transition::Finish {
                     plan: view.name.clone(),
                 })
             } else {
@@ -761,7 +733,7 @@ fn require_rebasing_plan(
     };
     if !from.path(repo_root).is_dir() {
         return Err(AgentError::RequestFailed {
-            raw: "no active plan to complete".to_string(),
+            raw: "no rebasing plan to rebase".to_string(),
         });
     }
     Ok(from)
@@ -972,7 +944,7 @@ mod tests {
         };
         assert_eq!(
             next_action(&no_intent, false),
-            Some(Transition::FinishRebasing {
+            Some(Transition::Finish {
                 plan: "a".to_string()
             })
         );
@@ -982,14 +954,14 @@ mod tests {
         };
         assert_eq!(
             next_action(&empty, false),
-            Some(Transition::FinishRebasing {
+            Some(Transition::Finish {
                 plan: "b".to_string()
             })
         );
         // Finishing never needs the mutex: the plan already holds it.
         assert_eq!(
             next_action(&empty, true),
-            Some(Transition::FinishRebasing {
+            Some(Transition::Finish {
                 plan: "b".to_string()
             })
         );
@@ -1032,7 +1004,7 @@ mod tests {
         };
         assert_eq!(
             next_action(&done, false),
-            Some(Transition::FinishEvergreening {
+            Some(Transition::Finish {
                 plan: "a".to_string()
             })
         );

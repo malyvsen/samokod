@@ -108,7 +108,7 @@ impl AgentManager {
         // fast instead of minting a second rebase. Cancel and finish paths
         // stay allowed.
         if let Some((repo_root, _)) = self.reopen_snapshot(window)
-            && super::rebasing_queue::is_held(&repo_root, &session)
+            && super::queue::is_queued(&repo_root, &session)
         {
             return Err(AgentError::RequestFailed {
                 raw: "rebasing is queued, waiting its turn".to_string(),

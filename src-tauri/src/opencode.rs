@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-use crate::plans::{Phase, PlanRef};
+use crate::plans::PlanRef;
+use crate::types::SessionRole;
 
 pub const SCOPING_AGENT: &str = "samokod-scoping";
 pub const EXECUTING_AGENT: &str = "samokod-executing";
@@ -18,15 +19,14 @@ const STATE_DENY_GLOB: &str = ".samokod/plans/**/state.json";
 /// edit them, denied last so deny wins.
 const ATTACHMENTS_DENY_GLOB: &str = ".samokod/plans/**/attachments/**";
 
-/// Agent id for a phase. Pure.
-pub fn agent_for(phase: Phase) -> &'static str {
-    match phase {
-        Phase::Scoping => SCOPING_AGENT,
-        Phase::Executing => EXECUTING_AGENT,
-        Phase::Queued => EXECUTING_AGENT,
-        Phase::Evergreening => EVERGREENING_AGENT,
-        Phase::Rebasing => REBASING_AGENT,
-        Phase::Completed | Phase::Cancelled => EXECUTING_AGENT,
+/// Agent id for a session role. Queued plans carry the executing role
+/// until promotion, so no queued case exists here. Pure.
+pub fn agent_for(role: SessionRole) -> &'static str {
+    match role {
+        SessionRole::Scoping => SCOPING_AGENT,
+        SessionRole::Executing => EXECUTING_AGENT,
+        SessionRole::Evergreening => EVERGREENING_AGENT,
+        SessionRole::Rebasing => REBASING_AGENT,
     }
 }
 
@@ -242,7 +242,7 @@ pub fn rebasing_first_message(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plans::STATE_FILE;
+    use crate::plans::{Phase, STATE_FILE};
 
     fn test_plan() -> PlanRef {
         PlanRef {
@@ -513,10 +513,10 @@ mod tests {
 
     #[test]
     fn rebasing_plans_run_the_rebasing_agent() {
-        assert_eq!(agent_for(Phase::Rebasing), REBASING_AGENT);
-        assert_eq!(agent_for(Phase::Evergreening), EVERGREENING_AGENT);
-        assert_eq!(agent_for(Phase::Executing), EXECUTING_AGENT);
-        assert_eq!(agent_for(Phase::Scoping), SCOPING_AGENT);
+        assert_eq!(agent_for(SessionRole::Rebasing), REBASING_AGENT);
+        assert_eq!(agent_for(SessionRole::Evergreening), EVERGREENING_AGENT);
+        assert_eq!(agent_for(SessionRole::Executing), EXECUTING_AGENT);
+        assert_eq!(agent_for(SessionRole::Scoping), SCOPING_AGENT);
     }
 
     #[test]

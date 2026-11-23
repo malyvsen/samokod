@@ -15,7 +15,7 @@ mod advance;
 mod config;
 mod permissions;
 mod plans_list;
-mod rebasing_queue;
+mod queue;
 mod session;
 mod session_ids;
 mod start;
@@ -504,7 +504,10 @@ impl AgentManager {
             for plan in &scanned {
                 if !matches!(
                     plan.phase,
-                    plans::Phase::Executing | plans::Phase::Evergreening
+                    plans::Phase::Executing
+                        | plans::Phase::Queued
+                        | plans::Phase::Rebasing
+                        | plans::Phase::Evergreening
                 ) {
                     continue;
                 }
@@ -1132,7 +1135,7 @@ fn gate_rebasing(dirty: bool, ffable: bool, step: RebasingStep) -> Result<(), Ag
         RebasingStep::Start => {
             if ffable {
                 return Err(AgentError::RequestFailed {
-                    raw: "already fast-forwardable, land it directly".to_string(),
+                    raw: "already fast-forwardable, finish it directly".to_string(),
                 });
             }
             Ok(())
@@ -1892,7 +1895,7 @@ mod tests {
         write_plan_dir(root, plans::Phase::Rebasing, "m", Some("M"));
         let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].sessions.len(), 4);
+        assert_eq!(entries[0].sessions.len(), 3);
         assert_eq!(
             most_recent_key(&entries),
             Some(SessionKey {
@@ -1910,7 +1913,7 @@ mod tests {
         write_plan_dir(root, plans::Phase::Evergreening, "g", Some("G"));
         let entries = sorted_entries(root, "", &HashMap::new(), &HashMap::new());
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].sessions.len(), 3);
+        assert_eq!(entries[0].sessions.len(), 4);
         assert_eq!(
             most_recent_key(&entries),
             Some(SessionKey {

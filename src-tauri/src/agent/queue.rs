@@ -1,7 +1,7 @@
-// Queued order plus the rebase mutex: oldest-first waiters in `queued/`,
+// Waiting line for finished work: oldest-first waiters in `queued/`,
 // at most one plan in `rebasing/` or `evergreening/` at a time. The pump
 // promotes queued plans while the mutex is free; queued plans hold with no
-// live session. This module owns that order plus the shared held-guard:
+// live session. This module owns that order plus the shared queued-guard:
 // warm, prompts, and history share it instead of ad-hoc phase checks.
 use std::path::Path;
 
@@ -17,7 +17,7 @@ pub(crate) fn position_in(queue: &[String], plan_name: &str) -> Option<usize> {
 /// True when a session must not mint a live agent: its plan sits in
 /// `queued/`, which owns no live session. Warm, prompts, and history share
 /// this instead of ad-hoc phase checks.
-pub(crate) fn is_held(repo_root: &Path, session: &SessionKey) -> bool {
+pub(crate) fn is_queued(repo_root: &Path, session: &SessionKey) -> bool {
     plans::PlanRef {
         name: session.plan.clone(),
         phase: Phase::Queued,
@@ -28,14 +28,14 @@ pub(crate) fn is_held(repo_root: &Path, session: &SessionKey) -> bool {
 
 /// True when any plan sits in `rebasing/` or `evergreening/`. Promotion
 /// from queued is gated on this, so at most one plan rebases at a time.
-pub(crate) fn rebase_mutex_held(repo_root: &Path) -> bool {
+pub(crate) fn mutex_held(repo_root: &Path) -> bool {
     plans::scan_plans(repo_root)
         .iter()
         .any(|plan| matches!(plan.phase, Phase::Rebasing | Phase::Evergreening))
 }
 
 /// Queued names oldest first: `(arrival, name)` order, unstamped last.
-pub(crate) fn sorted_queued_names(repo_root: &Path) -> Vec<String> {
+pub(crate) fn sorted_names(repo_root: &Path) -> Vec<String> {
     let entries: Vec<(String, i64)> = plans::scan_plans(repo_root)
         .into_iter()
         .filter(|plan| plan.phase == Phase::Queued)
@@ -123,7 +123,7 @@ mod tests {
         plans::ensure_structure(root).expect("ensure");
         queued_dir(root, "2026-10-11.02-00-00.old", 100);
         queued_dir(root, "2026-10-11.02-00-01.new", 200);
-        let queue = sorted_queued_names(root);
+        let queue = sorted_names(root);
         assert_eq!(
             queue,
             vec![
@@ -141,30 +141,30 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
-        assert!(!rebase_mutex_held(root));
+        assert!(!mutex_held(root));
         queued_dir(root, "2026-10-11.02-00-00.waiting", 100);
-        assert!(!rebase_mutex_held(root));
+        assert!(!mutex_held(root));
         let rebasing = plans::PlanRef {
             name: "2026-10-11.02-00-01.active".to_string(),
             phase: plans::Phase::Rebasing,
         };
         std::fs::create_dir_all(rebasing.path(root)).expect("mkdir");
-        assert!(rebase_mutex_held(root));
+        assert!(mutex_held(root));
         let greening = plans::PlanRef {
             name: "2026-10-11.02-00-02.green".to_string(),
             phase: plans::Phase::Evergreening,
         };
         std::fs::create_dir_all(greening.path(root)).expect("mkdir");
-        assert!(rebase_mutex_held(root));
+        assert!(mutex_held(root));
     }
 
     #[test]
-    fn held_covers_queued_plans_without_live_sessions() {
+    fn queued_plans_hold_without_live_sessions() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         plans::ensure_structure(root).expect("ensure");
         queued_dir(root, "2026-10-11.02-00-01.new", 200);
-        assert!(is_held(root, &queued_session("2026-10-11.02-00-01.new")));
-        assert!(!is_held(root, &queued_session("missing")));
+        assert!(is_queued(root, &queued_session("2026-10-11.02-00-01.new")));
+        assert!(!is_queued(root, &queued_session("missing")));
     }
 }

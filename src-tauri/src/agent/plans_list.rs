@@ -378,22 +378,22 @@ fn defaults_for(repo_root: &Path) -> RepoDefaults {
     }
 }
 
-/// Most-recent session across the sorted plans: the rebasing session when
-/// the plan owns one, else evergreening, else executing, else scoping.
+/// Most-recent session across the sorted plans: the evergreening session
+/// when the plan owns one, else rebasing, else executing, else scoping.
 pub(crate) fn most_recent_key(plans: &[PlanEntry]) -> Option<SessionKey> {
     plans.first().map(|entry| {
         let role = if entry
             .sessions
             .iter()
-            .any(|status| status.role == SessionRole::Rebasing)
-        {
-            SessionRole::Rebasing
-        } else if entry
-            .sessions
-            .iter()
             .any(|status| status.role == SessionRole::Evergreening)
         {
             SessionRole::Evergreening
+        } else if entry
+            .sessions
+            .iter()
+            .any(|status| status.role == SessionRole::Rebasing)
+        {
+            SessionRole::Rebasing
         } else if entry
             .sessions
             .iter()

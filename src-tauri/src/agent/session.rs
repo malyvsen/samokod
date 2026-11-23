@@ -96,19 +96,20 @@ impl ActivePlan {
         }
     }
 
+    pub(crate) fn role(&self) -> Option<SessionRole> {
+        match self.phase {
+            plans::Phase::Scoping => Some(SessionRole::Scoping),
+            plans::Phase::Executing => Some(SessionRole::Executing),
+            plans::Phase::Evergreening => Some(SessionRole::Evergreening),
+            plans::Phase::Rebasing => Some(SessionRole::Rebasing),
+            plans::Phase::Queued | plans::Phase::Completed | plans::Phase::Cancelled => None,
+        }
+    }
+
     pub(crate) fn key(&self) -> Option<SessionKey> {
-        let role = match self.phase {
-            plans::Phase::Scoping => SessionRole::Scoping,
-            plans::Phase::Executing => SessionRole::Executing,
-            plans::Phase::Evergreening => SessionRole::Evergreening,
-            plans::Phase::Rebasing => SessionRole::Rebasing,
-            plans::Phase::Queued | plans::Phase::Completed | plans::Phase::Cancelled => {
-                return None;
-            }
-        };
         Some(SessionKey {
             plan: self.name.clone(),
-            role,
+            role: self.role()?,
         })
     }
 
@@ -475,7 +476,7 @@ impl AgentManager {
         // path: the transition core marks their prefixed flag, since their
         // role already went out as the full first turn.
         plan.prefixed = stored_prefixed.unwrap_or(plan.prefixed);
-        let agent = opencode::agent_for(plan.phase);
+        let agent = opencode::agent_for(key.role);
         let (connection, session_id, _) = self
             .spawn_session(window, &repo_root, &branch, plan, agent)
             .await?;
@@ -680,7 +681,7 @@ impl AgentManager {
             return Err(AgentError::RequestFailed { raw });
         }
         if let Some((repo_root, _)) = self.reopen_snapshot(window)
-            && super::rebasing_queue::is_held(&repo_root, &session)
+            && super::queue::is_queued(&repo_root, &session)
         {
             history_guard.finish();
             log::info!(
