@@ -477,23 +477,25 @@ pub(crate) fn handle_notification(
                 log::warn!("tool call {} has no live session", call.tool_call_id);
                 return;
             };
-            // Todo-carrying calls render as a TODOS block instead of a `▸` line.
-            if let Some(fresh) = todos_from_call(merged.raw_input.as_ref()) {
+            // Todos and the tool line both emit so `task`/`explore` steps
+            // carrying a todos-shaped payload stay visible.
+            let fresh = todos_from_call(merged.name.as_deref(), merged.raw_input.as_ref());
+            let line = crate::updates::format_tool_line(&merged);
+            emit_event(
+                app,
+                window,
+                AppEvent::ToolLine {
+                    session: key.clone(),
+                    line,
+                },
+            );
+            if let Some(fresh) = fresh {
                 log::debug!("todo call {} todos {}", call.tool_call_id, fresh.len());
                 update_todos(state, app, window, key, fresh, expected);
-            } else {
-                let line = crate::updates::format_tool_line(&merged);
-                emit_event(
-                    app,
-                    window,
-                    AppEvent::ToolLine {
-                        session: key.clone(),
-                        line,
-                    },
-                );
             }
         }
         acp::SessionUpdate::ToolCallUpdate(update) => {
+            let tool_name_update = update.fields.name.clone();
             let merged = lock_backend(state).and_then(|mut backend| {
                 backend
                     .windows
@@ -516,21 +518,24 @@ pub(crate) fn handle_notification(
                 log::warn!("tool call {} has no live session", update.tool_call_id);
                 return;
             };
-            if let Some(fresh) =
-                todos_from_update(merged.raw_input.as_ref(), merged.raw_output.as_ref())
-            {
+            let tool_name = tool_name_update.as_deref().or(merged.name.as_deref());
+            let fresh = todos_from_update(
+                tool_name,
+                merged.raw_input.as_ref(),
+                merged.raw_output.as_ref(),
+            );
+            let line = crate::updates::format_tool_line(&merged);
+            emit_event(
+                app,
+                window,
+                AppEvent::ToolLine {
+                    session: key.clone(),
+                    line,
+                },
+            );
+            if let Some(fresh) = fresh {
                 log::debug!("todo update {} todos {}", update.tool_call_id, fresh.len());
                 update_todos(state, app, window, key, fresh, expected);
-            } else {
-                let line = crate::updates::format_tool_line(&merged);
-                emit_event(
-                    app,
-                    window,
-                    AppEvent::ToolLine {
-                        session: key.clone(),
-                        line,
-                    },
-                );
             }
         }
         acp::SessionUpdate::UsageUpdate(update) => {

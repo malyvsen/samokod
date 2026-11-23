@@ -301,6 +301,18 @@ mod tests {
     }
 
     #[test]
+    fn task_call_with_todos_payload_stays_a_task_line() {
+        let call = ToolCall::new("id-1", "Explore plans UI")
+            .name("task")
+            .kind(ToolKind::Other)
+            .raw_input(serde_json::json!({"todos": [
+                {"content": "a", "status": "pending"},
+            ]}))
+            .status(ToolCallStatus::Completed);
+        assert_eq!(format_tool_line(&call).text, "task: Explore plans UI");
+    }
+
+    #[test]
     fn skill_and_fetch_bodies_normalize() {
         let skill = ToolCall::new("id-1", "Loaded skill: repo-news")
             .name("skill")

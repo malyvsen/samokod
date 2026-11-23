@@ -2,16 +2,30 @@
 use crate::types::{TodoChangeView, TodoStatus, TodoView};
 
 /// Extract a todo list from a `tool_call` raw input, if it carries one.
-pub fn todos_from_call(raw_input: Option<&serde_json::Value>) -> Option<Vec<TodoView>> {
+/// Only the `todowrite` tool (enabled by `experimental.todo`) carries todos;
+/// every other tool name - including `task`, `subagent`, `explore` and
+/// `None` - returns `None` so subagent steps stay visible as tool lines.
+pub fn todos_from_call(
+    tool_name: Option<&str>,
+    raw_input: Option<&serde_json::Value>,
+) -> Option<Vec<TodoView>> {
+    if tool_name != Some("todowrite") {
+        return None;
+    }
     raw_input.and_then(parse_todos)
 }
 
 /// Extract a todo list from a `tool_call_update`, preferring the raw output
-/// over the raw input, if either carries one.
+/// over the raw input, if either carries one. Same `todowrite` gate as
+/// `todos_from_call`.
 pub fn todos_from_update(
+    tool_name: Option<&str>,
     raw_input: Option<&serde_json::Value>,
     raw_output: Option<&serde_json::Value>,
 ) -> Option<Vec<TodoView>> {
+    if tool_name != Some("todowrite") {
+        return None;
+    }
     raw_output
         .and_then(parse_todos)
         .or_else(|| raw_input.and_then(parse_todos))
@@ -157,15 +171,33 @@ mod tests {
     fn call_extracts_input() {
         let todos = todo_items();
         let raw = json!({"todos": todos});
-        let fresh = todos_from_call(Some(&raw)).expect("input carries todos");
+        let fresh = todos_from_call(Some("todowrite"), Some(&raw)).expect("input carries todos");
         assert_eq!(fresh.len(), 2);
         assert_eq!(fresh[0].content, "a");
     }
 
     #[test]
     fn call_ignores_empty_input() {
-        assert!(todos_from_call(None).is_none());
-        assert!(todos_from_call(Some(&json!({}))).is_none());
+        assert!(todos_from_call(Some("todowrite"), None).is_none());
+        assert!(todos_from_call(Some("todowrite"), Some(&json!({}))).is_none());
+    }
+
+    #[test]
+    fn call_ignores_non_todowrite_tools() {
+        let todos = todo_items();
+        let raw = json!({"todos": todos});
+        for tool in [
+            None,
+            Some("task"),
+            Some("explore"),
+            Some("subagent"),
+            Some(""),
+        ] {
+            assert!(
+                todos_from_call(tool, Some(&raw)).is_none(),
+                "tool {tool:?} must not parse todos"
+            );
+        }
     }
 
     #[test]
@@ -173,7 +205,8 @@ mod tests {
         let input = json!({"todos": [{"content": "a", "status": "pending"}]});
         let output =
             json!({"output": "…", "metadata": {"todos": todo_items(), "truncated": false}});
-        let fresh = todos_from_update(Some(&input), Some(&output)).expect("output carries todos");
+        let fresh = todos_from_update(Some("todowrite"), Some(&input), Some(&output))
+            .expect("output carries todos");
         assert_eq!(fresh.len(), 2);
         assert_eq!(fresh[0].content, "a");
     }
@@ -181,14 +214,35 @@ mod tests {
     #[test]
     fn update_falls_back_to_input() {
         let input = json!({"todos": todo_items()});
-        let fresh = todos_from_update(Some(&input), None).expect("input carries todos");
+        let fresh =
+            todos_from_update(Some("todowrite"), Some(&input), None).expect("input carries todos");
         assert_eq!(fresh.len(), 2);
     }
 
     #[test]
     fn update_ignores_payloads_without_todos() {
-        assert!(todos_from_update(None, None).is_none());
-        assert!(todos_from_update(Some(&json!({})), Some(&json!({"output": "…"}))).is_none());
+        assert!(todos_from_update(Some("todowrite"), None, None).is_none());
+        assert!(
+            todos_from_update(
+                Some("todowrite"),
+                Some(&json!({})),
+                Some(&json!({"output": "…"}))
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn update_ignores_non_todowrite_tools() {
+        let input = json!({"todos": todo_items()});
+        let output =
+            json!({"output": "…", "metadata": {"todos": todo_items(), "truncated": false}});
+        for tool in [None, Some("task"), Some("explore"), Some("subagent")] {
+            assert!(
+                todos_from_update(tool, Some(&input), Some(&output)).is_none(),
+                "tool {tool:?} must not parse todos"
+            );
+        }
     }
 
     #[test]
