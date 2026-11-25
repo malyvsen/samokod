@@ -854,6 +854,8 @@ export function App() {
 									onRetry={readOnly ? null : handleRetry}
 									onAnswer={handleAnswer}
 									working={chat?.working ?? false}
+									live={chat?.live ?? null}
+									workingSince={chat?.workingSince ?? null}
 									onStop={readOnly ? null : handleStop}
 									session={selectedKey}
 									onHistoryRetry={

@@ -8,7 +8,7 @@ import type {
 	ToolStatus,
 } from "../bindings";
 import type { SessionStart } from "../sessions/store";
-import { thinkingSeconds } from "../sessions/thoughts";
+import { type LiveThought, thinkingSeconds } from "../sessions/thoughts";
 import type { RunItem, TranscriptItem } from "../types";
 import {
 	CollapseControl,
@@ -28,6 +28,8 @@ export function Transcript({
 	onAnswer,
 	onHistoryRetry = null,
 	working = false,
+	live = null,
+	workingSince = null,
 	onStop = null,
 	children,
 	session,
@@ -40,6 +42,8 @@ export function Transcript({
 	onAnswer: (session: SessionKey, toolCallId: string, optionId: string) => void;
 	onHistoryRetry?: (() => void) | null;
 	working?: boolean;
+	live?: LiveThought | null;
+	workingSince?: number | null;
 	onStop?: (() => void) | null;
 	children?: ReactNode;
 	session: SessionKey | null;
@@ -47,8 +51,28 @@ export function Transcript({
 	const showLead =
 		lead !== null &&
 		!items.some((item) => item.kind === "user" && item.text === lead);
-	const groups = groupRuns(items);
 	const now = useNow(working);
+	const liveTurn = working && workingSince !== null;
+	const displayItems =
+		live !== null && liveTurn
+			? [
+					...items,
+					{
+						kind: "thought" as const,
+						id: "__live__",
+						ms: now - live.startedAt,
+						text: live.text,
+						at: now,
+					},
+				]
+			: items;
+	const groups = groupRuns(displayItems);
+	const lastGroup = groups[groups.length - 1];
+	const showPlaceholder =
+		liveTurn &&
+		(lastGroup === undefined ||
+			(lastGroup.kind !== "run" &&
+				(lastGroup.kind !== "message" || lastGroup.item.kind !== "agent")));
 	// Bind the owning session once so approval cards answer their own
 	// session. A null session disables the card, matching onRetry/onStop.
 	const boundAnswer =
@@ -75,7 +99,7 @@ export function Transcript({
 							items={group.items}
 							onRetry={onRetry}
 							onAnswer={boundAnswer}
-							isLive={working && index === groups.length - 1}
+							isLive={liveTurn && index === groups.length - 1}
 							now={now}
 							onStop={onStop}
 						/>
@@ -87,6 +111,17 @@ export function Transcript({
 							onAnswer={boundAnswer}
 						/>
 					),
+				)}
+				{showPlaceholder && (
+					<WorkBox
+						key="__live-placeholder__"
+						items={[]}
+						onRetry={onRetry}
+						onAnswer={boundAnswer}
+						isLive
+						now={now}
+						onStop={onStop}
+					/>
 				)}
 				{start?.kind === "failed" && (
 					<ErrorBar
@@ -146,8 +181,8 @@ function WorkBox({
 			? null
 			: `${(summary.durationMs / 1000).toFixed(1)}s`;
 	const verb = isLive ? "Working" : "Worked";
-	const prefix =
-		duration === null ? `${verb} · ` : `${verb} for ${duration} · `;
+	const base = duration === null ? verb : `${verb} for ${duration}`;
+	const prefix = summary.entries.length === 0 ? base : `${base} · `;
 	const showReview = isLive && hasUnresolvedApproval;
 	const showStop = isLive && onStop !== null;
 

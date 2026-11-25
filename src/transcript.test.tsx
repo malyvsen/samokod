@@ -388,6 +388,7 @@ describe("transcript thought rows", () => {
 					onRetry={vi.fn()}
 					onAnswer={vi.fn()}
 					working
+					workingSince={1000}
 					session={SESSION}
 				/>,
 			);
@@ -1149,6 +1150,7 @@ describe("transcript approval sessions", () => {
 				onAnswer={vi.fn()}
 				session={SESSION}
 				working
+				workingSince={1000}
 				onStop={vi.fn()}
 			/>,
 		);
@@ -1177,6 +1179,7 @@ describe("transcript approval sessions", () => {
 				onAnswer={vi.fn()}
 				session={SESSION}
 				working
+				workingSince={1000}
 				onStop={vi.fn()}
 			/>,
 		);
@@ -1189,5 +1192,135 @@ describe("transcript approval sessions", () => {
 		).toBeInTheDocument();
 		const detail = container.querySelector(".work .detail");
 		expect(detail?.getAttribute("hidden")).not.toBeNull();
+	});
+});
+
+describe("transcript live ack", () => {
+	function userOnly() {
+		return [{ kind: "user" as const, id: "u1", text: "hi" }];
+	}
+
+	function agentOnly() {
+		return [{ kind: "agent" as const, id: "a1", text: "hello" }];
+	}
+
+	test("working without ack renders no box", () => {
+		const { container } = render(
+			<Transcript
+				items={userOnly()}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				session={SESSION}
+				working
+				workingSince={null}
+			/>,
+		);
+		expect(container.querySelector(".work")).toBeNull();
+	});
+
+	test("acked user-only renders a Working box", () => {
+		const { container } = render(
+			<Transcript
+				items={userOnly()}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				session={SESSION}
+				working
+				workingSince={1000}
+				onStop={vi.fn()}
+			/>,
+		);
+		const box = container.querySelector(".work");
+		expect(box).not.toBeNull();
+		expect(box?.querySelector(".summary .txt")?.textContent).toContain(
+			"Working",
+		);
+	});
+
+	test("acked pending live joins the trailing run as think", () => {
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(5000);
+		try {
+			const { container } = render(
+				<Transcript
+					items={[
+						{ kind: "user", id: "u1", text: "hi" },
+						{
+							kind: "tool",
+							id: "t1",
+							line: {
+								id: "l1",
+								text: "read: a",
+								status: "completed",
+								label: "read",
+							},
+							at: 4000,
+						},
+					]}
+					start={IDLE}
+					repoLabel="~/repo"
+					onRetry={vi.fn()}
+					onAnswer={vi.fn()}
+					session={SESSION}
+					working
+					workingSince={1000}
+					live={{ startedAt: 4500, updatedAt: 4500, text: "hmm" }}
+				/>,
+			);
+			const txt =
+				container.querySelector(".work .summary .txt")?.textContent ?? "";
+			expect(txt).toContain("Working");
+			expect(txt).toContain("1x think");
+			expect(txt).toContain("1x read");
+		} finally {
+			nowSpy.mockRestore();
+		}
+	});
+
+	test("acked agent-only without live renders no box", () => {
+		const { container } = render(
+			<Transcript
+				items={agentOnly()}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				session={SESSION}
+				working
+				workingSince={1000}
+			/>,
+		);
+		expect(container.querySelector(".work")).toBeNull();
+		expect(screen.getByText("hello")).toBeInTheDocument();
+	});
+
+	test("live thought after agent text renders its own trailing box", () => {
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(5000);
+		try {
+			const { container } = render(
+				<Transcript
+					items={agentOnly()}
+					start={IDLE}
+					repoLabel="~/repo"
+					onRetry={vi.fn()}
+					onAnswer={vi.fn()}
+					session={SESSION}
+					working
+					workingSince={1000}
+					live={{ startedAt: 4500, updatedAt: 4500, text: "hmm" }}
+				/>,
+			);
+			const boxes = container.querySelectorAll(".work");
+			expect(boxes).toHaveLength(1);
+			const txt =
+				container.querySelector(".work .summary .txt")?.textContent ?? "";
+			expect(txt).toContain("Working");
+			expect(txt).toContain("1x think");
+		} finally {
+			nowSpy.mockRestore();
+		}
 	});
 });
