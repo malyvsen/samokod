@@ -40,7 +40,9 @@ export function SessionRow({
 				<span className="sess-tip" aria-hidden="true">
 					<span className="costline">
 						<span>{formatCost(status.spend.cost ?? 0)}</span>
-						<span>{formatContext(status.spend.ctx_pct ?? 0)}</span>
+						{status.live ? (
+							<span>{formatContext(status.spend.ctx_pct ?? 0)}</span>
+						) : null}
 					</span>
 				</span>
 			</div>

@@ -1000,6 +1000,7 @@ describe("plans panel", () => {
 				[
 					testStatus("scoping"),
 					testStatus("executing", {
+						live: true,
 						spend: { cost: 1.24, ctx_pct: 38.4 },
 						todos: [],
 					}),
@@ -1014,6 +1015,53 @@ describe("plans panel", () => {
 			expect(tips.length).toBeGreaterThan(0);
 			expect(screen.getAllByText("$1.24").length).toBeGreaterThan(0);
 			expect(screen.getAllByText("38% context").length).toBeGreaterThan(0);
+		});
+
+		test("hover tooltip hides context on inactive sessions", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing", {
+						live: false,
+						spend: { cost: 1.24, ctx_pct: 38.4 },
+						todos: [],
+					}),
+				],
+			);
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "executing" })}
+				/>,
+			);
+			expect(screen.getAllByText("$1.24").length).toBeGreaterThan(0);
+			expect(screen.queryByText(/context/)).toBeNull();
+		});
+
+		test("hover tooltip shows zero context for live sessions", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing", {
+						live: true,
+						spend: { cost: 0, ctx_pct: 0 },
+						todos: [],
+					}),
+				],
+			);
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "executing" })}
+				/>,
+			);
+			expect(screen.getAllByText("0% context").length).toBeGreaterThan(0);
 		});
 
 		test("finished plans have no buttons", () => {
