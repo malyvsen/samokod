@@ -4,13 +4,15 @@
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::io::IsTerminal;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 /// First-instance terminal launch: validate the path synchronously so errors
-/// stay visible, then respawn detached with stdio nulled and exit the parent
-/// so the terminal returns immediately. Child and non-tty launches fall
-/// through to the normal startup path.
+/// stay visible, then respawn detached with nulled stdio in a new session and
+/// exit the parent so the terminal returns immediately. Child and non-tty
+/// launches fall through to the normal startup path.
 pub fn maybe_detach() {
     if !should_detach(
         is_detached(),
@@ -45,18 +47,14 @@ fn detach_command(exe: PathBuf, args: impl IntoIterator<Item = OsString>) -> std
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        // SAFETY: `setsid` is async-signal-safe; the closure runs between
-        // `fork` and `exec` where only that call and returning apply.
-        unsafe {
-            command.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
+    unsafe {
+        // SAFETY: `setsid` is async-signal-safe; this runs between `fork` and `exec`.
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
     }
     command
 }
@@ -185,7 +183,6 @@ fn fail(message: &str) -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::OsString;
 
     #[test]
     fn parses_first_positional_only() {
