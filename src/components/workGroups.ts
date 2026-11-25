@@ -45,23 +45,39 @@ export type RunSummary = {
 };
 
 /// Counts sort count-desc, ties alphabetical. Tool counts read the label
-/// field directly. Duration needs every item stamped; thought items also
-/// contribute their inferred start (`at - ms`) so streaming time counts.
-/// Passing `now` measures the live run up to now instead of the frozen
-/// first-to-last span.
-export function summarizeRun(items: RunItem[], now?: number): RunSummary {
+/// field directly. Start is the minimum of all available evidence (stamped
+/// item `at` values, thought inferred starts `at - ms`, plus passed start
+/// anchors); end is `now` for a live box, otherwise the maximum stamped
+/// `at`. With no start or no end (e.g. unstamped replayed history) the
+/// duration stays null.
+export function summarizeRun(
+	items: RunItem[],
+	now?: number,
+	starts: number[] = [],
+): RunSummary {
 	let durationMs: number | null = null;
-	const stamped = items.filter(
-		(item): item is RunItem & { at: number } => item.at !== undefined,
-	);
-	if (stamped.length > 0 && stamped.length === items.length) {
-		const bounds = stamped.flatMap((item) =>
-			item.kind === "thought" ? [item.at - item.ms, item.at] : [item.at],
-		);
-		durationMs =
-			now !== undefined
-				? now - Math.min(...bounds)
-				: Math.max(...bounds) - Math.min(...bounds);
+	const atValues: number[] = [...starts];
+	for (const item of items) {
+		if (item.at !== undefined) {
+			atValues.push(item.at);
+			if (item.kind === "thought") {
+				atValues.push(item.at - item.ms);
+			}
+		}
+	}
+	const start = atValues.length > 0 ? Math.min(...atValues) : null;
+	const end =
+		now !== undefined
+			? now
+			: items.some((item) => item.at !== undefined)
+				? Math.max(
+						...items.flatMap((item) =>
+							item.at !== undefined ? [item.at] : [],
+						),
+					)
+				: null;
+	if (start !== null && end !== null) {
+		durationMs = end - start;
 	}
 	const toolCounts = new Map<string, number>();
 	let thinkCount = 0;

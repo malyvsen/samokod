@@ -73,6 +73,12 @@ export function Transcript({
 		(lastGroup === undefined ||
 			(lastGroup.kind !== "run" &&
 				(lastGroup.kind !== "message" || lastGroup.item.kind !== "agent")));
+	const liveAnchors: number[] =
+		liveTurn && workingSince !== null
+			? live !== null
+				? [workingSince, live.startedAt]
+				: [workingSince]
+			: [];
 	// Bind the owning session once so approval cards answer their own
 	// session. A null session disables the card, matching onRetry/onStop.
 	const boundAnswer =
@@ -101,6 +107,7 @@ export function Transcript({
 							onAnswer={boundAnswer}
 							isLive={liveTurn && index === groups.length - 1}
 							now={now}
+							starts={liveAnchors}
 							onStop={onStop}
 						/>
 					) : (
@@ -120,6 +127,7 @@ export function Transcript({
 						onAnswer={boundAnswer}
 						isLive
 						now={now}
+						starts={liveAnchors}
 						onStop={onStop}
 					/>
 				)}
@@ -156,6 +164,7 @@ function WorkBox({
 	onAnswer,
 	isLive = false,
 	now = Date.now(),
+	starts = [],
 	onStop = null,
 }: {
 	items: RunItem[];
@@ -163,6 +172,7 @@ function WorkBox({
 	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
 	isLive?: boolean;
 	now?: number;
+	starts?: number[];
 	onStop?: (() => void) | null;
 }) {
 	const hasUnresolvedApproval = items.some(
@@ -175,11 +185,15 @@ function WorkBox({
 		}
 	}, [hasUnresolvedApproval]);
 	const workRef = useRef<HTMLDivElement>(null);
-	const summary = summarizeRun(items, isLive ? now : undefined);
+	const summary = summarizeRun(
+		items,
+		isLive ? now : undefined,
+		isLive ? starts : [],
+	);
 	const duration =
 		summary.durationMs === null
 			? null
-			: `${(summary.durationMs / 1000).toFixed(1)}s`;
+			: `${Math.max(0, Math.floor(summary.durationMs / 1000))}s`;
 	const verb = isLive ? "Working" : "Worked";
 	const base = duration === null ? verb : `${verb} for ${duration}`;
 	const prefix = summary.entries.length === 0 ? base : `${base} · `;

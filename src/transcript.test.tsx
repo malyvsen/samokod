@@ -394,12 +394,12 @@ describe("transcript thought rows", () => {
 			);
 			const summary = () =>
 				container.querySelector(".work .summary .txt")?.textContent ?? "";
-			expect(summary()).toContain("Working for 4.0s");
+			expect(summary()).toContain("Working for 4s");
 			nowSpy.mockReturnValue(6000);
 			act(() => {
 				vi.advanceTimersByTime(1000);
 			});
-			expect(summary()).toContain("Working for 5.0s");
+			expect(summary()).toContain("Working for 5s");
 		} finally {
 			nowSpy.mockRestore();
 			vi.useRealTimers();
@@ -442,7 +442,7 @@ describe("transcript thought rows", () => {
 		);
 		expect(
 			container.querySelector(".work .summary .txt")?.textContent,
-		).toContain("Worked for 1.0s");
+		).toContain("Worked for 1s");
 	});
 
 	test("thoughts split only on intervening content", () => {
@@ -549,13 +549,13 @@ describe("transcript grouping", () => {
 		expect(counts).toBe("2x think");
 	});
 
-	test("duration hides unless every item has arrival time", () => {
+	test("duration hides when no arrival time is known", () => {
 		expect(
 			summarizeRun([tool("l1", "read", 1000), tool("l2", "read", 3000)])
 				.durationMs,
 		).toBe(2000);
 		expect(
-			summarizeRun([tool("l1", "read", 1000), tool("l2", "read")]).durationMs,
+			summarizeRun([tool("l1", "read"), tool("l2", "read")]).durationMs,
 		).toBeNull();
 		expect(summarizeRun([thought("t1")]).durationMs).toBeNull();
 	});
@@ -1322,5 +1322,107 @@ describe("transcript live ack", () => {
 		} finally {
 			nowSpy.mockRestore();
 		}
+	});
+});
+
+describe("transcript work duration", () => {
+	test("placeholder ticks from workingSince", () => {
+		vi.useFakeTimers();
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(4000);
+		try {
+			const { container } = render(
+				<Transcript
+					items={[{ kind: "user", id: "u1", text: "hi" }]}
+					start={IDLE}
+					repoLabel="~/repo"
+					onRetry={vi.fn()}
+					onAnswer={vi.fn()}
+					session={SESSION}
+					working
+					workingSince={1000}
+					onStop={vi.fn()}
+				/>,
+			);
+			const summary = () =>
+				container.querySelector(".work .summary .txt")?.textContent ?? "";
+			expect(summary()).toContain("Working for 3s");
+			expect(summary()).not.toContain("·");
+			nowSpy.mockReturnValue(5000);
+			act(() => {
+				vi.advanceTimersByTime(1000);
+			});
+			expect(summary()).toContain("Working for 4s");
+		} finally {
+			nowSpy.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
+	test("unstamped frozen box omits the duration", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{
+						kind: "tool",
+						id: "t1",
+						line: {
+							id: "l1",
+							text: "read: a",
+							status: "completed",
+							label: "read",
+						},
+					},
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				session={SESSION}
+			/>,
+		);
+		const txt =
+			container.querySelector(".work .summary .txt")?.textContent ?? "";
+		expect(txt).toContain("Worked");
+		expect(txt).toContain("1x read");
+		expect(txt).not.toContain("for");
+	});
+
+	test("flooring renders whole seconds", () => {
+		const { container } = render(
+			<Transcript
+				items={[
+					{
+						kind: "tool",
+						id: "t1",
+						line: {
+							id: "l1",
+							text: "read: a",
+							status: "completed",
+							label: "read",
+						},
+						at: 1000,
+					},
+					{
+						kind: "tool",
+						id: "t2",
+						line: {
+							id: "l2",
+							text: "read: b",
+							status: "completed",
+							label: "read",
+						},
+						at: 2500,
+					},
+				]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				session={SESSION}
+			/>,
+		);
+		expect(
+			container.querySelector(".work .summary .txt")?.textContent,
+		).toContain("Worked for 1s");
 	});
 });
