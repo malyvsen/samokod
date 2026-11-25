@@ -70,6 +70,7 @@ import {
 	type Chats,
 	carryHistory,
 	errorItem,
+	markAcked,
 	removeEntry,
 	updateEntry,
 	withScopingLead,
@@ -176,8 +177,13 @@ export function App() {
 			updateChat(key, (chat) => ({ ...chat, working: true, failed: false }));
 			try {
 				await sendPrompt(key, text);
+				updateChat(key, (chat) => markAcked(chat, Date.now()));
 			} catch (error) {
-				updateChat(key, (chat) => ({ ...chat, working: false }));
+				updateChat(key, (chat) => ({
+					...chat,
+					working: false,
+					workingSince: null,
+				}));
 				updateChat(key, (chat) => ({
 					...chat,
 					transcript: [
@@ -520,6 +526,7 @@ export function App() {
 		updateChat(key, (chat) => ({
 			...chat,
 			working: false,
+			workingSince: null,
 			approval: false,
 			transcript:
 				stopped && holds
@@ -581,11 +588,9 @@ export function App() {
 	) {
 		if (readOnly) return;
 		await answerPermission(session, toolCallId, optionId);
-		updateChat(session, (chat) => ({
-			...chat,
-			approval: false,
-			working: true,
-		}));
+		updateChat(session, (chat) =>
+			markAcked({ ...chat, approval: false }, Date.now()),
+		);
 	}
 
 	async function handleConfigChange(configId: string, value: string) {
@@ -620,9 +625,10 @@ export function App() {
 		try {
 			const retried = await retryLast(key);
 			if (retried) {
-				updateChat(key, (chat) => ({ ...chat, working: true }));
+				updateChat(key, (chat) => markAcked(chat, Date.now()));
 			}
 		} catch (error) {
+			updateChat(key, (chat) => ({ ...chat, workingSince: null }));
 			appendError(
 				key,
 				error instanceof Error ? error.message : String(error),
@@ -687,10 +693,16 @@ export function App() {
 		try {
 			const update = await executePlan(key);
 			const isViewed = selectedRef.current?.plan === key.plan;
-			applyChats((current) => carryHistory(current, key, update, isViewed));
+			applyChats((current) =>
+				carryHistory(current, key, update, isViewed, Date.now()),
+			);
 			applyOwnedUpdate(key.plan, update);
 		} catch (error) {
-			updateChat(key, (chat) => ({ ...chat, working: false }));
+			updateChat(key, (chat) => ({
+				...chat,
+				working: false,
+				workingSince: null,
+			}));
 			appendError(
 				key,
 				error instanceof Error ? error.message : String(error),
@@ -709,11 +721,17 @@ export function App() {
 				applyChats((current) => removeEntry(current, key));
 				draft.clearDraft(key);
 			} else {
-				applyChats((current) => carryHistory(current, key, update, false));
+				applyChats((current) =>
+					carryHistory(current, key, update, false, Date.now()),
+				);
 			}
 			applyOwnedUpdate(key.plan, update);
 		} catch (error) {
-			updateChat(key, (chat) => ({ ...chat, working: false }));
+			updateChat(key, (chat) => ({
+				...chat,
+				working: false,
+				workingSince: null,
+			}));
 			appendError(
 				key,
 				error instanceof Error ? error.message : String(error),

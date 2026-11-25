@@ -223,6 +223,7 @@ describe("scoping lead", () => {
 				scoping_preview: null,
 			},
 			false,
+			7000,
 		);
 		expect(after[sessionKeyOf(testKey())]).toBeUndefined();
 		const carried =
@@ -661,5 +662,123 @@ describe("arrival timestamps", () => {
 		expect(hasDuration(stamped)).toBe(true);
 		expect(hasDuration(mixed)).toBe(false);
 		expect(hasDuration([])).toBe(true);
+	});
+});
+
+describe("turn ack", () => {
+	test("optimistic working without stamp reads as unacked", () => {
+		const chats = updateEntry(withChat(), testKey(), (chat) => ({
+			...chat,
+			working: true,
+			workingSince: null,
+		}));
+		const chat = chatOf(chats);
+		expect(chat.working).toBe(true);
+		expect(chat.workingSince).toBeNull();
+	});
+
+	test("first live event stamps now", () => {
+		const optimistic = updateEntry(withChat(), testKey(), (chat) => ({
+			...chat,
+			working: true,
+			workingSince: null,
+		}));
+		const chats = applySessionEvent(
+			optimistic,
+			{ type: "agent_text", session: testKey(), chunk: "hello" },
+			5000,
+		);
+		expect(chatOf(chats).workingSince).toBe(5000);
+	});
+
+	test("later chunks preserve the first stamp", () => {
+		let chats = updateEntry(withChat(), testKey(), (chat) => ({
+			...chat,
+			working: true,
+			workingSince: null,
+		}));
+		chats = applySessionEvent(
+			chats,
+			{ type: "agent_text", session: testKey(), chunk: "hel" },
+			5000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{ type: "agent_thought", session: testKey(), chunk: "hmm" },
+			6000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{ type: "agent_text", session: testKey(), chunk: "lo" },
+			7000,
+		);
+		expect(chatOf(chats).workingSince).toBe(5000);
+	});
+
+	test("turn_done clears the stamp", () => {
+		let chats = applySessionEvent(
+			withChat(),
+			{ type: "agent_text", session: testKey(), chunk: "hello" },
+			5000,
+		);
+		expect(chatOf(chats).workingSince).toBe(5000);
+		chats = applySessionEvent(
+			chats,
+			{ type: "turn_done", session: testKey() },
+			6000,
+		);
+		const chat = chatOf(chats);
+		expect(chat.working).toBe(false);
+		expect(chat.workingSince).toBeNull();
+	});
+
+	test("replayed events leave the stamp null", () => {
+		let chats = eventFor({ type: "history_preparing", session: testKey() });
+		chats = applySessionEvent(chats, {
+			type: "history_begin",
+			session: testKey(),
+		});
+		chats = applySessionEvent(
+			chats,
+			{ type: "agent_text", session: testKey(), chunk: "hello" },
+			5000,
+		);
+		chats = applySessionEvent(
+			chats,
+			{ type: "agent_thought", session: testKey(), chunk: "hmm" },
+			5000,
+		);
+		expect(chatOf(chats).workingSince).toBeNull();
+		expect(chatOf(chats).working).toBe(false);
+	});
+
+	test("carryHistory stamps the running entry with now", () => {
+		const before = updateEntry(withChat(), testKey(), (chat) => ({
+			...chat,
+			working: true,
+			workingSince: null,
+		}));
+		const after = carryHistory(
+			before,
+			testKey(),
+			{
+				plans: [],
+				selected: { plan: "renamed", role: "executing" },
+				config_defaults: { model: null, effort: null },
+				scoping_preview: null,
+			},
+			true,
+			8000,
+		);
+		const running =
+			after[sessionKeyOf({ plan: "renamed", role: "executing" })] ??
+			emptyChat();
+		expect(running.working).toBe(true);
+		expect(running.workingSince).toBe(8000);
+		const history =
+			after[sessionKeyOf({ plan: "renamed", role: testKey().role })] ??
+			emptyChat();
+		expect(history.working).toBe(false);
+		expect(history.workingSince).toBeNull();
 	});
 });

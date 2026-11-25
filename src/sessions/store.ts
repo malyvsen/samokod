@@ -24,6 +24,7 @@ export interface ChatState {
 	todos: TodoView[];
 	configOptions: ConfigOptionView[];
 	working: boolean;
+	workingSince: number | null;
 	approval: boolean;
 	failed: boolean;
 	start: SessionStart;
@@ -39,6 +40,7 @@ export function emptyChat(): ChatState {
 		todos: [],
 		configOptions: [],
 		working: false,
+		workingSince: null,
 		approval: false,
 		failed: false,
 		start: { kind: "idle" },
@@ -54,6 +56,17 @@ export function updateEntry(
 ): Chats {
 	const id = sessionKeyOf(key);
 	return { ...chats, [id]: next(chats[id] ?? emptyChat()) };
+}
+
+/// Backend acknowledgment for a turn: presence of the timestamp is the ack.
+/// Preserves an existing stamp so mid-turn answers never rebase the start.
+export function markAcked(chat: ChatState, now: number): ChatState {
+	return {
+		...chat,
+		working: true,
+		failed: false,
+		workingSince: chat.workingSince ?? now,
+	};
 }
 
 export function removeEntry(chats: Chats, key: SessionKey): Chats {
@@ -132,15 +145,16 @@ function appendText(
 }
 
 /// Replayed transcript streams while history replays without marking a live
-/// turn, so the status dot stays truthful. Live updates mark working.
+/// turn, so the status dot stays truthful. Live updates mark acked working.
 function withTranscript(
 	chat: ChatState,
 	transcript: TranscriptItem[],
+	now: number,
 ): ChatState {
 	if (chat.start.kind === "replaying") {
 		return { ...chat, transcript };
 	}
-	return { ...chat, working: true, failed: false, transcript };
+	return { ...markAcked(chat, now), transcript };
 }
 
 /// Enter a start phase. Retrying after a failure replays from empty.
@@ -180,7 +194,7 @@ export function applySessionEvent(
 				);
 				if (replaying) return { ...chat, transcript };
 				return {
-					...withTranscript(chat, transcript),
+					...withTranscript(chat, transcript, now),
 					live: null,
 				};
 			});
@@ -191,9 +205,7 @@ export function applySessionEvent(
 			return updateEntry(chats, key, (chat) => {
 				if (chat.start.kind === "replaying") return chat;
 				return {
-					...chat,
-					working: true,
-					failed: false,
+					...markAcked(chat, now),
 					live: accumulateThought(chat.live, now, chunk),
 				};
 			});
@@ -242,7 +254,7 @@ export function applySessionEvent(
 							];
 				if (replaying) return { ...chat, transcript };
 				return {
-					...withTranscript(chat, transcript),
+					...withTranscript(chat, transcript, now),
 					live: null,
 				};
 			});
@@ -251,6 +263,7 @@ export function applySessionEvent(
 			return updateEntry(chats, event.session, (chat) => ({
 				...chat,
 				working: false,
+				workingSince: null,
 				approval: false,
 				failed: false,
 				transcript: frozen(chat, now),
@@ -261,6 +274,7 @@ export function applySessionEvent(
 			return updateEntry(chats, event.session, (chat) => ({
 				...chat,
 				working: false,
+				workingSince: null,
 				approval: false,
 				failed: true,
 				transcript: [
@@ -289,11 +303,20 @@ export function applySessionEvent(
 						...arrival(replaying, now),
 					},
 				];
+				if (replaying) {
+					return {
+						...chat,
+						approval: chat.approval,
+						transcript,
+						live: chat.live,
+					};
+				}
 				return {
 					...chat,
-					approval: replaying ? chat.approval : true,
+					approval: true,
+					workingSince: chat.workingSince ?? now,
 					transcript,
-					live: replaying ? chat.live : null,
+					live: null,
 				};
 			});
 		case "permission_resolved":
@@ -392,6 +415,7 @@ export function carryHistory(
 	key: SessionKey,
 	update: PlansUpdate,
 	markSelectedRunning: boolean,
+	now: number,
 ): Chats {
 	const historyKey: SessionKey = {
 		plan: update.selected.plan,
@@ -403,6 +427,7 @@ export function carryHistory(
 	next[sessionKeyOf(historyKey)] = {
 		...entry,
 		working: false,
+		workingSince: null,
 		live: null,
 		scopingLead: null,
 	};
@@ -411,12 +436,7 @@ export function carryHistory(
 		sessionKeyOf(update.selected) !== sessionKeyOf(historyKey)
 	) {
 		const id = sessionKeyOf(update.selected);
-		next[id] = {
-			...(next[id] ?? emptyChat()),
-			working: true,
-			failed: false,
-			live: null,
-		};
+		next[id] = markAcked({ ...(next[id] ?? emptyChat()), live: null }, now);
 	}
 	return next;
 }
