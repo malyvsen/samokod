@@ -580,6 +580,15 @@ describe("transcript grouping", () => {
 		).toBe(4000);
 	});
 
+	test("live duration starts from box items, not ack", () => {
+		expect(
+			summarizeRun([tool("l1", "read", 64000), tool("l2", "read", 65000)], {
+				now: 65000,
+				since: 1000,
+			}).durationMs,
+		).toBe(1000);
+	});
+
 	test("collapsed box expands to today's rows", () => {
 		const { container } = render(
 			<Transcript
@@ -1418,5 +1427,51 @@ describe("transcript work duration", () => {
 		expect(
 			container.querySelector(".work .summary .txt")?.textContent,
 		).toContain("Worked for 1s");
+	});
+
+	test("trailing live box measures its own items, not the turn", () => {
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(65000);
+		try {
+			const toolAt = (id: string, at: number) => ({
+				kind: "tool" as const,
+				id,
+				line: {
+					id,
+					text: `read: ${id}`,
+					status: "completed" as const,
+					label: "read",
+				},
+				at,
+			});
+			const { container } = render(
+				<Transcript
+					items={[
+						toolAt("t1", 1000),
+						toolAt("t2", 24000),
+						{ kind: "agent", id: "a1", text: "mid" },
+						toolAt("t3", 30000),
+						toolAt("t4", 59000),
+						{ kind: "agent", id: "a2", text: "mid again" },
+						toolAt("t5", 64000),
+						toolAt("t6", 65000),
+					]}
+					start={IDLE}
+					repoLabel="~/repo"
+					onRetry={vi.fn()}
+					onAnswer={vi.fn()}
+					session={SESSION}
+					turn={{ since: 1000, live: null }}
+					onStop={vi.fn()}
+				/>,
+			);
+			const boxes = container.querySelectorAll(".work .summary .txt");
+			expect(boxes).toHaveLength(3);
+			expect(boxes[0]?.textContent).toContain("Worked for 23s");
+			expect(boxes[1]?.textContent).toContain("Worked for 29s");
+			expect(boxes[2]?.textContent).toContain("Working for 1s");
+			expect(boxes[2]?.textContent).not.toContain("Working for 64s");
+		} finally {
+			nowSpy.mockRestore();
+		}
 	});
 });

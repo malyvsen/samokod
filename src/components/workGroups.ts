@@ -45,15 +45,16 @@ export type RunSummary = {
 };
 
 /// Counts sort count-desc, ties alphabetical. Tool counts read the label
-/// field directly. Start is the minimum of the ack anchor and stamped item
-/// starts (thought inferred `at - ms`); end is `now` for a live box,
-/// otherwise the maximum stamped `at`. With no start or no end (e.g.
+/// field directly. Start is the minimum stamped item start (thought
+/// inferred `at - ms`), falling back to the ack anchor only when the box
+/// has no stamped items (empty live placeholder); end is `now` for a live
+/// box, otherwise the maximum stamped `at`. With no start or no end (e.g.
 /// unstamped replayed history) the duration stays null.
 export function summarizeRun(
 	items: RunItem[],
 	live?: { now: number; since?: number | null },
 ): RunSummary {
-	let start: number | null = live?.since ?? null;
+	let start: number | null = null;
 	let end: number | null = live === undefined ? null : live.now;
 	for (const item of items) {
 		if (item.at === undefined) continue;
@@ -62,6 +63,9 @@ export function summarizeRun(
 		if (live === undefined) {
 			end = end === null ? item.at : Math.max(end, item.at);
 		}
+	}
+	if (start === null && live !== undefined) {
+		start = live.since ?? null;
 	}
 	const durationMs =
 		start !== null && end !== null ? Math.max(0, end - start) : null;
