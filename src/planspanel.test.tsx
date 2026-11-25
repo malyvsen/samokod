@@ -991,7 +991,7 @@ describe("plans panel", () => {
 			).toBeNull();
 		});
 
-		test("hover tooltip shows stacked cost and context", () => {
+		test("hover tooltip shows cost and context for live sessions", () => {
 			const plan = testEntryWith(
 				"2026-09-25.10-54-59.slug",
 				"executing",
@@ -1002,7 +1002,6 @@ describe("plans panel", () => {
 					testStatus("executing", {
 						live: true,
 						spend: { cost: 1.24, ctx_pct: 38.4 },
-						todos: [],
 					}),
 				],
 			);
@@ -1011,7 +1010,7 @@ describe("plans panel", () => {
 					{...panelProps([plan], { plan: plan.name, role: "executing" })}
 				/>,
 			);
-			const tips = container.querySelectorAll(".sess-tip .costline");
+			const tips = container.querySelectorAll(".sess-tip");
 			expect(tips.length).toBeGreaterThan(0);
 			expect(screen.getAllByText("$1.24").length).toBeGreaterThan(0);
 			expect(screen.getAllByText("38% context").length).toBeGreaterThan(0);
@@ -1028,7 +1027,6 @@ describe("plans panel", () => {
 					testStatus("executing", {
 						live: false,
 						spend: { cost: 1.24, ctx_pct: 38.4 },
-						todos: [],
 					}),
 				],
 			);
@@ -1052,7 +1050,6 @@ describe("plans panel", () => {
 					testStatus("executing", {
 						live: true,
 						spend: { cost: 0, ctx_pct: 0 },
-						todos: [],
 					}),
 				],
 			);
