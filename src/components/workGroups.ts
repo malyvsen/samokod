@@ -44,31 +44,52 @@ export type RunSummary = {
 	hasFailed: boolean;
 };
 
-/// Counts sort count-desc, ties alphabetical. Tool counts read the label
-/// field directly. Start is the minimum stamped item start (thought
-/// inferred `at - ms`), falling back to the ack anchor only when the box
-/// has no stamped items (empty live placeholder); end is `now` for a live
-/// box, otherwise the maximum stamped `at`. With no start or no end (e.g.
-/// unstamped replayed history) the duration stays null.
-export function summarizeRun(
-	items: RunItem[],
-	live?: { now: number; since?: number | null },
-): RunSummary {
-	let start: number | null = null;
-	let end: number | null = live === undefined ? null : live.now;
-	for (const item of items) {
-		if (item.at === undefined) continue;
-		const itemStart = item.kind === "thought" ? item.at - item.ms : item.at;
-		start = start === null ? itemStart : Math.min(start, itemStart);
-		if (live === undefined) {
-			end = end === null ? item.at : Math.max(end, item.at);
-		}
+/// Wall-clock for a live box: `now` ends the span, `since` is the turn-ack
+/// fallback for an empty placeholder with no stamped items yet.
+export type LiveTiming = { now: number; since?: number | null };
+
+/// Each box shows its own span. A frozen box spans its first to last
+/// stamped item (thoughts start at `at - ms`); a live box spans its first
+/// stamped item to `now`; an empty live placeholder spans ack to `now`.
+/// Unstamped history has no duration. Counts sort count-desc, ties
+/// alphabetical. Tool counts read the label field directly. Pure.
+export function summarizeRun(items: RunItem[], live?: LiveTiming): RunSummary {
+	const entries = countEntries(items);
+	entries.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+	const counts = entries
+		.map(({ label, count }) => `${count}x ${label}`)
+		.join(", ");
+	return {
+		entries,
+		counts,
+		durationMs: boxDurationMs(items, live),
+		hasFailed: entries.some((entry) => entry.label === "failed"),
+	};
+}
+
+function boxDurationMs(items: RunItem[], live?: LiveTiming): number | null {
+	const starts = items.flatMap((item) => {
+		const start = itemStart(item);
+		return start === null ? [] : [start];
+	});
+	const start = starts.length > 0 ? Math.min(...starts) : (live?.since ?? null);
+	if (live !== undefined) {
+		if (start === null) return null;
+		return Math.max(0, live.now - start);
 	}
-	if (start === null && live !== undefined) {
-		start = live.since ?? null;
-	}
-	const durationMs =
-		start !== null && end !== null ? Math.max(0, end - start) : null;
+	const ends = items.flatMap((item) =>
+		item.at === undefined ? [] : [item.at],
+	);
+	if (starts.length === 0 || ends.length === 0) return null;
+	return Math.max(0, Math.max(...ends) - Math.min(...starts));
+}
+
+function itemStart(item: RunItem): number | null {
+	if (item.at === undefined) return null;
+	return item.kind === "thought" ? item.at - item.ms : item.at;
+}
+
+function countEntries(items: RunItem[]): RunEntry[] {
 	const toolCounts = new Map<string, number>();
 	let thinkCount = 0;
 	const todoCounts = new Map<string, number>();
@@ -112,9 +133,5 @@ export function summarizeRun(
 	if (failedCount > 0) {
 		entries.push({ label: "failed", count: failedCount });
 	}
-	entries.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
-	const counts = entries
-		.map(({ label, count }) => `${count}x ${label}`)
-		.join(", ");
-	return { entries, counts, durationMs, hasFailed: failedCount > 0 };
+	return entries;
 }

@@ -10,6 +10,25 @@ const multiline = "first line\nsecond line\n- third";
 const IDLE: SessionStart = { kind: "idle" };
 const SESSION = { plan: "a", role: "scoping" } as const;
 
+function tool(id: string, label: string, at?: number): RunItem {
+	return {
+		kind: "tool",
+		id,
+		line: { id, text: `${label}: body`, status: "completed", label },
+		...(at === undefined ? {} : { at }),
+	};
+}
+
+function thought(id: string, at?: number, ms = 1000): RunItem {
+	return {
+		kind: "thought",
+		id,
+		ms,
+		text: "hmm",
+		...(at === undefined ? {} : { at }),
+	};
+}
+
 function transcript(text: string, start: SessionStart | null = IDLE) {
 	return (
 		<Transcript
@@ -478,25 +497,6 @@ describe("transcript thought rows", () => {
 });
 
 describe("transcript grouping", () => {
-	function tool(id: string, label: string, at?: number): RunItem {
-		return {
-			kind: "tool",
-			id,
-			line: { id, text: `${label}: body`, status: "completed", label },
-			...(at === undefined ? {} : { at }),
-		};
-	}
-
-	function thought(id: string, at?: number, ms = 1000): RunItem {
-		return {
-			kind: "thought",
-			id,
-			ms,
-			text: "hmm",
-			...(at === undefined ? {} : { at }),
-		};
-	}
-
 	test("splits only on user and agent messages", () => {
 		const groups = groupRuns([
 			{ kind: "user", id: "u1", text: "hi" },
@@ -1432,28 +1432,17 @@ describe("transcript work duration", () => {
 	test("trailing live box measures its own items, not the turn", () => {
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(65000);
 		try {
-			const toolAt = (id: string, at: number) => ({
-				kind: "tool" as const,
-				id,
-				line: {
-					id,
-					text: `read: ${id}`,
-					status: "completed" as const,
-					label: "read",
-				},
-				at,
-			});
 			const { container } = render(
 				<Transcript
 					items={[
-						toolAt("t1", 1000),
-						toolAt("t2", 24000),
+						tool("t1", "read", 1000),
+						tool("t2", "read", 24000),
 						{ kind: "agent", id: "a1", text: "mid" },
-						toolAt("t3", 30000),
-						toolAt("t4", 59000),
+						tool("t3", "read", 30000),
+						tool("t4", "read", 59000),
 						{ kind: "agent", id: "a2", text: "mid again" },
-						toolAt("t5", 64000),
-						toolAt("t6", 65000),
+						tool("t5", "read", 64000),
+						tool("t6", "read", 65000),
 					]}
 					start={IDLE}
 					repoLabel="~/repo"

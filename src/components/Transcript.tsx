@@ -19,6 +19,7 @@ import {
 import { MessageMarkdown } from "./MessageMarkdown";
 import {
 	groupRuns,
+	type LiveTiming,
 	summarizeRun,
 	type TranscriptGroup,
 	todoKindLabel,
@@ -55,8 +56,13 @@ export function Transcript({
 	const now = useNow(turn !== null);
 	const displayItems = withPendingThought(items, turn, now);
 	const groups = groupRuns(displayItems);
+	// Only the trailing run hosts the live box; a trailing message drops the
+	// timing (an agent message needs no box, a user message gets the empty
+	// placeholder below). Non-empty boxes measure from their own items, so
+	// `since` is only the empty-placeholder fallback.
 	const liveIndex = turn === null ? null : groups.length - 1;
-	const timing = turn === null ? null : { now, since: turn.since };
+	const timing: LiveTiming | null =
+		turn === null ? null : { now, since: turn.since };
 	// Bind the owning session once so approval cards answer their own
 	// session. A null session disables the card, matching onRetry/onStop.
 	const boundAnswer =
@@ -177,7 +183,7 @@ function WorkBox({
 	items: RunItem[];
 	onRetry: (() => void) | null;
 	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
-	live?: { now: number; since: number } | null;
+	live?: LiveTiming | null;
 	onStop?: (() => void) | null;
 }) {
 	const isLive = live !== null;
