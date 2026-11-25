@@ -8,6 +8,8 @@ import {
 	type Chats,
 	carryHistory,
 	emptyChat,
+	liveTurnOf,
+	markSent,
 	updateEntry,
 	withScopingLead,
 } from "./store";
@@ -666,37 +668,29 @@ describe("arrival timestamps", () => {
 });
 
 describe("turn ack", () => {
-	test("optimistic working without stamp reads as unacked", () => {
-		const chats = updateEntry(withChat(), testKey(), (chat) => ({
-			...chat,
-			working: true,
-			workingSince: null,
-		}));
+	test("optimistic send reads as unacked", () => {
+		const chats = updateEntry(withChat(), testKey(), (chat) => markSent(chat));
 		const chat = chatOf(chats);
 		expect(chat.working).toBe(true);
 		expect(chat.workingSince).toBeNull();
+		expect(liveTurnOf(chat)).toBeNull();
 	});
 
 	test("first live event stamps now", () => {
-		const optimistic = updateEntry(withChat(), testKey(), (chat) => ({
-			...chat,
-			working: true,
-			workingSince: null,
-		}));
+		const optimistic = updateEntry(withChat(), testKey(), (chat) =>
+			markSent(chat),
+		);
 		const chats = applySessionEvent(
 			optimistic,
 			{ type: "agent_text", session: testKey(), chunk: "hello" },
 			5000,
 		);
 		expect(chatOf(chats).workingSince).toBe(5000);
+		expect(liveTurnOf(chatOf(chats))).toEqual({ since: 5000, live: null });
 	});
 
 	test("later chunks preserve the first stamp", () => {
-		let chats = updateEntry(withChat(), testKey(), (chat) => ({
-			...chat,
-			working: true,
-			workingSince: null,
-		}));
+		let chats = updateEntry(withChat(), testKey(), (chat) => markSent(chat));
 		chats = applySessionEvent(
 			chats,
 			{ type: "agent_text", session: testKey(), chunk: "hel" },
@@ -753,11 +747,7 @@ describe("turn ack", () => {
 	});
 
 	test("carryHistory stamps the running entry with now", () => {
-		const before = updateEntry(withChat(), testKey(), (chat) => ({
-			...chat,
-			working: true,
-			workingSince: null,
-		}));
+		const before = updateEntry(withChat(), testKey(), (chat) => markSent(chat));
 		const after = carryHistory(
 			before,
 			testKey(),
@@ -780,5 +770,48 @@ describe("turn ack", () => {
 			emptyChat();
 		expect(history.working).toBe(false);
 		expect(history.workingSince).toBeNull();
+	});
+
+	test("permission request acks the turn", () => {
+		const optimistic = updateEntry(withChat(), testKey(), (chat) =>
+			markSent(chat),
+		);
+		const chats = applySessionEvent(
+			optimistic,
+			{
+				type: "permission_asked",
+				session: testKey(),
+				permission: {
+					tool_call_id: "t1",
+					title: "run?",
+					tool: "bash",
+					options: [{ id: "a", kind: "allow" }],
+					rule_hint: "hint",
+				},
+			},
+			5000,
+		);
+		const chat = chatOf(chats);
+		expect(chat.working).toBe(true);
+		expect(chat.workingSince).toBe(5000);
+	});
+
+	test("todo changes ack the turn", () => {
+		const optimistic = updateEntry(withChat(), testKey(), (chat) =>
+			markSent(chat),
+		);
+		const chats = applySessionEvent(
+			optimistic,
+			{
+				type: "todos_changed",
+				session: testKey(),
+				todos: [],
+				changes: [{ content: "do it", status: "pending" }],
+			},
+			5000,
+		);
+		const chat = chatOf(chats);
+		expect(chat.working).toBe(true);
+		expect(chat.workingSince).toBe(5000);
 	});
 });

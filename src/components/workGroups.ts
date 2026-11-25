@@ -45,40 +45,26 @@ export type RunSummary = {
 };
 
 /// Counts sort count-desc, ties alphabetical. Tool counts read the label
-/// field directly. Start is the minimum of all available evidence (stamped
-/// item `at` values, thought inferred starts `at - ms`, plus passed start
-/// anchors); end is `now` for a live box, otherwise the maximum stamped
-/// `at`. With no start or no end (e.g. unstamped replayed history) the
-/// duration stays null.
+/// field directly. Start is the minimum of the ack anchor and stamped item
+/// starts (thought inferred `at - ms`); end is `now` for a live box,
+/// otherwise the maximum stamped `at`. With no start or no end (e.g.
+/// unstamped replayed history) the duration stays null.
 export function summarizeRun(
 	items: RunItem[],
-	now?: number,
-	starts: number[] = [],
+	live?: { now: number; since?: number | null },
 ): RunSummary {
-	let durationMs: number | null = null;
-	const atValues: number[] = [...starts];
+	let start: number | null = live?.since ?? null;
+	let end: number | null = live === undefined ? null : live.now;
 	for (const item of items) {
-		if (item.at !== undefined) {
-			atValues.push(item.at);
-			if (item.kind === "thought") {
-				atValues.push(item.at - item.ms);
-			}
+		if (item.at === undefined) continue;
+		const itemStart = item.kind === "thought" ? item.at - item.ms : item.at;
+		start = start === null ? itemStart : Math.min(start, itemStart);
+		if (live === undefined) {
+			end = end === null ? item.at : Math.max(end, item.at);
 		}
 	}
-	const start = atValues.length > 0 ? Math.min(...atValues) : null;
-	const end =
-		now !== undefined
-			? now
-			: items.some((item) => item.at !== undefined)
-				? Math.max(
-						...items.flatMap((item) =>
-							item.at !== undefined ? [item.at] : [],
-						),
-					)
-				: null;
-	if (start !== null && end !== null) {
-		durationMs = end - start;
-	}
+	const durationMs =
+		start !== null && end !== null ? Math.max(0, end - start) : null;
 	const toolCounts = new Map<string, number>();
 	let thinkCount = 0;
 	const todoCounts = new Map<string, number>();

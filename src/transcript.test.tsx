@@ -387,8 +387,7 @@ describe("transcript thought rows", () => {
 					repoLabel="~/repo"
 					onRetry={vi.fn()}
 					onAnswer={vi.fn()}
-					working
-					workingSince={1000}
+					turn={{ since: 1000, live: null }}
 					session={SESSION}
 				/>,
 			);
@@ -576,9 +575,9 @@ describe("transcript grouping", () => {
 	});
 
 	test("live duration measures from inferred thought start", () => {
-		expect(summarizeRun([thought("t1", 5000, 3000)], 6000).durationMs).toBe(
-			4000,
-		);
+		expect(
+			summarizeRun([thought("t1", 5000, 3000)], { now: 6000 }).durationMs,
+		).toBe(4000);
 	});
 
 	test("collapsed box expands to today's rows", () => {
@@ -1149,8 +1148,7 @@ describe("transcript approval sessions", () => {
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
 				session={SESSION}
-				working
-				workingSince={1000}
+				turn={{ since: 1000, live: null }}
 				onStop={vi.fn()}
 			/>,
 		);
@@ -1178,8 +1176,7 @@ describe("transcript approval sessions", () => {
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
 				session={SESSION}
-				working
-				workingSince={1000}
+				turn={{ since: 1000, live: null }}
 				onStop={vi.fn()}
 			/>,
 		);
@@ -1204,7 +1201,7 @@ describe("transcript live ack", () => {
 		return [{ kind: "agent" as const, id: "a1", text: "hello" }];
 	}
 
-	test("working without ack renders no box", () => {
+	test("sent but unacked renders no box", () => {
 		const { container } = render(
 			<Transcript
 				items={userOnly()}
@@ -1213,8 +1210,6 @@ describe("transcript live ack", () => {
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
 				session={SESSION}
-				working
-				workingSince={null}
 			/>,
 		);
 		expect(container.querySelector(".work")).toBeNull();
@@ -1229,8 +1224,7 @@ describe("transcript live ack", () => {
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
 				session={SESSION}
-				working
-				workingSince={1000}
+				turn={{ since: 1000, live: null }}
 				onStop={vi.fn()}
 			/>,
 		);
@@ -1265,9 +1259,10 @@ describe("transcript live ack", () => {
 					onRetry={vi.fn()}
 					onAnswer={vi.fn()}
 					session={SESSION}
-					working
-					workingSince={1000}
-					live={{ startedAt: 4500, updatedAt: 4500, text: "hmm" }}
+					turn={{
+						since: 1000,
+						live: { startedAt: 4500, updatedAt: 4500, text: "hmm" },
+					}}
 				/>,
 			);
 			const txt =
@@ -1289,8 +1284,7 @@ describe("transcript live ack", () => {
 				onRetry={vi.fn()}
 				onAnswer={vi.fn()}
 				session={SESSION}
-				working
-				workingSince={1000}
+				turn={{ since: 1000, live: null }}
 			/>,
 		);
 		expect(container.querySelector(".work")).toBeNull();
@@ -1308,9 +1302,10 @@ describe("transcript live ack", () => {
 					onRetry={vi.fn()}
 					onAnswer={vi.fn()}
 					session={SESSION}
-					working
-					workingSince={1000}
-					live={{ startedAt: 4500, updatedAt: 4500, text: "hmm" }}
+					turn={{
+						since: 1000,
+						live: { startedAt: 4500, updatedAt: 4500, text: "hmm" },
+					}}
 				/>,
 			);
 			const boxes = container.querySelectorAll(".work");
@@ -1326,7 +1321,7 @@ describe("transcript live ack", () => {
 });
 
 describe("transcript work duration", () => {
-	test("placeholder ticks from workingSince", () => {
+	test("placeholder ticks from ack time", () => {
 		vi.useFakeTimers();
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(4000);
 		try {
@@ -1338,8 +1333,7 @@ describe("transcript work duration", () => {
 					onRetry={vi.fn()}
 					onAnswer={vi.fn()}
 					session={SESSION}
-					working
-					workingSince={1000}
+					turn={{ since: 1000, live: null }}
 					onStop={vi.fn()}
 				/>,
 			);

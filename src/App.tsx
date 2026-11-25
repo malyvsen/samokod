@@ -70,7 +70,10 @@ import {
 	type Chats,
 	carryHistory,
 	errorItem,
+	liveTurnOf,
 	markAcked,
+	markIdle,
+	markSent,
 	removeEntry,
 	updateEntry,
 	withScopingLead,
@@ -174,16 +177,12 @@ export function App() {
 					} satisfies TranscriptItem,
 				],
 			}));
-			updateChat(key, (chat) => ({ ...chat, working: true, failed: false }));
+			updateChat(key, (chat) => markSent(chat));
 			try {
 				await sendPrompt(key, text);
 				updateChat(key, (chat) => markAcked(chat, Date.now()));
 			} catch (error) {
-				updateChat(key, (chat) => ({
-					...chat,
-					working: false,
-					workingSince: null,
-				}));
+				updateChat(key, (chat) => markIdle(chat));
 				updateChat(key, (chat) => ({
 					...chat,
 					transcript: [
@@ -524,9 +523,7 @@ export function App() {
 			console.warn("cancel_turn failed", error);
 		}
 		updateChat(key, (chat) => ({
-			...chat,
-			working: false,
-			workingSince: null,
+			...markIdle(chat),
 			approval: false,
 			transcript:
 				stopped && holds
@@ -628,7 +625,7 @@ export function App() {
 				updateChat(key, (chat) => markAcked(chat, Date.now()));
 			}
 		} catch (error) {
-			updateChat(key, (chat) => ({ ...chat, workingSince: null }));
+			updateChat(key, (chat) => markIdle(chat));
 			appendError(
 				key,
 				error instanceof Error ? error.message : String(error),
@@ -689,7 +686,7 @@ export function App() {
 	}
 
 	async function handleExecute(key: SessionKey) {
-		updateChat(key, (chat) => ({ ...chat, working: true }));
+		updateChat(key, (chat) => markSent(chat));
 		try {
 			const update = await executePlan(key);
 			const isViewed = selectedRef.current?.plan === key.plan;
@@ -698,11 +695,7 @@ export function App() {
 			);
 			applyOwnedUpdate(key.plan, update);
 		} catch (error) {
-			updateChat(key, (chat) => ({
-				...chat,
-				working: false,
-				workingSince: null,
-			}));
+			updateChat(key, (chat) => markIdle(chat));
 			appendError(
 				key,
 				error instanceof Error ? error.message : String(error),
@@ -714,7 +707,7 @@ export function App() {
 
 	async function handleCancel(key: SessionKey) {
 		const wasEmpty = key.role === "scoping" && !hasSentUserMessage(chats, key);
-		updateChat(key, (chat) => ({ ...chat, working: true }));
+		updateChat(key, (chat) => markSent(chat));
 		try {
 			const update = await cancelPlan(key);
 			if (wasEmpty) {
@@ -727,11 +720,7 @@ export function App() {
 			}
 			applyOwnedUpdate(key.plan, update);
 		} catch (error) {
-			updateChat(key, (chat) => ({
-				...chat,
-				working: false,
-				workingSince: null,
-			}));
+			updateChat(key, (chat) => markIdle(chat));
 			appendError(
 				key,
 				error instanceof Error ? error.message : String(error),
@@ -853,9 +842,7 @@ export function App() {
 									repoLabel={repoLabel}
 									onRetry={readOnly ? null : handleRetry}
 									onAnswer={handleAnswer}
-									working={chat?.working ?? false}
-									live={chat?.live ?? null}
-									workingSince={chat?.workingSince ?? null}
+									turn={liveTurnOf(chat)}
 									onStop={readOnly ? null : handleStop}
 									session={selectedKey}
 									onHistoryRetry={

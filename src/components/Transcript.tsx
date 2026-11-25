@@ -7,8 +7,8 @@ import type {
 	ToolLineView,
 	ToolStatus,
 } from "../bindings";
-import type { SessionStart } from "../sessions/store";
-import { type LiveThought, thinkingSeconds } from "../sessions/thoughts";
+import type { LiveTurn, SessionStart } from "../sessions/store";
+import { thinkingSeconds } from "../sessions/thoughts";
 import type { RunItem, TranscriptItem } from "../types";
 import {
 	CollapseControl,
@@ -17,7 +17,12 @@ import {
 	useCollapsed,
 } from "./collapsible";
 import { MessageMarkdown } from "./MessageMarkdown";
-import { groupRuns, summarizeRun, todoKindLabel } from "./workGroups";
+import {
+	groupRuns,
+	summarizeRun,
+	type TranscriptGroup,
+	todoKindLabel,
+} from "./workGroups";
 
 export function Transcript({
 	items,
@@ -27,9 +32,7 @@ export function Transcript({
 	onRetry,
 	onAnswer,
 	onHistoryRetry = null,
-	working = false,
-	live = null,
-	workingSince = null,
+	turn = null,
 	onStop = null,
 	children,
 	session,
@@ -41,9 +44,7 @@ export function Transcript({
 	onRetry: (() => void) | null;
 	onAnswer: (session: SessionKey, toolCallId: string, optionId: string) => void;
 	onHistoryRetry?: (() => void) | null;
-	working?: boolean;
-	live?: LiveThought | null;
-	workingSince?: number | null;
+	turn?: LiveTurn | null;
 	onStop?: (() => void) | null;
 	children?: ReactNode;
 	session: SessionKey | null;
@@ -51,34 +52,11 @@ export function Transcript({
 	const showLead =
 		lead !== null &&
 		!items.some((item) => item.kind === "user" && item.text === lead);
-	const now = useNow(working);
-	const liveTurn = working && workingSince !== null;
-	const displayItems =
-		live !== null && liveTurn
-			? [
-					...items,
-					{
-						kind: "thought" as const,
-						id: "__live__",
-						ms: now - live.startedAt,
-						text: live.text,
-						at: now,
-					},
-				]
-			: items;
+	const now = useNow(turn !== null);
+	const displayItems = withPendingThought(items, turn, now);
 	const groups = groupRuns(displayItems);
-	const lastGroup = groups[groups.length - 1];
-	const showPlaceholder =
-		liveTurn &&
-		(lastGroup === undefined ||
-			(lastGroup.kind !== "run" &&
-				(lastGroup.kind !== "message" || lastGroup.item.kind !== "agent")));
-	const liveAnchors: number[] =
-		liveTurn && workingSince !== null
-			? live !== null
-				? [workingSince, live.startedAt]
-				: [workingSince]
-			: [];
+	const liveIndex = turn === null ? null : groups.length - 1;
+	const timing = turn === null ? null : { now, since: turn.since };
 	// Bind the owning session once so approval cards answer their own
 	// session. A null session disables the card, matching onRetry/onStop.
 	const boundAnswer =
@@ -105,9 +83,7 @@ export function Transcript({
 							items={group.items}
 							onRetry={onRetry}
 							onAnswer={boundAnswer}
-							isLive={liveTurn && index === groups.length - 1}
-							now={now}
-							starts={liveAnchors}
+							live={index === liveIndex ? timing : null}
 							onStop={onStop}
 						/>
 					) : (
@@ -119,15 +95,13 @@ export function Transcript({
 						/>
 					),
 				)}
-				{showPlaceholder && (
+				{needsPlaceholder(groups, turn) && (
 					<WorkBox
 						key="__live-placeholder__"
 						items={[]}
 						onRetry={onRetry}
 						onAnswer={boundAnswer}
-						isLive
-						now={now}
-						starts={liveAnchors}
+						live={timing}
 						onStop={onStop}
 					/>
 				)}
@@ -142,6 +116,41 @@ export function Transcript({
 			</div>
 		</>
 	);
+}
+
+/// The pending thought as a synthetic trailing item, so the existing run
+/// grouping produces the live box with no special branches. Never persisted:
+/// the next content event freezes the real thought.
+function withPendingThought(
+	items: TranscriptItem[],
+	turn: LiveTurn | null,
+	now: number,
+): TranscriptItem[] {
+	if (turn?.live == null) return items;
+	const live = turn.live;
+	return [
+		...items,
+		{
+			kind: "thought",
+			id: "__live__",
+			ms: Math.max(0, now - live.startedAt),
+			text: live.text,
+			at: now,
+		},
+	];
+}
+
+/// An empty live box is needed when the turn is acked but the last group
+/// can't host it: an empty transcript or one ending in a user message.
+/// (An agent message needs no box; a trailing run hosts its own.)
+function needsPlaceholder(
+	groups: TranscriptGroup[],
+	turn: LiveTurn | null,
+): boolean {
+	if (turn === null) return false;
+	const last = groups[groups.length - 1];
+	if (last === undefined) return true;
+	return last.kind === "message" && last.item.kind === "user";
 }
 
 /// Wall-clock for the live work box, ticking once per second while active.
@@ -162,19 +171,16 @@ function WorkBox({
 	items,
 	onRetry,
 	onAnswer,
-	isLive = false,
-	now = Date.now(),
-	starts = [],
+	live = null,
 	onStop = null,
 }: {
 	items: RunItem[];
 	onRetry: (() => void) | null;
 	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
-	isLive?: boolean;
-	now?: number;
-	starts?: number[];
+	live?: { now: number; since: number } | null;
 	onStop?: (() => void) | null;
 }) {
+	const isLive = live !== null;
 	const hasUnresolvedApproval = items.some(
 		(item) => item.kind === "approval" && !item.resolved,
 	);
@@ -185,15 +191,11 @@ function WorkBox({
 		}
 	}, [hasUnresolvedApproval]);
 	const workRef = useRef<HTMLDivElement>(null);
-	const summary = summarizeRun(
-		items,
-		isLive ? now : undefined,
-		isLive ? starts : [],
-	);
+	const summary = summarizeRun(items, live ?? undefined);
 	const duration =
 		summary.durationMs === null
 			? null
-			: `${Math.max(0, Math.floor(summary.durationMs / 1000))}s`;
+			: `${Math.floor(summary.durationMs / 1000)}s`;
 	const verb = isLive ? "Working" : "Worked";
 	const base = duration === null ? verb : `${verb} for ${duration}`;
 	const prefix = summary.entries.length === 0 ? base : `${base} · `;
