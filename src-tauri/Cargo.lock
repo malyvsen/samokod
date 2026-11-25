@@ -3199,6 +3199,7 @@ dependencies = [
  "base64 0.23.1",
  "jiff",
  "keepawake",
+ "libc",
  "log",
  "notify",
  "serde",

@@ -2,7 +2,7 @@
 // The validated root is staged before the window is built, so the new
 // window's mount claim cannot race the frontend load.
 use std::collections::HashMap;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -25,17 +25,40 @@ pub fn maybe_detach() {
     }
     let exe =
         std::env::current_exe().unwrap_or_else(|error| fail(&format!("cannot relaunch: {error}")));
-    match std::process::Command::new(exe)
-        .args(std::env::args_os().skip(1))
+    match detach_command(exe, std::env::args_os().skip(1))
         .env(DETACHED_ENV, "1")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
         .spawn()
     {
         Ok(_) => std::process::exit(0),
         Err(error) => fail(&format!("cannot relaunch: {error}")),
     }
+}
+
+/// Child respawn that cannot break the launching terminal: stdio is nulled
+/// and, on Unix, the child joins a new session so it shares neither the
+/// session nor the controlling TTY with the shell that ran `samokod <path>`.
+fn detach_command(exe: PathBuf, args: impl IntoIterator<Item = OsString>) -> std::process::Command {
+    let mut command = std::process::Command::new(exe);
+    command
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: `setsid` is async-signal-safe; the closure runs between
+        // `fork` and `exec` where only that call and returning apply.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    command
 }
 
 /// Validated repo root for `samokod <path>`, if a path was given. Exits 1
@@ -269,6 +292,25 @@ mod tests {
         assert!(!should_detach(false, false, false, false));
         assert!(!should_detach(false, false, true, true));
         assert!(!should_detach(true, true, false, true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn detached_child_lands_in_new_session() {
+        let mut child = detach_command(PathBuf::from("sleep"), vec![OsString::from("10")])
+            .spawn()
+            .expect("spawn probe");
+        // SAFETY: `getsid` with a live pid has no side effects.
+        let parent_sid = unsafe { libc::getsid(0) };
+        let child_sid = unsafe { libc::getsid(child.id() as libc::pid_t) };
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_ne!(parent_sid, -1, "getsid(parent) must succeed");
+        assert_ne!(child_sid, -1, "getsid(child) must succeed");
+        assert_ne!(
+            parent_sid, child_sid,
+            "detached child must leave the terminal session"
+        );
     }
 
     #[test]
