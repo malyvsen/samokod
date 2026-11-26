@@ -70,6 +70,8 @@ export function Transcript({
 			? null
 			: (toolCallId: string, optionId: string) =>
 					onAnswer(session, toolCallId, optionId);
+	const sessionScope =
+		session === null ? "null" : `${session.plan}::${session.role}`;
 	return (
 		<>
 			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
@@ -85,7 +87,12 @@ export function Transcript({
 				{groups.map((group, index) =>
 					group.kind === "run" ? (
 						<WorkBox
-							key={group.items[0].id}
+							// Runs are append-only during a turn, so position keys
+							// keep box and row expansion stable across streaming
+							// chunks and live-freeze transitions. Session scope
+							// resets expansion on session change.
+							// biome-ignore lint/suspicious/noArrayIndexKey: append-only runs keep positions stable
+							key={`run-${sessionScope}-${index}`}
 							items={group.items}
 							onRetry={onRetry}
 							onAnswer={boundAnswer}
@@ -275,17 +282,21 @@ function WorkBox({
 				)}
 			</div>
 			<div className="detail" hidden={!open}>
-				{items.map((item) =>
+				{items.map((item, rowIndex) =>
 					item.kind === "thought" ? (
 						<ThoughtRow
-							key={item.id}
+							// Run items only append, so the live __live__ row keeps
+							// its position when it freezes into a stamped thought.
+							// biome-ignore lint/suspicious/noArrayIndexKey: append-only rows keep positions stable
+							key={rowIndex}
 							ms={item.ms}
 							text={item.text}
 							at={item.at}
 						/>
 					) : (
 						<ItemRow
-							key={item.id}
+							// biome-ignore lint/suspicious/noArrayIndexKey: append-only rows keep positions stable
+							key={rowIndex}
 							item={item}
 							onRetry={onRetry}
 							onAnswer={onAnswer}

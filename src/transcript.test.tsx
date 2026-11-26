@@ -896,6 +896,145 @@ describe("transcript row expansion", () => {
 			container.querySelector(".work .summary")?.getAttribute("aria-expanded"),
 		).toBe("false");
 	});
+
+	test("live thought stays open across streaming chunks", () => {
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(5000);
+		try {
+			const props = {
+				start: IDLE,
+				repoLabel: "~/repo",
+				onRetry: vi.fn(),
+				onAnswer: vi.fn(),
+				session: SESSION,
+			} as const;
+			const { container, rerender } = render(
+				<Transcript
+					{...props}
+					items={[{ kind: "user", id: "u1", text: "hi" }]}
+					turn={{
+						since: 1000,
+						live: { startedAt: 4500, updatedAt: 4500, text: "hmm" },
+					}}
+				/>,
+			);
+			fireEvent.click(screen.getByTitle("Expand"));
+			fireEvent.click(screen.getByTitle("Show full thought"));
+			expect(screen.getByTitle("Hide full thought")).toBeInTheDocument();
+			nowSpy.mockReturnValue(6000);
+			rerender(
+				<Transcript
+					{...props}
+					items={[{ kind: "user", id: "u1", text: "hi" }]}
+					turn={{
+						since: 1000,
+						live: { startedAt: 4500, updatedAt: 6000, text: "hmm plus more" },
+					}}
+				/>,
+			);
+			expect(
+				container
+					.querySelector(".work .summary")
+					?.getAttribute("aria-expanded"),
+			).toBe("true");
+			expect(screen.getByTitle("Hide full thought")).toBeInTheDocument();
+			expect(
+				container.querySelector(".thinkfull")?.getAttribute("hidden"),
+			).toBeNull();
+		} finally {
+			nowSpy.mockRestore();
+		}
+	});
+
+	test("box and live thought stay open across live freeze", () => {
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(5000);
+		try {
+			const props = {
+				start: IDLE,
+				repoLabel: "~/repo",
+				onRetry: vi.fn(),
+				onAnswer: vi.fn(),
+				session: SESSION,
+			} as const;
+			const { container, rerender } = render(
+				<Transcript
+					{...props}
+					items={[
+						{
+							kind: "tool",
+							id: "t1",
+							line: {
+								id: "l1",
+								text: "read: a",
+								status: "completed",
+								label: "read",
+							},
+							at: 4000,
+						},
+					]}
+					turn={{
+						since: 1000,
+						live: {
+							startedAt: 4500,
+							updatedAt: 4500,
+							text: "streaming thought",
+						},
+					}}
+				/>,
+			);
+			fireEvent.click(screen.getByTitle("Expand"));
+			fireEvent.click(screen.getByTitle("Show full thought"));
+			expect(screen.getByTitle("Hide full thought")).toBeInTheDocument();
+			nowSpy.mockReturnValue(6000);
+			rerender(
+				<Transcript
+					{...props}
+					items={[
+						{
+							kind: "tool",
+							id: "t1",
+							line: {
+								id: "l1",
+								text: "read: a",
+								status: "completed",
+								label: "read",
+							},
+							at: 4000,
+						},
+						{
+							kind: "thought",
+							id: "frozen-1",
+							ms: 1500,
+							text: "streaming thought",
+							at: 6000,
+						},
+						{
+							kind: "tool",
+							id: "t2",
+							line: {
+								id: "l2",
+								text: "read: b",
+								status: "completed",
+								label: "read",
+							},
+							at: 6000,
+						},
+					]}
+					turn={{ since: 1000, live: null }}
+				/>,
+			);
+			expect(
+				container
+					.querySelector(".work .summary")
+					?.getAttribute("aria-expanded"),
+			).toBe("true");
+			expect(screen.getByTitle("Hide full thought")).toBeInTheDocument();
+			expect(
+				container.querySelector(".thinkfull")?.getAttribute("hidden"),
+			).toBeNull();
+		} finally {
+			nowSpy.mockRestore();
+		}
+	});
 });
 
 describe("transcript tool lines", () => {
