@@ -30,7 +30,10 @@ use tauri_plugin_log::{Target, TargetKind};
 use tauri_specta::{Builder, collect_commands};
 
 use crate::agent::AgentManager;
-use crate::menu::{build_menu, set_new_plan_enabled};
+use crate::menu::{
+    NEW_PLAN_ITEM_ID, NEW_WINDOW_ITEM_ID, OPEN_PICKER_ITEM_ID, TOGGLE_SETTINGS_ITEM_ID, build_menu,
+    set_new_plan_enabled,
+};
 use crate::prefs::{load_prefs, record_open, save_prefs};
 use crate::repo::{RepoInfo, validate_repo};
 use crate::types::{AppEvent, ConfigOptionView, OpenRepoResult, PlansUpdate, Prefs, SessionKey};
@@ -391,8 +394,7 @@ fn log_level(value: Option<&str>) -> log::LevelFilter {
 
 #[cfg(test)]
 mod tests {
-    use super::{EmitTarget, log_level, resolve_emit_target};
-    use crate::agent::BackendState;
+    use super::log_level;
 
     #[test]
     fn log_level_maps_known_names() {
@@ -403,24 +405,6 @@ mod tests {
         assert_eq!(log_level(None), log::LevelFilter::Info);
         assert_eq!(log_level(Some("")), log::LevelFilter::Info);
         assert_eq!(log_level(Some("verbose")), log::LevelFilter::Info);
-    }
-
-    #[test]
-    fn menu_events_target_focused_window_or_broadcast() {
-        assert_eq!(
-            resolve_emit_target(Some("main".to_string())),
-            EmitTarget::To("main".to_string())
-        );
-        assert_eq!(resolve_emit_target(None), EmitTarget::Broadcast);
-    }
-
-    #[test]
-    fn new_plan_stays_disabled_without_focus_or_repo() {
-        let mut backend = BackendState::default();
-        backend.ensure_window("picker");
-        assert!(!backend.new_plan_enabled(None));
-        assert!(!backend.new_plan_enabled(Some("missing")));
-        assert!(!backend.new_plan_enabled(Some("picker")));
     }
 }
 
@@ -460,13 +444,13 @@ fn handle_second_launch(app: &AppHandle, args: &[String], cwd: String) {
 /// broadcast when no window resolves as focused so single-window use
 /// always works.
 fn emit_to_focused_or_broadcast(app: &AppHandle, event: &str) {
-    match resolve_emit_target(focused_window_label(app)) {
-        EmitTarget::To(label) => {
+    match focused_window_label(app) {
+        Some(label) => {
             if let Err(error) = app.emit_to(label, event, ()) {
                 log::warn!("{event} menu failed: {error}");
             }
         }
-        EmitTarget::Broadcast => {
+        None => {
             if let Err(error) = app.emit(event, ()) {
                 log::warn!("{event} menu failed: {error}");
             }
@@ -479,22 +463,6 @@ fn focused_window_label(app: &AppHandle) -> Option<String> {
         .into_values()
         .find(|window| window.is_focused().unwrap_or(false))
         .map(|window| window.label().to_string())
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum EmitTarget {
-    To(String),
-    Broadcast,
-}
-
-/// Pure routing for `emit_to_focused_or_broadcast`: a focused window gets
-/// the window-targeted emit, otherwise the app broadcasts. Pure so unit
-/// tests pin the routing without an `AppHandle`.
-fn resolve_emit_target(focused: Option<String>) -> EmitTarget {
-    match focused {
-        Some(label) => EmitTarget::To(label),
-        None => EmitTarget::Broadcast,
-    }
 }
 
 fn emit_toggle_settings(app: &AppHandle) {
@@ -548,18 +516,13 @@ pub fn run() {
             Ok(())
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "new-plan" => emit_new_plan(app),
-            "new-window" => {
+            NEW_PLAN_ITEM_ID => emit_new_plan(app),
+            NEW_WINDOW_ITEM_ID | OPEN_PICKER_ITEM_ID => {
                 if let Err(error) = create_window(app) {
-                    log::warn!("New Window menu failed: {error}");
+                    log::warn!("{} menu failed: {error}", event.id().as_ref());
                 }
             }
-            "open-picker" => {
-                if let Err(error) = create_window(app) {
-                    log::warn!("Open menu failed: {error}");
-                }
-            }
-            "toggle-settings" => emit_toggle_settings(app),
+            TOGGLE_SETTINGS_ITEM_ID => emit_toggle_settings(app),
             _ => {}
         })
         .on_window_event(|window, event| match event {

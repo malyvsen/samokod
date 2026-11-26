@@ -1,7 +1,14 @@
-import { screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { App } from "./App";
 import { testDefaults, testEntry, testKey } from "./fixtures";
-import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
+import {
+	api,
+	emitAppEvent,
+	emitNewPlan,
+	openChat,
+	stubMatchMedia,
+} from "./testHarness";
 
 vi.mock("./api", async () => {
 	const { api } = await import("./testHarness");
@@ -691,6 +698,25 @@ describe("plan", () => {
 		expect(
 			await screen.findByRole("textbox", { name: "Ask for a change…" }),
 		).toBeInTheDocument();
+	});
+
+	test("menu new plan forwards the current draft to createPlan", async () => {
+		api.createPlan.mockResolvedValue({
+			plans: [testEntry()],
+			selected: { plan: "2026-09-25.10-54-59", role: "scoping" },
+			config_defaults: testDefaults(),
+		});
+		const user = await openChat(api);
+		await user.keyboard("hello draft");
+		emitNewPlan(api);
+		expect(api.createPlan).toHaveBeenCalledWith("hello draft");
+	});
+
+	test("menu new plan in picker does not call createPlan", async () => {
+		render(<App />);
+		await screen.findByRole("button", { name: "browse…" });
+		emitNewPlan(api);
+		expect(api.createPlan).not.toHaveBeenCalled();
 	});
 
 	test("failed turns show retry that resends", async () => {

@@ -85,19 +85,18 @@ export function emitAppEvents(apiMock: typeof api, events: AppEvent[]): void {
 }
 
 export function emitToggleSettings(apiMock: typeof api): void {
-	const handlers = mockHandlers<() => void>(
-		apiMock.onToggleSettings,
-		"toggle-settings",
-	);
-	act(() => {
-		for (const handler of handlers) {
-			handler();
-		}
-	});
+	emitMenuSignal(apiMock.onToggleSettings, "toggle-settings");
 }
 
 export function emitNewPlan(apiMock: typeof api): void {
-	const handlers = mockHandlers<() => void>(apiMock.onNewPlan, "new-plan");
+	emitMenuSignal(apiMock.onNewPlan, "new-plan");
+}
+
+function emitMenuSignal(
+	subscribe: { mock: { calls: unknown[][] } },
+	what: string,
+): void {
+	const handlers = mockHandlers<() => void>(subscribe, what);
 	act(() => {
 		for (const handler of handlers) {
 			handler();

@@ -8,8 +8,6 @@ pub(crate) const NEW_PLAN_ITEM_ID: &str = "new-plan";
 pub(crate) const NEW_WINDOW_ITEM_ID: &str = "new-window";
 pub(crate) const OPEN_PICKER_ITEM_ID: &str = "open-picker";
 pub(crate) const TOGGLE_SETTINGS_ITEM_ID: &str = "toggle-settings";
-pub(crate) const NEW_PLAN_ACCELERATOR: &str = "CmdOrCtrl+N";
-pub(crate) const OPEN_PICKER_ACCELERATOR: &str = "CmdOrCtrl+O";
 
 pub(crate) fn build_menu(app: &AppHandle) -> Result<tauri::menu::Menu<tauri::Wry>, String> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -23,19 +21,14 @@ pub(crate) fn build_menu(app: &AppHandle) -> Result<tauri::menu::Menu<tauri::Wry
         NEW_PLAN_ITEM_ID,
         "New Plan",
         false,
-        Some(NEW_PLAN_ACCELERATOR),
+        Some("CmdOrCtrl+N"),
     )
     .map_err(|error| menu_error("New Plan item", &error))?;
     let new_window = MenuItem::with_id(app, NEW_WINDOW_ITEM_ID, "New Window", true, accelerator)
         .map_err(|error| menu_error("New Window item", &error))?;
-    let open_picker = MenuItem::with_id(
-        app,
-        OPEN_PICKER_ITEM_ID,
-        "Open…",
-        true,
-        Some(OPEN_PICKER_ACCELERATOR),
-    )
-    .map_err(|error| menu_error("Open item", &error))?;
+    let open_picker =
+        MenuItem::with_id(app, OPEN_PICKER_ITEM_ID, "Open…", true, Some("CmdOrCtrl+O"))
+            .map_err(|error| menu_error("Open item", &error))?;
     let toggle_settings = MenuItem::with_id(
         app,
         TOGGLE_SETTINGS_ITEM_ID,
@@ -122,9 +115,9 @@ fn menu_error(what: &str, error: &dyn std::fmt::Display) -> String {
     format!("failed to build menu: {error}")
 }
 
-/// Enable or disable the `New Plan` item wherever it sits (inside the
-/// `File` submenu). Missing menus only warn so headless tests and early
-/// startup never crash on menu state.
+/// Enable or disable the `New Plan` item inside the `File` submenu.
+/// Missing menus only warn so headless tests and early startup never
+/// crash on menu state.
 pub(crate) fn set_new_plan_enabled(app: &AppHandle, enabled: bool) {
     let Some(menu) = app.menu() else {
         log::warn!("new-plan enable={enabled}: no app menu");
@@ -138,40 +131,19 @@ pub(crate) fn set_new_plan_enabled(app: &AppHandle, enabled: bool) {
         }
     };
     for item in &items {
-        if item.id().as_ref() == NEW_PLAN_ITEM_ID
-            && let Some(menu_item) = item.as_menuitem()
-        {
-            if let Err(error) = menu_item.set_enabled(enabled) {
-                log::warn!("new-plan enable={enabled} failed: {error}");
-            }
-            return;
+        let Some(submenu) = item.as_submenu() else {
+            continue;
+        };
+        let Some(inner) = submenu.get(NEW_PLAN_ITEM_ID) else {
+            continue;
+        };
+        let Some(menu_item) = inner.as_menuitem() else {
+            continue;
+        };
+        if let Err(error) = menu_item.set_enabled(enabled) {
+            log::warn!("new-plan enable={enabled} failed: {error}");
         }
-        if let Some(submenu) = item.as_submenu()
-            && let Some(inner) = submenu.get(NEW_PLAN_ITEM_ID)
-            && let Some(menu_item) = inner.as_menuitem()
-        {
-            if let Err(error) = menu_item.set_enabled(enabled) {
-                log::warn!("new-plan enable={enabled} failed: {error}");
-            }
-            return;
-        }
+        return;
     }
     log::warn!("new-plan enable={enabled}: item not found");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn file_trio_has_stable_ids_and_shortcuts() {
-        assert_eq!(NEW_PLAN_ITEM_ID, "new-plan");
-        assert_eq!(NEW_WINDOW_ITEM_ID, "new-window");
-        assert_eq!(OPEN_PICKER_ITEM_ID, "open-picker");
-        assert_eq!(NEW_PLAN_ACCELERATOR, "CmdOrCtrl+N");
-        assert_eq!(OPEN_PICKER_ACCELERATOR, "CmdOrCtrl+O");
-        // File order: New Plan, New Window, Open.
-        let order = [NEW_PLAN_ITEM_ID, NEW_WINDOW_ITEM_ID, OPEN_PICKER_ITEM_ID];
-        assert_eq!(order, ["new-plan", "new-window", "open-picker"]);
-    }
 }

@@ -120,8 +120,6 @@ export function App() {
 	const selectedRef = useRef<SessionKey | null>(null);
 	selectedRef.current = selectedKey;
 	const chatsRef = useRef<Chats>({});
-	const viewRef = useRef(view);
-	viewRef.current = view;
 	const handleNewPlanRef = useRef<() => void>(() => {});
 
 	// Single write path for chats. The ref publishes synchronously so events
@@ -656,6 +654,7 @@ export function App() {
 	}
 
 	async function handleNewPlan() {
+		if (view.kind === "picker") return;
 		const current = selectedRef.current;
 		const currentDraft =
 			current === null ? null : (draft.draftFor(current) ?? null);
@@ -690,10 +689,7 @@ export function App() {
 		}
 	}
 
-	handleNewPlanRef.current = () => {
-		if (viewRef.current.kind === "picker") return;
-		void handleNewPlan();
-	};
+	handleNewPlanRef.current = () => void handleNewPlan();
 
 	async function handleExecute(key: SessionKey) {
 		updateChat(key, (chat) => markSent(chat));

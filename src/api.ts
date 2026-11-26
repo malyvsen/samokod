@@ -180,18 +180,14 @@ export function onAppEvent(handler: (event: AppEvent) => void): () => void {
 }
 
 export function onToggleSettings(handler: () => void): () => void {
-	return onMenuSignal("samokod://toggle-settings", "toggle-settings", handler);
+	return onMenuSignal("samokod://toggle-settings", handler);
 }
 
 export function onNewPlan(handler: () => void): () => void {
-	return onMenuSignal("samokod://new-plan", "new-plan", handler);
+	return onMenuSignal("samokod://new-plan", handler);
 }
 
-function onMenuSignal(
-	event: string,
-	label: string,
-	handler: () => void,
-): () => void {
+function onMenuSignal(event: string, handler: () => void): () => void {
 	const { track, cleanup } = trackingSubscriptions();
 	// The backend emits window-targeted when a window is focused and
 	// broadcasts otherwise; both channel subscriptions receive the emit,
@@ -210,12 +206,12 @@ function onMenuSignal(
 		.listen(event, fire)
 		.then(track)
 		.catch((error: unknown) => {
-			console.warn(`failed to subscribe to ${label} events`, error);
+			console.warn(`failed to subscribe to ${event} events`, error);
 		});
 	listen(event, fire)
 		.then(track)
 		.catch((error: unknown) => {
-			console.warn(`failed to subscribe to ${label} events`, error);
+			console.warn(`failed to subscribe to ${event} events`, error);
 		});
 	return cleanup;
 }
