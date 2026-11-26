@@ -78,6 +78,7 @@ body {
 	filter: blur(24px);
 	animation: drift 39s ease-in-out infinite alternate;
 	overflow: hidden;
+	opacity: 0.45;
 }
 
 .rays {
@@ -86,6 +87,7 @@ body {
 	pointer-events: none;
 	filter: blur(26px);
 	mix-blend-mode: screen;
+	opacity: 0.55;
 	-webkit-mask-image: radial-gradient(
 		85% 75% at 50% 108%,
 		#000 20%,
@@ -300,6 +302,7 @@ body {
 			transparent 70%
 		);
 	filter: blur(32px);
+	opacity: 0.5;
 	transform: translate3d(
 		calc(var(--mx, 0) * 18px),
 		calc(var(--my, 0) * 10px),
@@ -508,7 +511,7 @@ body {
 
 .msg.draft .edit:empty::before {
 	content: attr(data-placeholder);
-	color: #6f6c66;
+	color: #8f8c85;
 }
 
 .queued {
