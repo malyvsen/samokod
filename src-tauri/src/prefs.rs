@@ -3,6 +3,7 @@
 // over an explicit directory so tests never touch the real profile.
 use std::path::Path;
 
+use crate::repo_state::ConfigRole;
 use crate::types::{Prefs, RecentRepo};
 
 const STATE_FILE: &str = "state.json";
@@ -60,6 +61,16 @@ pub fn record_open(prefs: &mut Prefs, path: &str) {
     prefs.recent.truncate(MAX_RECENT);
 }
 
+/// Record the last manually selected model/effort as the global default.
+/// `None` clears that role while preserving the other. Pure.
+pub fn record_global_choice(prefs: &mut Prefs, role: ConfigRole, value: Option<&str>) {
+    let slot = match role {
+        ConfigRole::Model => &mut prefs.default_model,
+        ConfigRole::Effort => &mut prefs.default_effort,
+    };
+    *slot = value.map(str::to_string);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +109,41 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join(STATE_FILE), "{oops").expect("write");
         assert_eq!(load_prefs(dir.path()), Prefs::default());
+    }
+
+    #[test]
+    fn global_choice_sets_model() {
+        let mut prefs = Prefs::default();
+        record_global_choice(&mut prefs, ConfigRole::Model, Some("m1"));
+        assert_eq!(prefs.default_model.as_deref(), Some("m1"));
+        assert_eq!(prefs.default_effort, None);
+    }
+
+    #[test]
+    fn global_choice_sets_effort() {
+        let mut prefs = Prefs::default();
+        record_global_choice(&mut prefs, ConfigRole::Effort, Some("high"));
+        assert_eq!(prefs.default_effort.as_deref(), Some("high"));
+        assert_eq!(prefs.default_model, None);
+    }
+
+    #[test]
+    fn global_choice_clear_preserves_other() {
+        let mut prefs = Prefs::default();
+        record_global_choice(&mut prefs, ConfigRole::Model, Some("m1"));
+        record_global_choice(&mut prefs, ConfigRole::Effort, Some("high"));
+        record_global_choice(&mut prefs, ConfigRole::Model, None);
+        assert_eq!(prefs.default_model, None);
+        assert_eq!(prefs.default_effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn global_choice_round_trips_through_disk() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut prefs = Prefs::default();
+        record_global_choice(&mut prefs, ConfigRole::Model, Some("m1"));
+        record_global_choice(&mut prefs, ConfigRole::Effort, Some("high"));
+        save_prefs(dir.path(), &prefs).expect("save");
+        assert_eq!(load_prefs(dir.path()), prefs);
     }
 }

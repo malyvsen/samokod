@@ -310,11 +310,15 @@ export type Prefs = Prefs_Serialize | Prefs_Deserialize;
 /**  Local state persisted under the OS app-data directory. */
 export type Prefs_Deserialize = {
 	recent?: RecentRepo[],
+	default_model?: string | null,
+	default_effort?: string | null,
 };
 
 /**  Local state persisted under the OS app-data directory. */
 export type Prefs_Serialize = {
 	recent: RecentRepo[],
+	default_model?: string,
+	default_effort?: string,
 };
 
 /**

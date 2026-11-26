@@ -492,6 +492,10 @@ impl AppEvent {
 pub struct Prefs {
     #[serde(default)]
     pub recent: Vec<RecentRepo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<String>,
 }
 
 #[cfg(test)]
