@@ -24,7 +24,7 @@ mod worktrees;
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager, State, Window};
+use tauri::{AppHandle, Emitter, Manager, State, Window};
 use tauri_plugin_log::{Target, TargetKind};
 
 use tauri_specta::{Builder, collect_commands};
@@ -440,6 +440,29 @@ fn handle_second_launch(app: &AppHandle, args: &[String], cwd: String) {
     }
 }
 
+/// Forward the native Settings item to the focused window, falling back
+/// to a broadcast when no window resolves as focused so single-window use
+/// always works.
+fn emit_toggle_settings(app: &AppHandle) {
+    let focused = app
+        .webview_windows()
+        .into_values()
+        .find(|window| window.is_focused().unwrap_or(false))
+        .map(|window| window.label().to_string());
+    match focused {
+        Some(label) => {
+            if let Err(error) = app.emit_to(label, "samokod://toggle-settings", ()) {
+                log::warn!("Toggle settings menu failed: {error}");
+            }
+        }
+        None => {
+            if let Err(error) = app.emit("samokod://toggle-settings", ()) {
+                log::warn!("Toggle settings menu failed: {error}");
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     cli::maybe_detach();
@@ -468,29 +491,14 @@ pub fn run() {
             app.set_menu(menu)?;
             Ok(())
         })
-        .on_menu_event(|app, event| {
-            if event.id().as_ref() == "new-window"
-                && let Err(error) = create_window(app)
-            {
-                log::warn!("New Window menu failed: {error}");
-            }
-            if event.id().as_ref() == "toggle-settings" {
-                use tauri::{Emitter, Manager};
-                let mut focused: Option<String> = None;
-                for (label, window) in app.webview_windows() {
-                    if window.is_focused().unwrap_or(false) {
-                        focused = Some(label);
-                        break;
-                    }
-                }
-                if let Some(label) = focused {
-                    if let Err(error) = app.emit_to(label, "samokod://toggle-settings", ()) {
-                        log::warn!("Toggle settings menu failed: {error}");
-                    }
-                } else if let Err(error) = app.emit("samokod://toggle-settings", ()) {
-                    log::warn!("Toggle settings menu failed: {error}");
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "new-window" => {
+                if let Err(error) = create_window(app) {
+                    log::warn!("New Window menu failed: {error}");
                 }
             }
+            "toggle-settings" => emit_toggle_settings(app),
+            _ => {}
         })
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {

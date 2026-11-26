@@ -1,5 +1,6 @@
 // App menu: App, File, Edit basics per Tauri menu defaults, plus File >
-// New Window. New Window binds Shift+Cmd+N on macOS; Cmd+N stays unbound
+// New Window. Settings lives in the app menu on macOS and in File
+// elsewhere. New Window binds Shift+Cmd+N on macOS; Cmd+N stays unbound
 // for future new-plan use.
 use tauri::AppHandle;
 
@@ -23,32 +24,26 @@ pub(crate) fn build_menu(app: &AppHandle) -> Result<tauri::menu::Menu<tauri::Wry
     let close = PredefinedMenuItem::close_window(app, None)
         .map_err(|error| menu_error("Close Window item", &error))?;
     #[cfg(not(target_os = "macos"))]
-    let file_quit =
+    let quit =
         PredefinedMenuItem::quit(app, None).map_err(|error| menu_error("Quit item", &error))?;
     #[cfg(not(target_os = "macos"))]
-    let file_sep_before =
+    let settings_sep_before =
         PredefinedMenuItem::separator(app).map_err(|error| menu_error("File separator", &error))?;
     #[cfg(not(target_os = "macos"))]
-    let file_sep_after =
+    let settings_sep_after =
         PredefinedMenuItem::separator(app).map_err(|error| menu_error("File separator", &error))?;
-    #[cfg(target_os = "macos")]
-    let file = Submenu::with_items(app, "File", true, &[&new_window, &close])
+    let mut file_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![&new_window];
+    #[cfg(not(target_os = "macos"))]
+    {
+        file_items.push(&settings_sep_before);
+        file_items.push(&toggle_settings);
+        file_items.push(&settings_sep_after);
+    }
+    file_items.push(&close);
+    #[cfg(not(target_os = "macos"))]
+    file_items.push(&quit);
+    let file = Submenu::with_items(app, "File", true, &file_items)
         .map_err(|error| menu_error("File menu", &error))?;
-    #[cfg(not(target_os = "macos"))]
-    let file = Submenu::with_items(
-        app,
-        "File",
-        true,
-        &[
-            &new_window,
-            &file_sep_before,
-            &toggle_settings,
-            &file_sep_after,
-            &close,
-            &file_quit,
-        ],
-    )
-    .map_err(|error| menu_error("File menu", &error))?;
     let edit = Submenu::with_items(
         app,
         "Edit",

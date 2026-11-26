@@ -44,14 +44,21 @@ export const dialog = {
 
 type AppEventHandler = (event: AppEvent) => void;
 
-function appEventHandlers(apiMock: typeof api): AppEventHandler[] {
-	const calls = apiMock.onAppEvent.mock.calls as unknown as AppEventHandler[][];
-	if (calls.length === 0) throw new Error("no app event handler");
+function mockHandlers<T>(
+	mockFn: { mock: { calls: unknown[][] } },
+	what: string,
+): T[] {
+	const calls = mockFn.mock.calls as T[][];
+	if (calls.length === 0) throw new Error(`no ${what} handler`);
 	return calls.map((call) => {
 		const handler = call[0];
-		if (handler === undefined) throw new Error("no app event handler");
+		if (handler === undefined) throw new Error(`no ${what} handler`);
 		return handler;
 	});
+}
+
+function appEventHandlers(apiMock: typeof api): AppEventHandler[] {
+	return mockHandlers<AppEventHandler>(apiMock.onAppEvent, "app event");
 }
 
 export function appEventHandler(apiMock: typeof api): AppEventHandler {
@@ -77,13 +84,12 @@ export function emitAppEvents(apiMock: typeof api, events: AppEvent[]): void {
 }
 
 export function emitToggleSettings(apiMock: typeof api): void {
-	const calls = apiMock.onToggleSettings.mock
-		.calls as unknown as (() => void)[][];
-	if (calls.length === 0) throw new Error("no toggle-settings handler");
+	const handlers = mockHandlers<() => void>(
+		apiMock.onToggleSettings,
+		"toggle-settings",
+	);
 	act(() => {
-		for (const call of calls) {
-			const handler = call[0];
-			if (handler === undefined) throw new Error("no toggle-settings handler");
+		for (const handler of handlers) {
 			handler();
 		}
 	});

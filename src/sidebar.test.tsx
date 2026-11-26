@@ -36,24 +36,30 @@ beforeEach(() => {
 	api.planMdText.mockResolvedValue(null);
 });
 
-describe("toggle settings", () => {
+describe("sidebar", () => {
 	test("native menu event flips between plans and settings", async () => {
 		await openChat(api);
 		expect(
 			screen.getByRole("button", { name: "New plan" }),
 		).toBeInTheDocument();
-		const footer = screen.getByText("/repo · feature");
-		expect(footer.className).toContain("repo-dim");
-		expect(footer.getAttribute("title")).toBe("/repo · feature");
 		emitToggleSettings(api);
 		await screen.findByText("MODEL");
 		expect(
 			screen.queryByRole("button", { name: "New plan" }),
 		).not.toBeInTheDocument();
-		const settingsFooter = screen.getByText("/repo · feature");
-		expect(settingsFooter.getAttribute("title")).toBe("/repo · feature");
 		emitToggleSettings(api);
 		await screen.findByRole("button", { name: "New plan" });
 		expect(screen.queryByText("MODEL")).not.toBeInTheDocument();
+	});
+
+	test("repo footer shows in both modes", async () => {
+		await openChat(api);
+		const footer = screen.getByText("/repo · feature");
+		expect(footer.className).toContain("sidebar-footer");
+		expect(footer.getAttribute("title")).toBe("/repo · feature");
+		emitToggleSettings(api);
+		await screen.findByText("MODEL");
+		const settingsFooter = screen.getByText("/repo · feature");
+		expect(settingsFooter.getAttribute("title")).toBe("/repo · feature");
 	});
 });

@@ -38,6 +38,11 @@ import { PlansPanel } from "./components/PlansPanel";
 import { QueuedBubbleList } from "./components/QueuedBubble";
 import { RepoPicker } from "./components/RepoPicker";
 import { SettingsPanel } from "./components/SettingsPanel";
+import {
+	flipSidebarMode,
+	Sidebar,
+	type SidebarMode,
+} from "./components/Sidebar";
 import { CommitsPanel, SidePanel } from "./components/SidePanel";
 import { Transcript } from "./components/Transcript";
 import {
@@ -99,7 +104,7 @@ export function App() {
 		model: null,
 		effort: null,
 	});
-	const [sidebarMode, setSidebarMode] = useState<"plans" | "settings">("plans");
+	const [sidebarMode, setSidebarMode] = useState<SidebarMode>("plans");
 	const appRef = useRef<HTMLDivElement>(null);
 	const notifyEdit = useAuroraMotion(appRef);
 	const configGeneration = useRef(0);
@@ -280,13 +285,7 @@ export function App() {
 
 	useEffect(() => onAppEvent(handleEvent), [handleEvent]);
 
-	useEffect(
-		() =>
-			onToggleSettings(() =>
-				setSidebarMode((mode) => (mode === "plans" ? "settings" : "plans")),
-			),
-		[],
-	);
+	useEffect(() => onToggleSettings(() => setSidebarMode(flipSidebarMode)), []);
 
 	// Picker marks come from the initial list plus the global
 	// `open_repos_changed` handler above.
@@ -810,7 +809,12 @@ export function App() {
 				/>
 			) : (
 				<div className="mainrow">
-					<div className={sidebarMode === "plans" ? "plans" : "plans settings"}>
+					<Sidebar
+						mode={sidebarMode}
+						repoLabel={repoLabel}
+						repoRoot={repoRoot}
+						branch={branch}
+					>
 						{sidebarMode === "plans" ? (
 							<PlansPanel
 								plans={plans}
@@ -834,15 +838,7 @@ export function App() {
 								}
 							/>
 						)}
-						<div className="plans-footer">
-							<span
-								className="repo-dim"
-								title={`${repoRoot ?? "no repo"} · ${branch}`}
-							>
-								{repoLabel} · {branch}
-							</span>
-						</div>
-					</div>
+					</Sidebar>
 					<div className="chatcol">
 						<div className="transcript" ref={scrollRef} onScroll={onScroll}>
 							<Transcript

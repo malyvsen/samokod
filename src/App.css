@@ -342,14 +342,10 @@ body {
 	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
 }
 
-.plans-footer {
+.sidebar-footer {
 	margin-top: auto;
 	border-top: 1px solid rgba(255, 255, 255, 0.12);
 	padding-top: 8px;
-}
-
-.repo-dim {
-	display: block;
 	font-size: 11px;
 	color: #6f6c66;
 	white-space: nowrap;
@@ -526,7 +522,7 @@ body {
 	border-color: rgba(255, 200, 60, 0.55);
 }
 
-/* hover-reveal mirrors .plans .sbtn */
+/* hover-reveal mirrors .sidebar .sbtn */
 .qmove {
 	display: flex;
 	gap: 4px;
@@ -1158,7 +1154,7 @@ button.arow {
 	min-height: 0;
 }
 
-.plans {
+.sidebar {
 	flex: none;
 	width: 280px;
 	border-right: 1px solid rgba(255, 255, 255, 0.12);
@@ -1170,7 +1166,7 @@ button.arow {
 	gap: 4px;
 }
 
-.plans.settings {
+.sidebar.settings {
 	gap: 10px;
 }
 
@@ -1213,7 +1209,7 @@ button.arow {
 	padding: 12px 2px 4px;
 }
 
-.plans > .sect-head:first-of-type {
+.sidebar > .sect-head:first-of-type {
 	padding-top: 0;
 }
 
@@ -1646,8 +1642,8 @@ button.arow {
 	);
 }
 
-.plans .sect-head:hover .sbtn,
-.plans .sect-head:focus-within .sbtn {
+.sidebar .sect-head:hover .sbtn,
+.sidebar .sect-head:focus-within .sbtn {
 	opacity: 1;
 }
 
@@ -1721,7 +1717,7 @@ button.arow {
 }
 
 /* biome-ignore lint/style/noDescendingSpecificity: hidden opacity is overridden by higher-specificity tree visibility regardless of order */
-.plans .sect-head .sbtn {
+.sidebar .sect-head .sbtn {
 	opacity: 0;
 }
 

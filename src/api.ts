@@ -144,15 +144,7 @@ function isBroadcast(event: AppEvent): boolean {
 }
 
 export function onAppEvent(handler: (event: AppEvent) => void): () => void {
-	let cancelled = false;
-	const stops: (() => void)[] = [];
-	function track(stop: () => void) {
-		if (cancelled) {
-			stop();
-		} else {
-			stops.push(stop);
-		}
-	}
+	const { track, cleanup } = trackingSubscriptions();
 	function subscribe(
 		start: (accept: (event: AppEvent) => boolean) => Promise<() => void>,
 		accept: (event: AppEvent) => boolean,
@@ -184,15 +176,11 @@ export function onAppEvent(handler: (event: AppEvent) => void): () => void {
 		isBroadcast,
 		"app",
 	);
-	return () => {
-		cancelled = true;
-		for (const stop of stops) stop();
-	};
+	return cleanup;
 }
 
 export function onToggleSettings(handler: () => void): () => void {
-	let cancelled = false;
-	const stops: (() => void)[] = [];
+	const { track, cleanup } = trackingSubscriptions();
 	// The backend emits window-targeted when a window is focused and
 	// broadcasts otherwise; both channel subscriptions receive the emit,
 	// so coalesce synchronous duplicates into a single toggle.
@@ -204,13 +192,6 @@ export function onToggleSettings(handler: () => void): () => void {
 			pending = false;
 		});
 		handler();
-	}
-	function track(stop: () => void) {
-		if (cancelled) {
-			stop();
-		} else {
-			stops.push(stop);
-		}
 	}
 	const window = getCurrentWebviewWindow();
 	window
@@ -224,8 +205,28 @@ export function onToggleSettings(handler: () => void): () => void {
 		.catch((error: unknown) => {
 			console.warn("failed to subscribe to toggle-settings events", error);
 		});
-	return () => {
+	return cleanup;
+}
+
+// Shared stop-list for the dual window/app subscriptions above: cleanup
+// before either listen resolves still unlistens, and resubscribes (as in
+// StrictMode) never leak the earlier stops.
+function trackingSubscriptions(): {
+	track: (stop: () => void) => void;
+	cleanup: () => void;
+} {
+	let cancelled = false;
+	const stops: (() => void)[] = [];
+	function track(stop: () => void) {
+		if (cancelled) {
+			stop();
+		} else {
+			stops.push(stop);
+		}
+	}
+	function cleanup() {
 		cancelled = true;
 		for (const stop of stops) stop();
-	};
+	}
+	return { track, cleanup };
 }
