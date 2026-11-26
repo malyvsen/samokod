@@ -22,7 +22,7 @@ tasks:
   dev:
     desc: Run the app in development mode (no auto-reload - restart when idle)
     cmds:
-      - pnpm tauri dev --no-watch
+      - pnpm tauri dev --no-watch --config src-tauri/tauri.dev.conf.json
 
   check:
     desc: Run all checks
