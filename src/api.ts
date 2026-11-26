@@ -189,3 +189,43 @@ export function onAppEvent(handler: (event: AppEvent) => void): () => void {
 		for (const stop of stops) stop();
 	};
 }
+
+export function onToggleSettings(handler: () => void): () => void {
+	let cancelled = false;
+	const stops: (() => void)[] = [];
+	// The backend emits window-targeted when a window is focused and
+	// broadcasts otherwise; both channel subscriptions receive the emit,
+	// so coalesce synchronous duplicates into a single toggle.
+	let pending = false;
+	function fire() {
+		if (pending) return;
+		pending = true;
+		queueMicrotask(() => {
+			pending = false;
+		});
+		handler();
+	}
+	function track(stop: () => void) {
+		if (cancelled) {
+			stop();
+		} else {
+			stops.push(stop);
+		}
+	}
+	const window = getCurrentWebviewWindow();
+	window
+		.listen("samokod://toggle-settings", fire)
+		.then(track)
+		.catch((error: unknown) => {
+			console.warn("failed to subscribe to toggle-settings events", error);
+		});
+	listen("samokod://toggle-settings", fire)
+		.then(track)
+		.catch((error: unknown) => {
+			console.warn("failed to subscribe to toggle-settings events", error);
+		});
+	return () => {
+		cancelled = true;
+		for (const stop of stops) stop();
+	};
+}

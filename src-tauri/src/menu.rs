@@ -12,18 +12,43 @@ pub(crate) fn build_menu(app: &AppHandle) -> Result<tauri::menu::Menu<tauri::Wry
     let accelerator: Option<&str> = None;
     let new_window = MenuItem::with_id(app, "new-window", "New Window", true, accelerator)
         .map_err(|error| menu_error("New Window item", &error))?;
-    let mut file_items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![&new_window];
+    let toggle_settings = MenuItem::with_id(
+        app,
+        "toggle-settings",
+        "Settings…",
+        true,
+        Some("CmdOrCtrl+,"),
+    )
+    .map_err(|error| menu_error("Settings item", &error))?;
     let close = PredefinedMenuItem::close_window(app, None)
         .map_err(|error| menu_error("Close Window item", &error))?;
-    file_items.push(&close);
     #[cfg(not(target_os = "macos"))]
-    {
-        let quit =
-            PredefinedMenuItem::quit(app, None).map_err(|error| menu_error("Quit item", &error))?;
-        file_items.push(&quit);
-    }
-    let file = Submenu::with_items(app, "File", true, &file_items)
+    let file_quit =
+        PredefinedMenuItem::quit(app, None).map_err(|error| menu_error("Quit item", &error))?;
+    #[cfg(not(target_os = "macos"))]
+    let file_sep_before =
+        PredefinedMenuItem::separator(app).map_err(|error| menu_error("File separator", &error))?;
+    #[cfg(not(target_os = "macos"))]
+    let file_sep_after =
+        PredefinedMenuItem::separator(app).map_err(|error| menu_error("File separator", &error))?;
+    #[cfg(target_os = "macos")]
+    let file = Submenu::with_items(app, "File", true, &[&new_window, &close])
         .map_err(|error| menu_error("File menu", &error))?;
+    #[cfg(not(target_os = "macos"))]
+    let file = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[
+            &new_window,
+            &file_sep_before,
+            &toggle_settings,
+            &file_sep_after,
+            &close,
+            &file_quit,
+        ],
+    )
+    .map_err(|error| menu_error("File menu", &error))?;
     let edit = Submenu::with_items(
         app,
         "Edit",
@@ -54,6 +79,9 @@ pub(crate) fn build_menu(app: &AppHandle) -> Result<tauri::menu::Menu<tauri::Wry
             &[
                 &PredefinedMenuItem::about(app, None, None)
                     .map_err(|error| menu_error("About item", &error))?,
+                &PredefinedMenuItem::separator(app)
+                    .map_err(|error| menu_error("App separator", &error))?,
+                &toggle_settings,
                 &PredefinedMenuItem::separator(app)
                     .map_err(|error| menu_error("App separator", &error))?,
                 &PredefinedMenuItem::quit(app, None)

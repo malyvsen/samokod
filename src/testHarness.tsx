@@ -31,6 +31,7 @@ export const api = {
 	loadHistory: vi.fn(),
 	planMdText: vi.fn(async () => null as string | null),
 	onAppEvent: vi.fn(() => () => {}),
+	onToggleSettings: vi.fn(() => () => {}),
 	listOpenRepos: vi.fn(async () => [] as OpenRepoEntry[]),
 	focusWindow: vi.fn(async () => {}),
 	newWindow: vi.fn(async () => "window-1"),
@@ -71,6 +72,19 @@ export function emitAppEvents(apiMock: typeof api, events: AppEvent[]): void {
 			for (const handler of handlers) {
 				handler(event);
 			}
+		}
+	});
+}
+
+export function emitToggleSettings(apiMock: typeof api): void {
+	const calls = apiMock.onToggleSettings.mock
+		.calls as unknown as (() => void)[][];
+	if (calls.length === 0) throw new Error("no toggle-settings handler");
+	act(() => {
+		for (const call of calls) {
+			const handler = call[0];
+			if (handler === undefined) throw new Error("no toggle-settings handler");
+			handler();
 		}
 	});
 }

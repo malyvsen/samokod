@@ -474,6 +474,23 @@ pub fn run() {
             {
                 log::warn!("New Window menu failed: {error}");
             }
+            if event.id().as_ref() == "toggle-settings" {
+                use tauri::{Emitter, Manager};
+                let mut focused: Option<String> = None;
+                for (label, window) in app.webview_windows() {
+                    if window.is_focused().unwrap_or(false) {
+                        focused = Some(label);
+                        break;
+                    }
+                }
+                if let Some(label) = focused {
+                    if let Err(error) = app.emit_to(label, "samokod://toggle-settings", ()) {
+                        log::warn!("Toggle settings menu failed: {error}");
+                    }
+                } else if let Err(error) = app.emit("samokod://toggle-settings", ()) {
+                    log::warn!("Toggle settings menu failed: {error}");
+                }
+            }
         })
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {

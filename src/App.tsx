@@ -10,6 +10,7 @@ import {
 	listOpenRepos,
 	loadHistory,
 	onAppEvent,
+	onToggleSettings,
 	openRepo,
 	refreshBranch,
 	retryLast,
@@ -279,6 +280,14 @@ export function App() {
 	}, []);
 
 	useEffect(() => onAppEvent(handleEvent), [handleEvent]);
+
+	useEffect(
+		() =>
+			onToggleSettings(() =>
+				setSidebarMode((mode) => (mode === "plans" ? "settings" : "plans")),
+			),
+		[],
+	);
 
 	// Picker marks come from the initial list plus the global
 	// `open_repos_changed` handler above.
