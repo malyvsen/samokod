@@ -313,7 +313,7 @@ describe("todoProgress", () => {
 		const entry = plan("a", "executing", [
 			testStatus("scoping"),
 			testStatus("executing", {
-				progress: { done: 2, total: 5, eta_secs: 480 },
+				progress: { done: 2, total: 5, eta_secs: 480, elapsed_secs: 180 },
 			}),
 		]);
 		expect(todoProgress(entry)).toEqual({
@@ -329,7 +329,7 @@ describe("todoProgress", () => {
 			testStatus("executing"),
 			testStatus("rebasing"),
 			testStatus("evergreening", {
-				progress: { done: 1, total: 4, eta_secs: 120 },
+				progress: { done: 1, total: 4, eta_secs: 120, elapsed_secs: 180 },
 			}),
 		]);
 		expect(todoProgress(entry)).toEqual({
@@ -357,7 +357,7 @@ describe("headerProgress", () => {
 		const entry = plan("a", "executing", [
 			testStatus("scoping"),
 			testStatus("executing", {
-				progress: { done: 2, total: 5, eta_secs: 480 },
+				progress: { done: 2, total: 5, eta_secs: 480, elapsed_secs: 180 },
 			}),
 		]);
 		expect(headerProgress(entry)).toEqual(todoProgress(entry));
@@ -373,7 +373,7 @@ describe("headerProgress", () => {
 			false,
 			true,
 			["abc plan work", "def more work"],
-			{ done: 0, total: 2, eta_secs: null },
+			{ done: 0, total: 2, eta_secs: null, elapsed_secs: null },
 		);
 		expect(headerProgress(entry)).toEqual({
 			done: 0,
@@ -392,7 +392,7 @@ describe("headerProgress", () => {
 			false,
 			true,
 			["abc plan work", "def more work"],
-			{ done: 2, total: 2, eta_secs: null },
+			{ done: 2, total: 2, eta_secs: null, elapsed_secs: null },
 		);
 		expect(headerProgress(entry)).toEqual({
 			done: 2,
@@ -423,7 +423,7 @@ describe("headerProgress", () => {
 			false,
 			true,
 			["abc plan work", "def more work"],
-			{ done: 1, total: 2, eta_secs: 600 },
+			{ done: 1, total: 2, eta_secs: 600, elapsed_secs: 180 },
 		);
 		expect(headerProgress(entry)).toEqual({
 			done: 1,

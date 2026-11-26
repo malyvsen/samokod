@@ -237,21 +237,28 @@ pub(crate) fn sorted_entries(
 }
 
 /// Done/total progress with an ETA from the completion rate since
-/// `started`. `estimate_remaining` already yields `None` for empty,
-/// estimating, and done. Pure except the clock read.
+/// `started`, plus the elapsed time itself. `estimate_remaining` already
+/// yields `None` for empty, estimating, and done; `elapsed_secs` is `None`
+/// only when `started` is `None`. Pure except the clock read.
 fn progress_view(
     done: usize,
     total: usize,
     started: Option<std::time::SystemTime>,
 ) -> ProgressView {
+    let now = std::time::SystemTime::now();
     let eta_secs = started.and_then(|started| {
-        estimate_remaining(done, total, started, std::time::SystemTime::now())
-            .map(|remaining| remaining.as_secs())
+        estimate_remaining(done, total, started, now).map(|remaining| remaining.as_secs())
+    });
+    let elapsed_secs = started.and_then(|started| {
+        now.duration_since(started)
+            .ok()
+            .map(|elapsed| elapsed.as_secs())
     });
     ProgressView {
         done,
         total,
         eta_secs,
+        elapsed_secs,
     }
 }
 
@@ -806,6 +813,35 @@ mod tests {
                 rebasing_progress_for(dir.path(), &plan, &state, &commits, false),
                 None,
                 "{phase:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn progress_view_reports_elapsed_since_started() {
+        let started = std::time::SystemTime::now() - std::time::Duration::from_secs(180);
+        let progress = progress_view(1, 2, Some(started));
+        let elapsed = progress.elapsed_secs.expect("elapsed");
+        assert!(elapsed.abs_diff(180) <= 2, "elapsed {elapsed} close to 180");
+    }
+
+    #[test]
+    fn progress_view_without_started_has_no_elapsed() {
+        let progress = progress_view(1, 2, None);
+        assert_eq!(progress.elapsed_secs, None);
+        assert_eq!(progress.eta_secs, None);
+    }
+
+    #[test]
+    fn progress_view_keeps_elapsed_when_eta_is_none() {
+        let started = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        for (done, total) in [(0, 0), (0, 3), (2, 2)] {
+            let progress = progress_view(done, total, Some(started));
+            assert_eq!(progress.eta_secs, None, "{done}/{total}");
+            let elapsed = progress.elapsed_secs.expect("elapsed");
+            assert!(
+                elapsed.abs_diff(60) <= 2,
+                "elapsed {elapsed} close to 60 for {done}/{total}"
             );
         }
     }

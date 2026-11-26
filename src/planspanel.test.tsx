@@ -565,7 +565,7 @@ describe("plans panel", () => {
 					testStatus("scoping"),
 					testStatus("executing", {
 						working: true,
-						progress: { done: 2, total: 5, eta_secs: 480 },
+						progress: { done: 2, total: 5, eta_secs: 480, elapsed_secs: 180 },
 					}),
 				],
 			);
@@ -613,7 +613,7 @@ describe("plans panel", () => {
 					testStatus("scoping"),
 					testStatus("executing", {
 						working: true,
-						progress: { done: 0, total: 5, eta_secs: null },
+						progress: { done: 0, total: 5, eta_secs: null, elapsed_secs: null },
 					}),
 				],
 			);
@@ -638,7 +638,7 @@ describe("plans panel", () => {
 				[
 					testStatus("scoping"),
 					testStatus("executing", {
-						progress: { done: 5, total: 5, eta_secs: null },
+						progress: { done: 5, total: 5, eta_secs: null, elapsed_secs: null },
 					}),
 				],
 			);
@@ -664,7 +664,7 @@ describe("plans panel", () => {
 					testStatus("scoping"),
 					testStatus("executing", {
 						approval: true,
-						progress: { done: 2, total: 5, eta_secs: 480 },
+						progress: { done: 2, total: 5, eta_secs: 480, elapsed_secs: 180 },
 					}),
 				],
 			);
@@ -691,7 +691,7 @@ describe("plans panel", () => {
 				false,
 				true,
 				["abc plan work", "def more work"],
-				{ done: 1, total: 2, eta_secs: 600 },
+				{ done: 1, total: 2, eta_secs: 600, elapsed_secs: 180 },
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
 			const header = screen.getByRole("button", {
@@ -719,7 +719,7 @@ describe("plans panel", () => {
 				false,
 				true,
 				["abc plan work", "def more work"],
-				{ done: 0, total: 2, eta_secs: null },
+				{ done: 0, total: 2, eta_secs: null, elapsed_secs: null },
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
 			const header = screen.getByRole("button", {
@@ -747,7 +747,7 @@ describe("plans panel", () => {
 				false,
 				true,
 				["abc plan work", "def more work"],
-				{ done: 2, total: 2, eta_secs: null },
+				{ done: 2, total: 2, eta_secs: null, elapsed_secs: null },
 			);
 			render(<PlansPanel {...panelProps([plan], null)} />);
 			const header = screen.getByRole("button", {
@@ -1215,7 +1215,7 @@ describe("plans panel", () => {
 					testStatus("scoping"),
 					testStatus("executing", {
 						working: true,
-						progress: { done: 2, total: 5, eta_secs: 480 },
+						progress: { done: 2, total: 5, eta_secs: 480, elapsed_secs: 180 },
 					}),
 				],
 			);

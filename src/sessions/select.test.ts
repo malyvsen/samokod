@@ -151,7 +151,10 @@ function rebasingEntry(
 
 describe("sideContentFor", () => {
 	test("rebasing role returns commits with progress and working", () => {
-		const entry = rebasingEntry({ done: 1, total: 2, eta_secs: null }, true);
+		const entry = rebasingEntry(
+			{ done: 1, total: 2, eta_secs: null, elapsed_secs: null },
+			true,
+		);
 		expect(sideContentFor(entry, { plan: "a", role: "rebasing" }, [])).toEqual({
 			kind: "commits",
 			commits: ["abc plan work", "def more work"],
@@ -173,7 +176,10 @@ describe("sideContentFor", () => {
 	});
 
 	test("rebasing done clamps to total", () => {
-		const entry = rebasingEntry({ done: 5, total: 2, eta_secs: null }, true);
+		const entry = rebasingEntry(
+			{ done: 5, total: 2, eta_secs: null, elapsed_secs: null },
+			true,
+		);
 		expect(sideContentFor(entry, { plan: "a", role: "rebasing" }, [])).toEqual({
 			kind: "commits",
 			commits: ["abc plan work", "def more work"],

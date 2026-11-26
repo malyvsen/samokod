@@ -188,12 +188,15 @@ pub struct SpendStatusView {
 
 /// Done/total progress with an optional ETA for the plans list.
 /// `eta_secs` is `None` when no ETA text shows (empty, estimating, or
-/// done). Shared by per-session todo progress and rebasing commit progress.
+/// done). `elapsed_secs` is `None` when no start time is known. Shared by
+/// per-session todo progress and rebasing commit progress.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Type)]
 pub struct ProgressView {
     pub done: usize,
     pub total: usize,
     pub eta_secs: Option<u64>,
+    /// Elapsed seconds since `started`.
+    pub elapsed_secs: Option<u64>,
 }
 
 /// One plan row for the plans list.

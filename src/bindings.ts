@@ -324,30 +324,37 @@ export type Prefs_Serialize = {
 /**
  *  Done/total progress with an optional ETA for the plans list.
  *  `eta_secs` is `None` when no ETA text shows (empty, estimating, or
- *  done). Shared by per-session todo progress and rebasing commit progress.
+ *  done). `elapsed_secs` is `None` when no start time is known. Shared by
+ *  per-session todo progress and rebasing commit progress.
  */
 export type ProgressView = ProgressView_Serialize | ProgressView_Deserialize;
 
 /**
  *  Done/total progress with an optional ETA for the plans list.
  *  `eta_secs` is `None` when no ETA text shows (empty, estimating, or
- *  done). Shared by per-session todo progress and rebasing commit progress.
+ *  done). `elapsed_secs` is `None` when no start time is known. Shared by
+ *  per-session todo progress and rebasing commit progress.
  */
 export type ProgressView_Deserialize = {
 	done: number,
 	total: number,
 	eta_secs?: number | null,
+	/**  Elapsed seconds since `started`. */
+	elapsed_secs?: number | null,
 };
 
 /**
  *  Done/total progress with an optional ETA for the plans list.
  *  `eta_secs` is `None` when no ETA text shows (empty, estimating, or
- *  done). Shared by per-session todo progress and rebasing commit progress.
+ *  done). `elapsed_secs` is `None` when no start time is known. Shared by
+ *  per-session todo progress and rebasing commit progress.
  */
 export type ProgressView_Serialize = {
 	done: number,
 	total: number,
 	eta_secs: number | null,
+	/**  Elapsed seconds since `started`. */
+	elapsed_secs: number | null,
 };
 
 /**  Recent repo row for the picker: path only. */
