@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::plans;
 use crate::todos::estimate_remaining;
@@ -25,7 +25,15 @@ impl AgentManager {
         let state = backend.windows.get(window).expect("window gone");
         let branch = state.checkout_branch.clone();
         let (repo_root, plans, selected) = listed(state, None);
-        let config_defaults = defaults_for(&repo_root);
+        let prefs = match self.app.path().app_data_dir() {
+            Ok(dir) => crate::prefs::load_prefs(&dir),
+            Err(error) => {
+                log::warn!("failed to resolve app data dir: {error}");
+                crate::types::Prefs::default()
+            }
+        };
+        let stored = crate::repo_state::load_repo_state(&repo_root);
+        let config_defaults = defaults_for(&stored, &prefs);
         let scoping_preview = scoping_preview_for(state, &repo_root, &selected);
         OpenRepoResult {
             repo_root: repo_root.to_string_lossy().to_string(),
@@ -43,7 +51,15 @@ impl AgentManager {
         let backend = lock_backend(&self.state).expect("state poisoned");
         let state = backend.windows.get(window).expect("window gone");
         let (repo_root, plans, selected) = listed(state, state.current.as_ref());
-        let config_defaults = defaults_for(&repo_root);
+        let prefs = match self.app.path().app_data_dir() {
+            Ok(dir) => crate::prefs::load_prefs(&dir),
+            Err(error) => {
+                log::warn!("failed to resolve app data dir: {error}");
+                crate::types::Prefs::default()
+            }
+        };
+        let stored = crate::repo_state::load_repo_state(&repo_root);
+        let config_defaults = defaults_for(&stored, &prefs);
         let scoping_preview = scoping_preview_for(state, &repo_root, &selected);
         PlansUpdate {
             plans,
@@ -392,14 +408,14 @@ fn progress_for(live: &LiveSession) -> Option<ProgressView> {
     Some(progress_view(done, total, live.todos_started_at))
 }
 
-/// Stored model/effort defaults for the instant picker paint. Pure file
-/// read; missing files yield empty defaults.
-fn defaults_for(repo_root: &Path) -> RepoDefaults {
-    let stored = crate::repo_state::load_repo_state(repo_root);
-    RepoDefaults {
-        model: stored.model,
-        effort: stored.effort,
-    }
+/// Stored model/effort defaults for the instant picker paint, with the
+/// global fallback for repos without a per-repo choice. Pure over its
+/// inputs; missing files yield empty defaults.
+fn defaults_for(
+    stored: &crate::repo_state::RepoState,
+    prefs: &crate::types::Prefs,
+) -> RepoDefaults {
+    crate::repo_state::effective_defaults(stored, prefs)
 }
 
 /// Most-recent session across the sorted plans: the evergreening session
@@ -504,22 +520,39 @@ mod tests {
 
     #[test]
     fn defaults_mirror_stored_repo_state() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let empty_prefs = crate::types::Prefs::default();
         assert_eq!(
-            defaults_for(dir.path()),
+            defaults_for(&crate::repo_state::RepoState::default(), &empty_prefs),
             RepoDefaults {
                 model: None,
                 effort: None,
             }
         );
-        crate::repo_state::set_role(dir.path(), crate::repo_state::ConfigRole::Model, Some("m1"));
-        crate::repo_state::set_role(
-            dir.path(),
-            crate::repo_state::ConfigRole::Effort,
-            Some("high"),
+        let stored = crate::repo_state::RepoState {
+            model: Some("m1".to_string()),
+            effort: Some("high".to_string()),
+        };
+        assert_eq!(
+            defaults_for(&stored, &empty_prefs),
+            RepoDefaults {
+                model: Some("m1".to_string()),
+                effort: Some("high".to_string()),
+            }
+        );
+        let prefs = crate::types::Prefs {
+            default_model: Some("m2".to_string()),
+            default_effort: Some("low".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            defaults_for(&crate::repo_state::RepoState::default(), &prefs),
+            RepoDefaults {
+                model: Some("m2".to_string()),
+                effort: Some("low".to_string()),
+            }
         );
         assert_eq!(
-            defaults_for(dir.path()),
+            defaults_for(&stored, &prefs),
             RepoDefaults {
                 model: Some("m1".to_string()),
                 effort: Some("high".to_string()),

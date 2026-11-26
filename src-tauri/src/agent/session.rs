@@ -10,6 +10,7 @@ use crate::error_hint::classify_error;
 use crate::opencode;
 use crate::plans;
 use crate::types::{AgentError, AppEvent, SessionKey, SessionRole};
+use tauri::Manager;
 
 use super::AgentManager;
 use super::config::{
@@ -243,6 +244,14 @@ impl AgentManager {
             raw: "cannot open a session for a finished plan".to_string(),
         })?;
         let stored = crate::repo_state::load_repo_state(repo_root);
+        let prefs = match self.app.path().app_data_dir() {
+            Ok(dir) => crate::prefs::load_prefs(&dir),
+            Err(error) => {
+                log::warn!("failed to resolve app data dir: {error}");
+                crate::types::Prefs::default()
+            }
+        };
+        let effective = crate::repo_state::effective_defaults(&stored, &prefs);
         let connection = self
             .ensure_connection_for(window, &key, &plan, opencode::agent_env(&plan.plan_ref()))
             .await?;
@@ -259,13 +268,18 @@ impl AgentManager {
             pin_agent_mode(&connection, &acp::SessionId::new(session_id.clone()), agent).await?;
         // Reapply model first, then effort; each absent or inapplicable role
         // is skipped with a warn-log while the open continues on defaults.
+        // Per-repo choices win, otherwise the global defaults apply.
         let mut applied = crate::repo_state::RepoState::default();
         for role in crate::repo_state::ConfigRole::ALL {
-            let Some(wanted) = role.get(&stored).cloned() else {
+            let wanted = match role {
+                crate::repo_state::ConfigRole::Model => effective.model.clone(),
+                crate::repo_state::ConfigRole::Effort => effective.effort.clone(),
+            };
+            let Some(wanted) = wanted else {
                 continue;
             };
             let Some(id) = option_id_for_role(&options, role) else {
-                log::warn!("stored {} has no matching option, skipping", role.name());
+                log::warn!("default {} has no matching option, skipping", role.name());
                 continue;
             };
             let session = acp::SessionId::new(session_id.clone());
@@ -275,7 +289,10 @@ impl AgentManager {
                     role.set(&mut applied, Some(wanted));
                 }
                 Err(error) => {
-                    log::warn!("failed to reapply stored {} {wanted}: {error}", role.name())
+                    log::warn!(
+                        "failed to reapply default {} {wanted}: {error}",
+                        role.name()
+                    )
                 }
             }
         }

@@ -5,7 +5,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::ConfigOptionView;
+use crate::types::{ConfigOptionView, Prefs, RepoDefaults};
 
 const STATE_PATH: &str = ".samokod/state.json";
 
@@ -127,6 +127,18 @@ pub fn set_role(repo_root: &Path, role: ConfigRole, value: Option<&str>) {
     }
 }
 
+/// Effective model/effort defaults: per-repo `Some` wins, else the global
+/// default. Pure.
+pub fn effective_defaults(stored: &RepoState, prefs: &Prefs) -> RepoDefaults {
+    RepoDefaults {
+        model: stored.model.clone().or_else(|| prefs.default_model.clone()),
+        effort: stored
+            .effort
+            .clone()
+            .or_else(|| prefs.default_effort.clone()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,6 +237,54 @@ mod tests {
             load_repo_state(dir.path()),
             RepoState {
                 model: Some("m1".to_string()),
+                effort: None,
+            }
+        );
+    }
+
+    #[test]
+    fn effective_prefers_stored_over_global() {
+        let stored = RepoState {
+            model: Some("m1".to_string()),
+            effort: Some("high".to_string()),
+        };
+        let prefs = Prefs {
+            default_model: Some("m2".to_string()),
+            default_effort: Some("low".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            effective_defaults(&stored, &prefs),
+            RepoDefaults {
+                model: Some("m1".to_string()),
+                effort: Some("high".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn effective_falls_back_to_global_when_stored_empty() {
+        let stored = RepoState::default();
+        let prefs = Prefs {
+            default_model: Some("m2".to_string()),
+            default_effort: Some("low".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            effective_defaults(&stored, &prefs),
+            RepoDefaults {
+                model: Some("m2".to_string()),
+                effort: Some("low".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn effective_is_empty_when_both_empty() {
+        assert_eq!(
+            effective_defaults(&RepoState::default(), &Prefs::default()),
+            RepoDefaults {
+                model: None,
                 effort: None,
             }
         );
