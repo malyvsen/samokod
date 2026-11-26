@@ -1,21 +1,19 @@
 // Session config: reading and reapplying model/effort options per
-// session, with the repo-wide default in `.samokod/state.json`.
+// session, with repo-wide and global defaults.
 use crate::acp::{
     self, Agent, ConnectionTo, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigSelectOptions,
 };
 use crate::types::{AgentError, ConfigOptionValueView, ConfigOptionView, SessionKey};
-use tauri::Manager;
 
 use super::AgentManager;
 
 impl AgentManager {
     /// Set one config option repo-wide: every live session gets the same
     /// value, each `last_roles` refreshes from its own response, and moved
-    /// model/effort roles persist as the repo default and the global default.
-    /// Returns the last
-    /// session's option list for the settings paint; with no live sessions
-    /// it fails instead of guessing.
+    /// model/effort roles persist as the repo default and the global
+    /// default. Returns the last session's option list for the settings
+    /// paint; with no live sessions it fails instead of guessing.
     pub async fn set_global_config_option(
         &self,
         window: &str,
@@ -85,35 +83,7 @@ impl AgentManager {
                 }
             };
             if let Some(moved) = moved {
-                if let Some(repo) = self.current_repo(window) {
-                    for role in &moved {
-                        crate::repo_state::set_role(
-                            &repo,
-                            *role,
-                            role.get(&roles).map(String::as_str),
-                        );
-                    }
-                }
-                if !moved.is_empty() {
-                    match self.app.path().app_data_dir() {
-                        Ok(dir) => {
-                            let mut prefs = crate::prefs::load_prefs(&dir);
-                            for role in &moved {
-                                crate::prefs::record_global_choice(
-                                    &mut prefs,
-                                    *role,
-                                    role.get(&roles).map(String::as_str),
-                                );
-                            }
-                            if let Err(error) = crate::prefs::save_prefs(&dir, &prefs) {
-                                log::warn!("failed to save global defaults: {error}");
-                            }
-                        }
-                        Err(error) => {
-                            log::warn!("failed to resolve app data dir: {error}");
-                        }
-                    }
-                }
+                self.persist_moved_roles(window, &moved, &roles);
             }
             log_roles("selected", &roles);
             last = response;

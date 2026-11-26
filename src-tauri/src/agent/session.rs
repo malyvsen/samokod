@@ -10,7 +10,6 @@ use crate::error_hint::classify_error;
 use crate::opencode;
 use crate::plans;
 use crate::types::{AgentError, AppEvent, SessionKey, SessionRole};
-use tauri::Manager;
 
 use super::AgentManager;
 use super::config::{
@@ -228,8 +227,8 @@ impl AgentManager {
     }
 
     /// Spawn a fresh agent process scoped to one plan and open a session on
-    /// it: pin the agent mode, reapply the repo default model then effort
-    /// (effort-last, since a model switch can reshape effort options).
+    /// it: pin the agent mode, reapply the effective default model then
+    /// effort (effort-last, since a model switch can reshape effort options).
     /// Shared by lazy first prompts and the eager executing start.
     pub(crate) async fn spawn_session(
         &self,
@@ -243,15 +242,7 @@ impl AgentManager {
         let key = plan.key().ok_or_else(|| AgentError::RequestFailed {
             raw: "cannot open a session for a finished plan".to_string(),
         })?;
-        let stored = crate::repo_state::load_repo_state(repo_root);
-        let prefs = match self.app.path().app_data_dir() {
-            Ok(dir) => crate::prefs::load_prefs(&dir),
-            Err(error) => {
-                log::warn!("failed to resolve app data dir: {error}");
-                crate::types::Prefs::default()
-            }
-        };
-        let effective = crate::repo_state::effective_defaults(&stored, &prefs);
+        let effective = self.config_defaults(repo_root);
         let connection = self
             .ensure_connection_for(window, &key, &plan, opencode::agent_env(&plan.plan_ref()))
             .await?;
@@ -271,11 +262,7 @@ impl AgentManager {
         // Per-repo choices win, otherwise the global defaults apply.
         let mut applied = crate::repo_state::RepoState::default();
         for role in crate::repo_state::ConfigRole::ALL {
-            let wanted = match role {
-                crate::repo_state::ConfigRole::Model => effective.model.clone(),
-                crate::repo_state::ConfigRole::Effort => effective.effort.clone(),
-            };
-            let Some(wanted) = wanted else {
+            let Some(wanted) = role.get_default(&effective).cloned() else {
                 continue;
             };
             let Some(id) = option_id_for_role(&options, role) else {
@@ -364,7 +351,7 @@ impl AgentManager {
     }
 
     /// Live connection for one session, spawning lazily on the first
-    /// prompt: same plan directory, mode pin, stored model/effort
+    /// prompt: same plan directory, mode pin, default model/effort
     /// reapplied. A reopened session keeps its one-time prefix state; a
     /// fresh plan starts with the caller's flag. Single-flights against a
     /// racing warm: one spawner wins, the other polls for liveness.

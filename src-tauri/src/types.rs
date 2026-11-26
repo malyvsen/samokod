@@ -217,7 +217,7 @@ pub struct PlanEntry {
     pub rebasing_progress: Option<ProgressView>,
 }
 
-/// Stored model/effort defaults for the instant disabled picker paint.
+/// Effective model/effort defaults for the instant disabled picker paint.
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq, Type)]
 pub struct RepoDefaults {
     pub model: Option<String>,

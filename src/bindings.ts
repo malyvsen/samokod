@@ -355,16 +355,16 @@ export type RecentRepo = {
 	path: string,
 };
 
-/**  Stored model/effort defaults for the instant disabled picker paint. */
+/**  Effective model/effort defaults for the instant disabled picker paint. */
 export type RepoDefaults = RepoDefaults_Serialize | RepoDefaults_Deserialize;
 
-/**  Stored model/effort defaults for the instant disabled picker paint. */
+/**  Effective model/effort defaults for the instant disabled picker paint. */
 export type RepoDefaults_Deserialize = {
 	model?: string | null,
 	effort?: string | null,
 };
 
-/**  Stored model/effort defaults for the instant disabled picker paint. */
+/**  Effective model/effort defaults for the instant disabled picker paint. */
 export type RepoDefaults_Serialize = {
 	model: string | null,
 	effort: string | null,

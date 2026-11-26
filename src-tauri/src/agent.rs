@@ -4,12 +4,15 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::awake;
 use crate::opencode;
 use crate::plans;
-use crate::types::{AgentError, AppEvent, OpenRepoResult, PlansUpdate, SessionKey, SessionRole};
+use crate::repo_state::{ConfigRole, RepoState};
+use crate::types::{
+    AgentError, AppEvent, OpenRepoResult, PlansUpdate, Prefs, RepoDefaults, SessionKey, SessionRole,
+};
 
 mod advance;
 mod config;
@@ -431,6 +434,61 @@ impl AgentManager {
         Self {
             state: Arc::new(Mutex::new(BackendState::default())),
             app,
+        }
+    }
+
+    /// App-data directory for prefs. Warns and yields `None` when it
+    /// cannot resolve, so callers fall back to defaults.
+    fn prefs_dir(&self) -> Option<PathBuf> {
+        match self.app.path().app_data_dir() {
+            Ok(dir) => Some(dir),
+            Err(error) => {
+                log::warn!("failed to resolve app data dir: {error}");
+                None
+            }
+        }
+    }
+
+    /// Global prefs, defaulting quietly when the app-data dir is missing.
+    fn app_prefs(&self) -> Prefs {
+        self.prefs_dir()
+            .map(|dir| crate::prefs::load_prefs(&dir))
+            .unwrap_or_default()
+    }
+
+    /// Effective model/effort defaults for one repo: the per-repo file
+    /// wins, else the last manually selected global values.
+    fn config_defaults(&self, repo_root: &Path) -> RepoDefaults {
+        let stored = crate::repo_state::load_repo_state(repo_root);
+        crate::repo_state::effective_defaults(&stored, &self.app_prefs())
+    }
+
+    /// Persist moved model/effort roles per-repo and globally. The repo
+    /// write is skipped without a current repo; the global write always
+    /// runs so a new repo inherits the last manual choice. Prefs failures
+    /// only warn, never failing the config change.
+    fn persist_moved_roles(&self, window: &str, moved: &[ConfigRole], roles: &RepoState) {
+        if moved.is_empty() {
+            return;
+        }
+        if let Some(repo) = self.current_repo(window) {
+            for role in moved {
+                crate::repo_state::set_role(&repo, *role, role.get(roles).map(String::as_str));
+            }
+        }
+        let Some(dir) = self.prefs_dir() else {
+            return;
+        };
+        let mut prefs = crate::prefs::load_prefs(&dir);
+        for role in moved {
+            crate::prefs::record_global_choice(
+                &mut prefs,
+                *role,
+                role.get(roles).map(String::as_str),
+            );
+        }
+        if let Err(error) = crate::prefs::save_prefs(&dir, &prefs) {
+            log::warn!("failed to save global defaults: {error}");
         }
     }
 

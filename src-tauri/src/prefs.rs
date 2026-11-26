@@ -1,6 +1,7 @@
-// Local state: recent repo paths. Persisted as JSON under the OS app-data
-// directory resolved through the Tauri path API. Record helpers stay pure
-// over an explicit directory so tests never touch the real profile.
+// Local state: recent repo paths plus global model/effort defaults.
+// Persisted as JSON under the OS app-data directory resolved through the
+// Tauri path API. Record helpers stay pure over an explicit directory so
+// tests never touch the real profile.
 use std::path::Path;
 
 use crate::repo_state::ConfigRole;
@@ -112,19 +113,14 @@ mod tests {
     }
 
     #[test]
-    fn global_choice_sets_model() {
+    fn global_choice_sets_each_role_independently() {
         let mut prefs = Prefs::default();
         record_global_choice(&mut prefs, ConfigRole::Model, Some("m1"));
         assert_eq!(prefs.default_model.as_deref(), Some("m1"));
         assert_eq!(prefs.default_effort, None);
-    }
-
-    #[test]
-    fn global_choice_sets_effort() {
-        let mut prefs = Prefs::default();
         record_global_choice(&mut prefs, ConfigRole::Effort, Some("high"));
+        assert_eq!(prefs.default_model.as_deref(), Some("m1"));
         assert_eq!(prefs.default_effort.as_deref(), Some("high"));
-        assert_eq!(prefs.default_model, None);
     }
 
     #[test]

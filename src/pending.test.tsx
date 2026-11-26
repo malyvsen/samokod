@@ -64,7 +64,7 @@ describe("pending pickers", () => {
 				testEntry("2026-09-25.11-00-00", "scoping", "Untitled", false),
 			],
 			selected: { plan: "2026-09-25.11-00-00", role: "scoping" },
-			config_defaults: testDefaults({ model: "stored-model", effort: null }),
+			config_defaults: testDefaults({ model: "default-model", effort: null }),
 			scoping_preview: null,
 		});
 		const user = await openChat(api);
@@ -79,7 +79,7 @@ describe("pending pickers", () => {
 		expect(screen.queryByText("TODOS")).not.toBeInTheDocument();
 		expect(screen.queryByText("MODEL")).not.toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: "Toggle settings" }));
-		await screen.findByText("stored-model");
+		await screen.findByText("default-model");
 		expect(screen.getByText("MODEL")).toBeInTheDocument();
 		expect(screen.getByLabelText("Model")).toBeDisabled();
 	});

@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::plans;
 use crate::todos::estimate_remaining;
 use crate::types::{
-    AppEvent, OpenRepoResult, PlanEntry, PlansUpdate, ProgressView, RepoDefaults, SessionKey,
-    SessionRole, SessionStatusView, SpendStatusView, TodoStatus,
+    AppEvent, OpenRepoResult, PlanEntry, PlansUpdate, ProgressView, SessionKey, SessionRole,
+    SessionStatusView, SpendStatusView, TodoStatus,
 };
 
 use super::AgentManager;
@@ -25,15 +25,7 @@ impl AgentManager {
         let state = backend.windows.get(window).expect("window gone");
         let branch = state.checkout_branch.clone();
         let (repo_root, plans, selected) = listed(state, None);
-        let prefs = match self.app.path().app_data_dir() {
-            Ok(dir) => crate::prefs::load_prefs(&dir),
-            Err(error) => {
-                log::warn!("failed to resolve app data dir: {error}");
-                crate::types::Prefs::default()
-            }
-        };
-        let stored = crate::repo_state::load_repo_state(&repo_root);
-        let config_defaults = defaults_for(&stored, &prefs);
+        let config_defaults = self.config_defaults(&repo_root);
         let scoping_preview = scoping_preview_for(state, &repo_root, &selected);
         OpenRepoResult {
             repo_root: repo_root.to_string_lossy().to_string(),
@@ -51,15 +43,7 @@ impl AgentManager {
         let backend = lock_backend(&self.state).expect("state poisoned");
         let state = backend.windows.get(window).expect("window gone");
         let (repo_root, plans, selected) = listed(state, state.current.as_ref());
-        let prefs = match self.app.path().app_data_dir() {
-            Ok(dir) => crate::prefs::load_prefs(&dir),
-            Err(error) => {
-                log::warn!("failed to resolve app data dir: {error}");
-                crate::types::Prefs::default()
-            }
-        };
-        let stored = crate::repo_state::load_repo_state(&repo_root);
-        let config_defaults = defaults_for(&stored, &prefs);
+        let config_defaults = self.config_defaults(&repo_root);
         let scoping_preview = scoping_preview_for(state, &repo_root, &selected);
         PlansUpdate {
             plans,
@@ -408,16 +392,6 @@ fn progress_for(live: &LiveSession) -> Option<ProgressView> {
     Some(progress_view(done, total, live.todos_started_at))
 }
 
-/// Stored model/effort defaults for the instant picker paint, with the
-/// global fallback for repos without a per-repo choice. Pure over its
-/// inputs; missing files yield empty defaults.
-fn defaults_for(
-    stored: &crate::repo_state::RepoState,
-    prefs: &crate::types::Prefs,
-) -> RepoDefaults {
-    crate::repo_state::effective_defaults(stored, prefs)
-}
-
 /// Most-recent session across the sorted plans: the evergreening session
 /// when the plan owns one, else rebasing, else executing, else scoping.
 pub(crate) fn most_recent_key(plans: &[PlanEntry]) -> Option<SessionKey> {
@@ -517,48 +491,6 @@ pub(crate) fn push_sorted(state: &Mutex<BackendState>, app: &AppHandle, window: 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn defaults_mirror_stored_repo_state() {
-        let empty_prefs = crate::types::Prefs::default();
-        assert_eq!(
-            defaults_for(&crate::repo_state::RepoState::default(), &empty_prefs),
-            RepoDefaults {
-                model: None,
-                effort: None,
-            }
-        );
-        let stored = crate::repo_state::RepoState {
-            model: Some("m1".to_string()),
-            effort: Some("high".to_string()),
-        };
-        assert_eq!(
-            defaults_for(&stored, &empty_prefs),
-            RepoDefaults {
-                model: Some("m1".to_string()),
-                effort: Some("high".to_string()),
-            }
-        );
-        let prefs = crate::types::Prefs {
-            default_model: Some("m2".to_string()),
-            default_effort: Some("low".to_string()),
-            ..Default::default()
-        };
-        assert_eq!(
-            defaults_for(&crate::repo_state::RepoState::default(), &prefs),
-            RepoDefaults {
-                model: Some("m2".to_string()),
-                effort: Some("low".to_string()),
-            }
-        );
-        assert_eq!(
-            defaults_for(&stored, &prefs),
-            RepoDefaults {
-                model: Some("m1".to_string()),
-                effort: Some("high".to_string()),
-            }
-        );
-    }
 
     #[test]
     fn heading_beats_working_title_beats_untitled() {

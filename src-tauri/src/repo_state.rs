@@ -1,6 +1,6 @@
-// Per-repo samokod state under `.samokod/state.json`: model and effort
-// choices, stored by our own role names. Created lazily on first change;
-// a missing file means agent defaults.
+// Model/effort defaults: per-repo choices under `.samokod/state.json`,
+// falling back to the global defaults in prefs. Created lazily on first
+// change; a missing file means agent defaults.
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,8 @@ pub struct RepoState {
     pub effort: Option<String>,
 }
 
-/// Our storage role for one agent-advertised option.
+/// Our role for one agent-advertised model/effort option, stored both
+/// per-repo and globally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigRole {
     Model,
@@ -50,6 +51,22 @@ impl ConfigRole {
         match self {
             ConfigRole::Model => roles.model = value,
             ConfigRole::Effort => roles.effort = value,
+        }
+    }
+
+    /// Global default for this role. Pure.
+    pub fn get_global(self, prefs: &Prefs) -> Option<&String> {
+        match self {
+            ConfigRole::Model => prefs.default_model.as_ref(),
+            ConfigRole::Effort => prefs.default_effort.as_ref(),
+        }
+    }
+
+    /// Effective default for this role. Pure.
+    pub fn get_default(self, defaults: &RepoDefaults) -> Option<&String> {
+        match self {
+            ConfigRole::Model => defaults.model.as_ref(),
+            ConfigRole::Effort => defaults.effort.as_ref(),
         }
     }
 }
@@ -131,11 +148,14 @@ pub fn set_role(repo_root: &Path, role: ConfigRole, value: Option<&str>) {
 /// default. Pure.
 pub fn effective_defaults(stored: &RepoState, prefs: &Prefs) -> RepoDefaults {
     RepoDefaults {
-        model: stored.model.clone().or_else(|| prefs.default_model.clone()),
-        effort: stored
-            .effort
-            .clone()
-            .or_else(|| prefs.default_effort.clone()),
+        model: ConfigRole::Model
+            .get(stored)
+            .cloned()
+            .or_else(|| ConfigRole::Model.get_global(prefs).cloned()),
+        effort: ConfigRole::Effort
+            .get(stored)
+            .cloned()
+            .or_else(|| ConfigRole::Effort.get_global(prefs).cloned()),
     }
 }
 
