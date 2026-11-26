@@ -18,7 +18,6 @@ pub fn maybe_detach() {
         is_detached(),
         log_opt_in(std::env::var("SAMOKOD_ATTACH_TERMINAL").ok().as_deref()),
         std::io::stdout().is_terminal(),
-        cfg!(debug_assertions),
     ) {
         return;
     }
@@ -69,14 +68,9 @@ pub fn launch_root() -> Option<PathBuf> {
 }
 
 /// Detach only for a foreground terminal launch without the `SAMOKOD_ATTACH_TERMINAL`
-/// opt-in. Debug builds never detach so dev and tests stay in the foreground.
-fn should_detach(
-    already_detached: bool,
-    log_opted_in: bool,
-    stdout_is_tty: bool,
-    is_debug: bool,
-) -> bool {
-    !already_detached && !log_opted_in && stdout_is_tty && !is_debug
+/// opt-in.
+fn should_detach(already_detached: bool, log_opted_in: bool, stdout_is_tty: bool) -> bool {
+    !already_detached && !log_opted_in && stdout_is_tty
 }
 
 /// Non-empty `SAMOKOD_ATTACH_TERMINAL` keeps the launch in the foreground and enables
@@ -282,13 +276,11 @@ mod tests {
     }
 
     #[test]
-    fn detach_only_foreground_terminal_release_without_log_opt_in() {
-        assert!(should_detach(false, false, true, false));
-        assert!(!should_detach(true, false, true, false));
-        assert!(!should_detach(false, true, true, false));
-        assert!(!should_detach(false, false, false, false));
-        assert!(!should_detach(false, false, true, true));
-        assert!(!should_detach(true, true, false, true));
+    fn detach_only_foreground_terminal_without_attach_opt_in() {
+        assert!(should_detach(false, false, true));
+        assert!(!should_detach(true, false, true));
+        assert!(!should_detach(false, true, true));
+        assert!(!should_detach(false, false, false));
     }
 
     #[cfg(unix)]

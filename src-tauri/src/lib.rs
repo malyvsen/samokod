@@ -464,7 +464,7 @@ pub fn run() {
                 .level(log_level(attach_terminal.as_deref()))
                 .clear_targets()
                 .target(Target::new(TargetKind::LogDir { file_name: None }));
-            if cfg!(debug_assertions) || cli::log_opt_in(attach_terminal.as_deref()) {
+            if cli::log_opt_in(attach_terminal.as_deref()) {
                 log_builder = log_builder.target(Target::new(TargetKind::Stdout));
             }
             app.handle().plugin(log_builder.build())?;
