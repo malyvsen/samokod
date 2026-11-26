@@ -1278,8 +1278,11 @@ button.arow {
 	position: absolute;
 	left: 0;
 	top: calc(100% + 4px);
-	width: 260px;
-	max-width: 260px;
+	width: auto;
+	max-width: min(260px, 100%);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 	padding: 6px 8px;
 	font-size: 12px;
 	letter-spacing: normal;
