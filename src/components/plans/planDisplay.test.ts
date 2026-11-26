@@ -4,6 +4,7 @@ import { testEntryWith, testStatus } from "../../fixtures";
 import {
 	attentionFor,
 	attentionTitle,
+	barTip,
 	formatEta,
 	headerKey,
 	headerMeta,
@@ -296,7 +297,7 @@ describe("todoProgress", () => {
 					testStatus("executing"),
 				]),
 			),
-		).toEqual({ done: 0, total: 0, etaSecs: null });
+		).toEqual({ done: 0, total: 0, etaSecs: null, elapsedSecs: null });
 		expect(
 			todoProgress(
 				plan("a", "evergreening", [
@@ -306,7 +307,7 @@ describe("todoProgress", () => {
 					testStatus("evergreening"),
 				]),
 			),
-		).toEqual({ done: 0, total: 0, etaSecs: null });
+		).toEqual({ done: 0, total: 0, etaSecs: null, elapsedSecs: null });
 	});
 
 	test("maps the executing session progress", () => {
@@ -320,6 +321,7 @@ describe("todoProgress", () => {
 			done: 2,
 			total: 5,
 			etaSecs: 480,
+			elapsedSecs: 180,
 		});
 	});
 
@@ -336,6 +338,7 @@ describe("todoProgress", () => {
 			done: 1,
 			total: 4,
 			etaSecs: 120,
+			elapsedSecs: 180,
 		});
 	});
 });
@@ -379,6 +382,7 @@ describe("headerProgress", () => {
 			done: 0,
 			total: 2,
 			etaSecs: null,
+			elapsedSecs: null,
 		});
 	});
 
@@ -398,6 +402,7 @@ describe("headerProgress", () => {
 			done: 2,
 			total: 2,
 			etaSecs: null,
+			elapsedSecs: null,
 		});
 	});
 
@@ -410,6 +415,7 @@ describe("headerProgress", () => {
 			done: 0,
 			total: 0,
 			etaSecs: null,
+			elapsedSecs: null,
 		});
 	});
 
@@ -429,6 +435,7 @@ describe("headerProgress", () => {
 			done: 1,
 			total: 2,
 			etaSecs: 600,
+			elapsedSecs: 180,
 		});
 	});
 });
@@ -447,9 +454,31 @@ describe("formatEta", () => {
 	});
 });
 
+describe("barTip", () => {
+	test("shows elapsed and remaining", () => {
+		expect(barTip({ done: 2, total: 5, etaSecs: 300, elapsedSecs: 180 })).toBe(
+			"3m elapsed \u00b7 5m left",
+		);
+	});
+
+	test("omits remaining when unknown", () => {
+		expect(barTip({ done: 2, total: 5, etaSecs: null, elapsedSecs: 180 })).toBe(
+			"3m elapsed",
+		);
+	});
+
+	test("omits elapsed when unknown", () => {
+		expect(barTip({ done: 2, total: 5, etaSecs: 300, elapsedSecs: null })).toBe(
+			"5m left",
+		);
+	});
+});
+
 describe("headerMeta", () => {
 	test("empty shows no text and an empty track", () => {
-		expect(headerMeta({ done: 0, total: 0, etaSecs: null }, null)).toEqual({
+		expect(
+			headerMeta({ done: 0, total: 0, etaSecs: null, elapsedSecs: null }, null),
+		).toEqual({
 			eta: null,
 			pct: 0,
 			barClass: "",
@@ -457,7 +486,9 @@ describe("headerMeta", () => {
 	});
 
 	test("estimating shows no text and an empty track", () => {
-		expect(headerMeta({ done: 0, total: 5, etaSecs: null }, null)).toEqual({
+		expect(
+			headerMeta({ done: 0, total: 5, etaSecs: null, elapsedSecs: null }, null),
+		).toEqual({
 			eta: null,
 			pct: 0,
 			barClass: "",
@@ -465,7 +496,9 @@ describe("headerMeta", () => {
 	});
 
 	test("partial shows ETA and a green bar", () => {
-		expect(headerMeta({ done: 2, total: 5, etaSecs: 480 }, null)).toEqual({
+		expect(
+			headerMeta({ done: 2, total: 5, etaSecs: 480, elapsedSecs: 180 }, null),
+		).toEqual({
 			eta: "8m",
 			pct: 40,
 			barClass: "",
@@ -474,7 +507,10 @@ describe("headerMeta", () => {
 
 	test("waiting dims the bar but keeps the ETA", () => {
 		for (const attention of ["idle", "approval", "failed"] as const) {
-			const meta = headerMeta({ done: 2, total: 5, etaSecs: 480 }, attention);
+			const meta = headerMeta(
+				{ done: 2, total: 5, etaSecs: 480, elapsedSecs: 180 },
+				attention,
+			);
 			expect(meta.eta).toBe("8m");
 			expect(meta.pct).toBe(40);
 			expect(meta.barClass).toBe("paused");
@@ -482,7 +518,12 @@ describe("headerMeta", () => {
 	});
 
 	test("done shows a full green bar with no text even when idle", () => {
-		expect(headerMeta({ done: 5, total: 5, etaSecs: null }, "idle")).toEqual({
+		expect(
+			headerMeta(
+				{ done: 5, total: 5, etaSecs: null, elapsedSecs: null },
+				"idle",
+			),
+		).toEqual({
 			eta: null,
 			pct: 100,
 			barClass: "",

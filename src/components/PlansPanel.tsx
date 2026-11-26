@@ -5,6 +5,7 @@ import {
 	type AttentionKind,
 	attentionFor,
 	attentionTitle,
+	barTip,
 	headerKey,
 	headerMeta,
 	headerProgress,
@@ -123,13 +124,18 @@ function PlanGroup({
 				onSetMode={onSetMode}
 				onSetEvergreen={onSetEvergreen}
 			/>
-			{meta === null ? null : (
+			{meta === null || progress === null ? null : (
 				<>
 					<span className="bgutter">
 						<Spine expanded={expanded} openIdx={openIdx} openPath={openPath} />
 					</span>
-					<div className={`hbar-in${meta.barClass ? ` ${meta.barClass}` : ""}`}>
-						<i style={{ width: `${meta.pct}%` }} />
+					<div className="hbar-cell">
+						<div
+							className={`hbar-in${meta.barClass ? ` ${meta.barClass}` : ""}`}
+						>
+							<i style={{ width: `${meta.pct}%` }} />
+						</div>
+						<div className="hbar-tip">{barTip(progress)}</div>
 					</div>
 				</>
 			)}

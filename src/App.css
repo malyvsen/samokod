@@ -1289,6 +1289,32 @@ button.arow {
 	white-space: nowrap;
 }
 
+.hbar-cell {
+	min-width: 0;
+	position: relative;
+}
+
+.hbar-tip {
+	display: none;
+	position: absolute;
+	left: 0;
+	top: calc(100% + 4px);
+	width: 260px;
+	max-width: 260px;
+	padding: 6px 8px;
+	font-size: 12px;
+	letter-spacing: normal;
+	color: #9d9a92;
+	background: rgba(8, 8, 12, 0.95);
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	font-variant-numeric: tabular-nums;
+	z-index: 10;
+}
+
+.hbar-cell:hover .hbar-tip {
+	display: block;
+}
+
 .hbar-in {
 	height: 3px;
 	background: rgba(255, 255, 255, 0.14);

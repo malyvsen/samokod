@@ -1265,7 +1265,68 @@ describe("plans panel", () => {
 			render(<PlansPanel {...panelProps([plan], null)} />);
 			const group = planGroup("Shiny, executing, opens Executing");
 			expect(group.querySelector(".bgutter")).not.toBeNull();
-			expect(group.querySelector(".bgutter + .hbar-in")).not.toBeNull();
+			expect(group.querySelector(".bgutter + .hbar-cell")).not.toBeNull();
+			expect(
+				group.querySelector(".bgutter + .hbar-cell .hbar-in"),
+			).not.toBeNull();
+		});
+
+		test("bar hover reveals elapsed and remaining for executing plans", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing", {
+						working: true,
+						progress: { done: 2, total: 5, eta_secs: 300, elapsed_secs: 180 },
+					}),
+				],
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const group = planGroup("Shiny, executing, opens Executing");
+			const tip = group.querySelector(".hbar-tip");
+			expect(tip).not.toBeNull();
+			expect(tip?.textContent).toBe("3m elapsed \u00b7 5m left");
+		});
+
+		test("bar hover reveals elapsed and remaining for rebasing plans", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.rebasing",
+				"rebasing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing"),
+					testStatus("rebasing", { working: true }),
+				],
+				false,
+				true,
+				["abc plan work", "def more work"],
+				{ done: 1, total: 2, eta_secs: 720, elapsed_secs: 420 },
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const group = planGroup("Shiny, rebasing, opens Rebasing");
+			const tip = group.querySelector(".hbar-tip");
+			expect(tip).not.toBeNull();
+			expect(tip?.textContent).toBe("7m elapsed \u00b7 12m left");
+		});
+
+		test("no bar means no hover tip", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59",
+				"scoping",
+				"Shiny",
+				true,
+				[testStatus("scoping")],
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const group = planGroup("Shiny, scoping, opens Scoping");
+			expect(group.querySelector(".hbar-cell")).toBeNull();
+			expect(group.querySelector(".hbar-tip")).toBeNull();
 		});
 
 		test("mode switch uses green auto and blue manual", () => {

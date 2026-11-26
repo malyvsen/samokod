@@ -64,6 +64,7 @@ export interface HeaderProgress {
 	done: number;
 	total: number;
 	etaSecs: number | null;
+	elapsedSecs: number | null;
 }
 
 function toHeaderProgress(progress: ProgressView): HeaderProgress {
@@ -71,6 +72,7 @@ function toHeaderProgress(progress: ProgressView): HeaderProgress {
 		done: progress.done,
 		total: progress.total,
 		etaSecs: progress.eta_secs ?? null,
+		elapsedSecs: progress.elapsed_secs ?? null,
 	};
 }
 
@@ -83,7 +85,7 @@ export function todoProgress(plan: PlanEntry): HeaderProgress | null {
 	const status = plan.sessions.find((candidate) => candidate.role === role);
 	const progress: ProgressView | null = status?.progress ?? null;
 	if (progress === null) {
-		return { done: 0, total: 0, etaSecs: null };
+		return { done: 0, total: 0, etaSecs: null, elapsedSecs: null };
 	}
 	return toHeaderProgress(progress);
 }
@@ -91,7 +93,7 @@ export function todoProgress(plan: PlanEntry): HeaderProgress | null {
 function rebasingProgress(plan: PlanEntry): HeaderProgress {
 	const progress = plan.rebasing_progress ?? null;
 	if (progress === null) {
-		return { done: 0, total: 0, etaSecs: null };
+		return { done: 0, total: 0, etaSecs: null, elapsedSecs: null };
 	}
 	return toHeaderProgress(progress);
 }
@@ -108,6 +110,17 @@ export function formatEta(secs: number): string {
 		return `${Math.floor(secs / 3600)}h`;
 	}
 	return `${Math.max(1, Math.floor(secs / 60))}m`;
+}
+
+export function barTip(progress: HeaderProgress): string {
+	const parts: string[] = [];
+	if (progress.elapsedSecs !== null) {
+		parts.push(`${formatEta(progress.elapsedSecs)} elapsed`);
+	}
+	if (progress.etaSecs !== null) {
+		parts.push(`${formatEta(progress.etaSecs)} left`);
+	}
+	return parts.join(" · ");
 }
 
 export interface HeaderMeta {
