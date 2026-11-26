@@ -16,7 +16,7 @@ use std::sync::{Mutex, OnceLock};
 pub fn maybe_detach() {
     if !should_detach(
         is_detached(),
-        log_opt_in(std::env::var("SAMOKOD_ATTACH_TERMINAL").ok().as_deref()),
+        attach_terminal_opt_in(std::env::var(ATTACH_TERMINAL_ENV).ok().as_deref()),
         std::io::stdout().is_terminal(),
     ) {
         return;
@@ -69,13 +69,13 @@ pub fn launch_root() -> Option<PathBuf> {
 
 /// Detach only for a foreground terminal launch without the `SAMOKOD_ATTACH_TERMINAL`
 /// opt-in.
-fn should_detach(already_detached: bool, log_opted_in: bool, stdout_is_tty: bool) -> bool {
-    !already_detached && !log_opted_in && stdout_is_tty
+fn should_detach(already_detached: bool, attach_opted_in: bool, stdout_is_tty: bool) -> bool {
+    !already_detached && !attach_opted_in && stdout_is_tty
 }
 
 /// Non-empty `SAMOKOD_ATTACH_TERMINAL` keeps the launch in the foreground and enables
-/// stdout logs; unset or empty stays file-only in release.
-pub fn log_opt_in(value: Option<&str>) -> bool {
+/// stdout logs; unset or empty stays file-only.
+pub fn attach_terminal_opt_in(value: Option<&str>) -> bool {
     value.is_some_and(|value| !value.is_empty())
 }
 
@@ -151,6 +151,7 @@ pub fn take_pending(label: &str) -> Option<PathBuf> {
     pending().take(label)
 }
 
+pub const ATTACH_TERMINAL_ENV: &str = "SAMOKOD_ATTACH_TERMINAL";
 const DETACHED_ENV: &str = "SAMOKOD_DETACHED";
 
 /// True in the detached child spawned by [`maybe_detach`].
@@ -303,10 +304,10 @@ mod tests {
     }
 
     #[test]
-    fn log_opt_in_requires_non_empty_value() {
-        assert!(!log_opt_in(None));
-        assert!(!log_opt_in(Some("")));
-        assert!(log_opt_in(Some("info")));
-        assert!(log_opt_in(Some("1")));
+    fn attach_terminal_opt_in_requires_non_empty_value() {
+        assert!(!attach_terminal_opt_in(None));
+        assert!(!attach_terminal_opt_in(Some("")));
+        assert!(attach_terminal_opt_in(Some("info")));
+        assert!(attach_terminal_opt_in(Some("1")));
     }
 }

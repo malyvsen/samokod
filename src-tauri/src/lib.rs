@@ -382,12 +382,8 @@ fn take_pending_repo(window: Window) -> Option<String> {
     crate::cli::take_pending(&label).map(|path| path.to_string_lossy().to_string())
 }
 
-fn log_level(attach_terminal: Option<&str>) -> log::LevelFilter {
-    match attach_terminal
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
+fn log_level(value: Option<&str>) -> log::LevelFilter {
+    match value.unwrap_or_default().to_ascii_lowercase().as_str() {
         "trace" => log::LevelFilter::Trace,
         "debug" => log::LevelFilter::Debug,
         "warn" => log::LevelFilter::Warn,
@@ -459,12 +455,12 @@ pub fn run() {
         }))
         .setup(|app| {
             app.manage(AgentManager::new(app.handle().clone()));
-            let attach_terminal = std::env::var("SAMOKOD_ATTACH_TERMINAL").ok();
+            let attach_value = std::env::var(cli::ATTACH_TERMINAL_ENV).ok();
             let mut log_builder = tauri_plugin_log::Builder::new()
-                .level(log_level(attach_terminal.as_deref()))
+                .level(log_level(attach_value.as_deref()))
                 .clear_targets()
                 .target(Target::new(TargetKind::LogDir { file_name: None }));
-            if cli::log_opt_in(attach_terminal.as_deref()) {
+            if cli::attach_terminal_opt_in(attach_value.as_deref()) {
                 log_builder = log_builder.target(Target::new(TargetKind::Stdout));
             }
             app.handle().plugin(log_builder.build())?;

@@ -21,8 +21,11 @@ tasks:
 
   dev:
     desc: Run the app in development mode (no auto-reload - restart when idle)
+    # Dev uses its own single-instance identifier so it runs alongside release.
+    env:
+      SAMOKOD_ATTACH_TERMINAL: info
     cmds:
-      - SAMOKOD_ATTACH_TERMINAL=info pnpm tauri dev --no-watch --config src-tauri/tauri.dev.conf.json
+      - pnpm tauri dev --no-watch --config src-tauri/tauri.dev.conf.json
 
   check:
     desc: Run all checks
