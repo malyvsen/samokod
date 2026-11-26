@@ -1452,6 +1452,42 @@ describe("transcript live ack", () => {
 		);
 	});
 
+	test("empty working placeholder is locked non-expandable", () => {
+		const { container } = render(
+			<Transcript
+				items={userOnly()}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				session={SESSION}
+				turn={{ since: 1000, live: null }}
+				onStop={vi.fn()}
+			/>,
+		);
+		const summary = container.querySelector(
+			".work .summary",
+		) as HTMLElement | null;
+		expect(summary?.getAttribute("aria-disabled")).toBe("true");
+		fireEvent.click(summary as HTMLElement);
+		expect(
+			container.querySelector(".work .detail")?.getAttribute("hidden"),
+		).not.toBeNull();
+		expect(
+			container.querySelector(".work .summary")?.getAttribute("aria-expanded"),
+		).toBe("false");
+		const expanders = screen.queryAllByRole("button", {
+			name: "Expand message",
+		});
+		expect(expanders).toHaveLength(1);
+		for (const button of expanders) {
+			expect(button).toBeDisabled();
+		}
+		expect(
+			screen.queryByRole("button", { name: "Collapse message" }),
+		).not.toBeInTheDocument();
+	});
+
 	test("acked pending live joins the trailing run as think", () => {
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(5000);
 		try {

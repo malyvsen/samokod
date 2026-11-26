@@ -214,6 +214,7 @@ function WorkBox({
 	const prefix = summary.entries.length === 0 ? base : `${base} · `;
 	const showReview = isLive && hasUnresolvedApproval;
 	const showStop = isLive && onStop !== null;
+	const isEmpty = items.length === 0;
 
 	function focusFirstApproval() {
 		const button = workRef.current?.querySelector(".drow.appr button");
@@ -232,6 +233,7 @@ function WorkBox({
 	}
 
 	function toggle() {
+		if (items.length === 0) return;
 		setOpen((was) => !was);
 	}
 
@@ -244,8 +246,10 @@ function WorkBox({
 					className="summary"
 					type="button"
 					aria-expanded={open}
+					aria-disabled={isEmpty ? true : undefined}
+					style={isEmpty ? { cursor: "default" } : undefined}
 					title={open ? "Collapse" : "Expand"}
-					onClick={toggle}
+					onClick={isEmpty ? undefined : toggle}
 				>
 					<span className="txt">
 						{prefix}
@@ -291,6 +295,8 @@ function WorkBox({
 						className="mctl"
 						aria-label={mctlLabel}
 						title={mctlLabel}
+						disabled={isEmpty}
+						style={isEmpty ? { opacity: 0.35 } : undefined}
 						onMouseDown={(event) => event.preventDefault()}
 						onClick={(event) => {
 							event.stopPropagation();
