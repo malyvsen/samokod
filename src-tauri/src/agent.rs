@@ -137,6 +137,21 @@ impl BackendState {
         }
     }
 
+    /// True when the window owns a repo (`None` means picker). Pure read;
+    /// the app-level `New Plan` menu derives its enabled flag from this.
+    pub(crate) fn has_repo(&self, window: &str) -> bool {
+        self.windows
+            .get(window)
+            .is_some_and(|state| state.has_repo())
+    }
+
+    /// Enabled iff the focused window owns a repo. `None` (no focus or
+    /// picker) stays disabled. Pure so tests pin the focus transitions
+    /// without an `AppHandle`.
+    pub(crate) fn new_plan_enabled(&self, focused: Option<&str>) -> bool {
+        focused.is_some_and(|label| self.has_repo(label))
+    }
+
     /// Recompute the global sleep guard as working-in-any-window. Runs
     /// after every working-flag mutation.
     fn recompute_awake(&mut self) {
@@ -204,6 +219,11 @@ impl BackendState {
 }
 
 impl WindowState {
+    /// True when the window owns a repo (`None` means picker). Pure read.
+    pub(crate) fn has_repo(&self) -> bool {
+        self.repo_root.is_some()
+    }
+
     /// Reset one window to empty, ready to claim a new repo. Drops live
     /// sessions by dropping their connections, the branch watcher, and all
     /// pending claims; the caller sets the new repo root next.
@@ -482,6 +502,15 @@ impl AgentManager {
         let result = f(state);
         backend.recompute_awake();
         Some(result)
+    }
+
+    /// Enabled iff the focused window owns a repo. `None` (no focus,
+    /// closed, or poisoned) stays disabled so the menu never enables on a
+    /// picker. Short critical section, never holds across await.
+    pub(crate) fn new_plan_enabled(&self, focused: Option<&str>) -> bool {
+        lock_backend(&self.state)
+            .map(|backend| backend.new_plan_enabled(focused))
+            .unwrap_or(false)
     }
 
     /// Open a repository: ensure the plan structure, prune stale worktree
@@ -1768,6 +1797,27 @@ mod tests {
             backend.owner_of(Some("window-1"), "/repo"),
             Some("window-2".to_string())
         );
+    }
+
+    #[test]
+    fn new_plan_enabled_follows_focused_repo() {
+        let mut backend = BackendState::default();
+        // Picker window owns nothing; chat window owns a repo.
+        backend.ensure_window("picker");
+        backend.ensure_window("chat").repo_root = Some(PathBuf::from("/repo"));
+        assert!(!backend.has_repo("picker"));
+        assert!(backend.has_repo("chat"));
+        assert!(!backend.has_repo("missing"));
+        // Focus switch: chat enables, picker and no focus disable.
+        assert!(backend.new_plan_enabled(Some("chat")));
+        assert!(!backend.new_plan_enabled(Some("picker")));
+        assert!(!backend.new_plan_enabled(Some("missing")));
+        assert!(!backend.new_plan_enabled(None));
+        // Destroy: the closed chat window no longer enables.
+        assert!(backend.remove_window("chat"));
+        assert!(!backend.has_repo("chat"));
+        assert!(!backend.new_plan_enabled(Some("chat")));
+        assert!(!backend.new_plan_enabled(Some("picker")));
     }
 
     #[test]

@@ -30,7 +30,7 @@ use tauri_plugin_log::{Target, TargetKind};
 use tauri_specta::{Builder, collect_commands};
 
 use crate::agent::AgentManager;
-use crate::menu::build_menu;
+use crate::menu::{build_menu, set_new_plan_enabled};
 use crate::prefs::{load_prefs, record_open, save_prefs};
 use crate::repo::{RepoInfo, validate_repo};
 use crate::types::{AppEvent, ConfigOptionView, OpenRepoResult, PlansUpdate, Prefs, SessionKey};
@@ -141,6 +141,7 @@ async fn open_repo(
     if let Err(error) = save_prefs(&dir, &prefs) {
         log::warn!("failed to save prefs after opening {}: {error}", info.root);
     }
+    refresh_new_plan_menu(&app);
     Ok(result)
 }
 
@@ -391,6 +392,7 @@ fn log_level(value: Option<&str>) -> log::LevelFilter {
 #[cfg(test)]
 mod tests {
     use super::{EmitTarget, log_level, resolve_emit_target};
+    use crate::agent::BackendState;
 
     #[test]
     fn log_level_maps_known_names() {
@@ -410,6 +412,15 @@ mod tests {
             EmitTarget::To("main".to_string())
         );
         assert_eq!(resolve_emit_target(None), EmitTarget::Broadcast);
+    }
+
+    #[test]
+    fn new_plan_stays_disabled_without_focus_or_repo() {
+        let mut backend = BackendState::default();
+        backend.ensure_window("picker");
+        assert!(!backend.new_plan_enabled(None));
+        assert!(!backend.new_plan_enabled(Some("missing")));
+        assert!(!backend.new_plan_enabled(Some("picker")));
     }
 }
 
@@ -494,6 +505,20 @@ fn emit_new_plan(app: &AppHandle) {
     emit_to_focused_or_broadcast(app, "samokod://new-plan");
 }
 
+/// Recompute the `New Plan` enabled flag from the focused window's repo
+/// state. Runs after `open_repo`, on focus change, and on destroy; the
+/// frontend picker no-op stays as the race safety net.
+fn refresh_new_plan_menu(app: &AppHandle) {
+    let enabled = match app.try_state::<AgentManager>() {
+        Some(manager) => {
+            let focused = focused_window_label(app);
+            manager.new_plan_enabled(focused.as_deref())
+        }
+        None => false,
+    };
+    set_new_plan_enabled(app, enabled);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     cli::maybe_detach();
@@ -537,14 +562,20 @@ pub fn run() {
             "toggle-settings" => emit_toggle_settings(app),
             _ => {}
         })
-        .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Destroyed => {
                 let app = window.app_handle().clone();
                 let label = window.label().to_string();
                 if let Some(manager) = app.try_state::<AgentManager>() {
                     manager.remove_window(&label);
                 }
+                refresh_new_plan_menu(&app);
             }
+            tauri::WindowEvent::Focused(_) => {
+                let app = window.app_handle().clone();
+                refresh_new_plan_menu(&app);
+            }
+            _ => {}
         })
         .invoke_handler(builder.invoke_handler())
         .build(tauri::generate_context!())

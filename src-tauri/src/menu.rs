@@ -22,7 +22,7 @@ pub(crate) fn build_menu(app: &AppHandle) -> Result<tauri::menu::Menu<tauri::Wry
         app,
         NEW_PLAN_ITEM_ID,
         "New Plan",
-        true,
+        false,
         Some(NEW_PLAN_ACCELERATOR),
     )
     .map_err(|error| menu_error("New Plan item", &error))?;
@@ -120,6 +120,43 @@ pub(crate) fn build_menu(app: &AppHandle) -> Result<tauri::menu::Menu<tauri::Wry
 fn menu_error(what: &str, error: &dyn std::fmt::Display) -> String {
     log::warn!("failed to build {what}: {error}");
     format!("failed to build menu: {error}")
+}
+
+/// Enable or disable the `New Plan` item wherever it sits (inside the
+/// `File` submenu). Missing menus only warn so headless tests and early
+/// startup never crash on menu state.
+pub(crate) fn set_new_plan_enabled(app: &AppHandle, enabled: bool) {
+    let Some(menu) = app.menu() else {
+        log::warn!("new-plan enable={enabled}: no app menu");
+        return;
+    };
+    let items = match menu.items() {
+        Ok(items) => items,
+        Err(error) => {
+            log::warn!("new-plan enable={enabled}: failed to list menu: {error}");
+            return;
+        }
+    };
+    for item in &items {
+        if item.id().as_ref() == NEW_PLAN_ITEM_ID
+            && let Some(menu_item) = item.as_menuitem()
+        {
+            if let Err(error) = menu_item.set_enabled(enabled) {
+                log::warn!("new-plan enable={enabled} failed: {error}");
+            }
+            return;
+        }
+        if let Some(submenu) = item.as_submenu()
+            && let Some(inner) = submenu.get(NEW_PLAN_ITEM_ID)
+            && let Some(menu_item) = inner.as_menuitem()
+        {
+            if let Err(error) = menu_item.set_enabled(enabled) {
+                log::warn!("new-plan enable={enabled} failed: {error}");
+            }
+            return;
+        }
+    }
+    log::warn!("new-plan enable={enabled}: item not found");
 }
 
 #[cfg(test)]
