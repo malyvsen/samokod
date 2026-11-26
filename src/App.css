@@ -381,6 +381,21 @@ button.brand:hover {
 	text-overflow: ellipsis;
 }
 
+.plans-footer {
+	margin-top: auto;
+	border-top: 1px solid rgba(255, 255, 255, 0.12);
+	padding-top: 8px;
+}
+
+.repo-dim {
+	display: block;
+	font-size: 11px;
+	color: #6f6c66;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
 .tbtn {
 	font: inherit;
 	font-size: 11px;

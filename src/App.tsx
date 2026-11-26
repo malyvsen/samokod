@@ -812,8 +812,6 @@ export function App() {
 			) : (
 				<>
 					<TopBar
-						repoLabel={repoLabel}
-						branch={branch}
 						onToggleSettings={() =>
 							setSidebarMode((mode) =>
 								mode === "plans" ? "settings" : "plans",
@@ -821,29 +819,41 @@ export function App() {
 						}
 					/>
 					<div className="mainrow">
-						{sidebarMode === "plans" ? (
-							<PlansPanel
-								plans={plans}
-								selected={selectedKey}
-								onSelect={handleSelect}
-								onNewPlan={() => void handleNewPlan()}
-								onExecute={(key) => void handleExecute(key)}
-								onCancel={(key) => void handleCancel(key)}
-								onSetMode={(plan, manual) => void handleSetMode(plan, manual)}
-								onSetEvergreen={(plan, evergreen) =>
-									void handleSetEvergreen(plan, evergreen)
-								}
-							/>
-						) : (
-							<SettingsPanel
-								chats={chats}
-								defaults={configDefaults}
-								disabled={busy}
-								onChange={(configId, value) =>
-									void handleConfigChange(configId, value)
-								}
-							/>
-						)}
+						<div
+							className={sidebarMode === "plans" ? "plans" : "plans settings"}
+						>
+							{sidebarMode === "plans" ? (
+								<PlansPanel
+									plans={plans}
+									selected={selectedKey}
+									onSelect={handleSelect}
+									onNewPlan={() => void handleNewPlan()}
+									onExecute={(key) => void handleExecute(key)}
+									onCancel={(key) => void handleCancel(key)}
+									onSetMode={(plan, manual) => void handleSetMode(plan, manual)}
+									onSetEvergreen={(plan, evergreen) =>
+										void handleSetEvergreen(plan, evergreen)
+									}
+								/>
+							) : (
+								<SettingsPanel
+									chats={chats}
+									defaults={configDefaults}
+									disabled={busy}
+									onChange={(configId, value) =>
+										void handleConfigChange(configId, value)
+									}
+								/>
+							)}
+							<div className="plans-footer">
+								<span
+									className="repo-dim"
+									title={`${repoRoot ?? "no repo"} · ${branch}`}
+								>
+									{repoLabel} · {branch}
+								</span>
+							</div>
+						</div>
 						<div className="chatcol">
 							<div className="transcript" ref={scrollRef} onScroll={onScroll}>
 								<Transcript

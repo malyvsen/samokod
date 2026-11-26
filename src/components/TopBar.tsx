@@ -1,12 +1,4 @@
-export function TopBar({
-	repoLabel,
-	branch,
-	onToggleSettings,
-}: {
-	repoLabel: string;
-	branch: string;
-	onToggleSettings: () => void;
-}) {
+export function TopBar({ onToggleSettings }: { onToggleSettings: () => void }) {
 	return (
 		<div className="topbar">
 			<button
@@ -17,9 +9,6 @@ export function TopBar({
 			>
 				SAMOKOD
 			</button>
-			<span className="repo-static">
-				{repoLabel} · {branch}
-			</span>
 		</div>
 	);
 }

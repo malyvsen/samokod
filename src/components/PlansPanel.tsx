@@ -36,7 +36,7 @@ export function PlansPanel({
 }) {
 	const byPhase = groupByPhase(plans);
 	return (
-		<div className="plans">
+		<>
 			{PHASES.map((phase) => (
 				<Fragment key={phase}>
 					<div className="sect-head">
@@ -66,7 +66,7 @@ export function PlansPanel({
 					))}
 				</Fragment>
 			))}
-		</div>
+		</>
 	);
 }
 

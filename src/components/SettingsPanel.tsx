@@ -25,7 +25,7 @@ export function SettingsPanel({
 			: splitOptions(live);
 	const frozen = live === null;
 	return (
-		<div className="plans settings">
+		<>
 			{model !== undefined && (
 				<div className="sect">
 					<div className="slabel">MODEL</div>
@@ -56,7 +56,7 @@ export function SettingsPanel({
 					onChange={onChange}
 				/>
 			))}
-		</div>
+		</>
 	);
 }
 
