@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { SessionKey } from "../bindings";
+import { formatContext } from "../spend";
 import { attachmentHandlers } from "./attachments";
 import {
 	applyInitialText,
@@ -12,6 +13,7 @@ export function DraftBubble({
 	initialText,
 	placeholder = "Ask for a change…",
 	session,
+	contextPct,
 	onSend,
 	onEdit,
 	onInput,
@@ -20,6 +22,7 @@ export function DraftBubble({
 	initialText?: string | undefined;
 	placeholder?: string;
 	session: SessionKey;
+	contextPct: number | null;
 	onSend: (text: string) => void;
 	onEdit: () => void;
 	onInput?: ((text: string) => void) | undefined;
@@ -72,7 +75,14 @@ export function DraftBubble({
 
 	return (
 		<div className="msg user draft">
-			<div className="who">YOU</div>
+			<div className="who">
+				<span>YOU</span>
+				{contextPct === null ? null : (
+					<span className="right">
+						<span className="ctx-draft">{formatContext(contextPct)}</span>
+					</span>
+				)}
+			</div>
 			{/* biome-ignore lint/a11y/useSemanticElements: contenteditable is the design - a textarea cannot size like a sent message without measuring code. */}
 			<div
 				ref={attach}

@@ -1,5 +1,4 @@
 import type { SessionKey, SessionStatusView } from "../../bindings";
-import { formatContext, formatCost } from "../../spend";
 import type { AttentionKind } from "./planDisplay";
 import { roleLabel } from "./planDisplay";
 
@@ -37,12 +36,6 @@ export function SessionRow({
 				>
 					<span className="slabel">{roleLabel(status.role)}</span>
 				</button>
-				<span className="sess-tip" aria-hidden="true">
-					<span>{formatCost(status.spend.cost ?? 0)}</span>
-					{status.live && (
-						<span>{formatContext(status.spend.ctx_pct ?? 0)}</span>
-					)}
-				</span>
 			</div>
 		</>
 	);

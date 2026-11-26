@@ -188,16 +188,14 @@ function PlanHeader({
 				</span>
 				{eta == null ? null : <span className="pmeta">{eta}</span>}
 			</button>
-			{plan.phase === "completed" || plan.phase === "cancelled" ? null : (
-				<PlanMenu
-					plan={plan}
-					target={target}
-					onExecute={onExecute}
-					onCancel={onCancel}
-					onSetMode={onSetMode}
-					onSetEvergreen={onSetEvergreen}
-				/>
-			)}
+			<PlanMenu
+				plan={plan}
+				target={target}
+				onExecute={onExecute}
+				onCancel={onCancel}
+				onSetMode={onSetMode}
+				onSetEvergreen={onSetEvergreen}
+			/>
 		</div>
 	);
 }

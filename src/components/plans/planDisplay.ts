@@ -181,3 +181,16 @@ const ROLE_LABELS: Record<SessionRole, string> = {
 export function roleLabel(role: SessionRole): string {
 	return ROLE_LABELS[role];
 }
+
+export function planTotalCost(plan: PlanEntry): number | null {
+	let total = 0;
+	let known = false;
+	for (const status of plan.sessions) {
+		const cost = status.spend.cost;
+		if (cost != null) {
+			total += cost;
+			known = true;
+		}
+	}
+	return known ? total : null;
+}

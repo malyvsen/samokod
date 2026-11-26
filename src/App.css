@@ -466,6 +466,13 @@ button.brand:hover {
 	align-items: center;
 }
 
+.ctx-draft {
+	font-size: 11px;
+	letter-spacing: normal;
+	color: #6f6c66;
+	font-variant-numeric: tabular-nums;
+}
+
 .msg.collapsed .body {
 	max-height: 96px;
 	overflow: hidden;
@@ -1076,6 +1083,18 @@ button.arow {
 	color: #e8e6e1;
 }
 
+.dopt.static,
+.dopt.static:hover {
+	background: transparent;
+	color: #6f6c66;
+	cursor: default;
+}
+
+.mamt {
+	margin-left: auto;
+	font-variant-numeric: tabular-nums;
+}
+
 .dopt .tick {
 	width: 14px;
 	flex: none;
@@ -1296,13 +1315,11 @@ button.arow {
 	flex: none;
 }
 
-.plan-group:hover .hact,
-.plan-group:focus-within .hact {
+.plan-group:hover .hact {
 	display: flex;
 }
 
-.plan-group:hover .pmeta,
-.plan-group:focus-within .pmeta {
+.plan-group:hover .pmeta {
 	display: none;
 }
 
@@ -1504,29 +1521,6 @@ button.arow {
 
 .sbody:hover {
 	background: rgba(255, 255, 255, 0.04);
-}
-
-.sess-tip {
-	display: none;
-	position: absolute;
-	left: 0;
-	top: calc(100% + 4px);
-	width: 260px;
-	max-width: 260px;
-	padding: 6px 8px;
-	font-size: 12px;
-	letter-spacing: normal;
-	color: #9d9a92;
-	background: rgba(8, 8, 12, 0.95);
-	border: 1px solid rgba(255, 255, 255, 0.2);
-	font-variant-numeric: tabular-nums;
-	z-index: 10;
-}
-
-.sbody:hover .sess-tip,
-.sbody:focus-within .sess-tip {
-	display: grid;
-	gap: 2px;
 }
 
 .sbody .srow {

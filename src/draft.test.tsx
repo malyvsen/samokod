@@ -501,6 +501,59 @@ describe("draft bubble in chat", () => {
 			screen.queryByRole("button", { name: "Stop this turn" }),
 		).not.toBeInTheDocument();
 	});
+
+	describe("draft context", () => {
+		test("live session shows context with empty draft", async () => {
+			const live = testEntryWith("aaa", "scoping", "First", false, [
+				testStatus("scoping", {
+					live: true,
+					spend: { cost: 1.24, ctx_pct: 38.4 },
+				}),
+			]);
+			await openChat(api, {
+				plans: [live],
+				selected: { plan: "aaa", role: "scoping" },
+				scoping_preview: null,
+			});
+			const badge = screen.getByText("38% context");
+			expect(badge.className).toContain("ctx-draft");
+			expect(
+				badge.closest(".msg.user.draft")?.querySelector(".who .right"),
+			).not.toBeNull();
+		});
+
+		test("live session keeps context with draft text", async () => {
+			const live = testEntryWith("aaa", "scoping", "First", false, [
+				testStatus("scoping", {
+					live: true,
+					spend: { cost: 1.24, ctx_pct: 38.4 },
+				}),
+			]);
+			const user = await openChat(api, {
+				plans: [live],
+				selected: { plan: "aaa", role: "scoping" },
+				scoping_preview: null,
+			});
+			await user.keyboard("hello");
+			expect(await screen.findByRole("textbox")).toHaveTextContent("hello");
+			expect(screen.getByText("38% context")).toBeInTheDocument();
+		});
+
+		test("non-live session shows no context", async () => {
+			const idle = testEntryWith("aaa", "scoping", "First", false, [
+				testStatus("scoping", {
+					live: false,
+					spend: { cost: 1.24, ctx_pct: 38.4 },
+				}),
+			]);
+			await openChat(api, {
+				plans: [idle],
+				selected: { plan: "aaa", role: "scoping" },
+				scoping_preview: null,
+			});
+			expect(screen.queryByText(/context/)).toBeNull();
+		});
+	});
 });
 
 describe("draft helpers", () => {

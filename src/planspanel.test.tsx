@@ -991,14 +991,66 @@ describe("plans panel", () => {
 			).toBeNull();
 		});
 
-		test("hover tooltip shows cost and context for live sessions", () => {
+		test("cost breakdown appears in the menu when spend is known", async () => {
 			const plan = testEntryWith(
 				"2026-09-25.10-54-59.slug",
 				"executing",
 				"Shiny",
 				true,
 				[
-					testStatus("scoping"),
+					testStatus("scoping", { spend: { cost: 1.24, ctx_pct: 0 } }),
+					testStatus("executing", { spend: { cost: 1.22, ctx_pct: 0 } }),
+				],
+			);
+			const user = userEvent.setup();
+			const { container } = render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "executing" })}
+				/>,
+			);
+			expect(container.querySelector(".sess-tip")).toBeNull();
+			expect(screen.queryByText(/\$/)).toBeNull();
+			await openMenu(user, "Shiny");
+			const menu = menuOf("Shiny");
+			expect(within(menu).getByText("Total cost")).toBeInTheDocument();
+			expect(within(menu).getByText("$2.46")).toBeInTheDocument();
+			expect(within(menu).getByText("Scoping")).toBeInTheDocument();
+			expect(within(menu).getByText("$1.24")).toBeInTheDocument();
+			expect(within(menu).getByText("Executing")).toBeInTheDocument();
+			expect(within(menu).getByText("$1.22")).toBeInTheDocument();
+		});
+
+		test("cost breakdown is absent when all costs are unknown", async () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping", { spend: { cost: null, ctx_pct: null } }),
+					testStatus("executing", { spend: { cost: null, ctx_pct: null } }),
+				],
+			);
+			const user = userEvent.setup();
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "executing" })}
+				/>,
+			);
+			await openMenu(user, "Shiny");
+			const menu = menuOf("Shiny");
+			expect(within(menu).queryByText("Total cost")).toBeNull();
+			expect(within(menu).queryByText(/\$/)).toBeNull();
+		});
+
+		test("headers and rows show no amounts", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping", { spend: { cost: 1.24, ctx_pct: 38.4 } }),
 					testStatus("executing", {
 						live: true,
 						spend: { cost: 1.24, ctx_pct: 38.4 },
@@ -1010,55 +1062,45 @@ describe("plans panel", () => {
 					{...panelProps([plan], { plan: plan.name, role: "executing" })}
 				/>,
 			);
-			const tips = container.querySelectorAll(".sess-tip");
-			expect(tips.length).toBeGreaterThan(0);
-			expect(screen.getAllByText("$1.24").length).toBeGreaterThan(0);
-			expect(screen.getAllByText("38% context").length).toBeGreaterThan(0);
-		});
-
-		test("hover tooltip hides context on inactive sessions", () => {
-			const plan = testEntryWith(
-				"2026-09-25.10-54-59.slug",
-				"executing",
-				"Shiny",
-				true,
-				[
-					testStatus("scoping"),
-					testStatus("executing", {
-						live: false,
-						spend: { cost: 1.24, ctx_pct: 38.4 },
-					}),
-				],
-			);
-			render(
-				<PlansPanel
-					{...panelProps([plan], { plan: plan.name, role: "executing" })}
-				/>,
-			);
-			expect(screen.getAllByText("$1.24").length).toBeGreaterThan(0);
+			expect(container.querySelector(".sess-tip")).toBeNull();
+			expect(screen.queryByText(/\$/)).toBeNull();
 			expect(screen.queryByText(/context/)).toBeNull();
 		});
 
-		test("hover tooltip shows zero context for live sessions", () => {
-			const plan = testEntryWith(
-				"2026-09-25.10-54-59.slug",
-				"executing",
-				"Shiny",
-				true,
-				[
-					testStatus("scoping"),
-					testStatus("executing", {
-						live: true,
-						spend: { cost: 0, ctx_pct: 0 },
-					}),
-				],
-			);
+		test("completed plans hold just the breakdown when known", async () => {
+			const plan = testEntryWith("done", "completed", "Done", true, [
+				testStatus("scoping", { spend: { cost: 0.31, ctx_pct: 0 } }),
+				testStatus("executing", { spend: { cost: 0.53, ctx_pct: 0 } }),
+			]);
+			const user = userEvent.setup();
 			render(
 				<PlansPanel
 					{...panelProps([plan], { plan: plan.name, role: "executing" })}
 				/>,
 			);
-			expect(screen.getAllByText("0% context").length).toBeGreaterThan(0);
+			await openMenu(user, "Done");
+			const menu = menuOf("Done");
+			expect(within(menu).getByText("Total cost")).toBeInTheDocument();
+			expect(within(menu).getByText("$0.84")).toBeInTheDocument();
+			expect(
+				within(menu).queryByRole("menuitem", { name: "Cancel" }),
+			).toBeNull();
+			expect(within(menu).queryByRole("menuitemcheckbox")).toBeNull();
+		});
+
+		test("completed plans render no menu when costs are unknown", () => {
+			const plan = testEntryWith("done", "completed", "Done", true, [
+				testStatus("scoping", { spend: { cost: null, ctx_pct: null } }),
+				testStatus("executing", { spend: { cost: null, ctx_pct: null } }),
+			]);
+			render(
+				<PlansPanel
+					{...panelProps([plan], { plan: plan.name, role: "executing" })}
+				/>,
+			);
+			expect(
+				screen.queryByRole("button", { name: "Plan options for Done" }),
+			).toBeNull();
 		});
 
 		test("finished plans have no buttons", () => {
@@ -1167,10 +1209,11 @@ describe("plans panel", () => {
 			const hact = /\.hact\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
 			expect(hact).toContain("display: none");
 			expect(css).toContain(".plan-group:hover .hact");
-			expect(css).toContain(".plan-group:focus-within .hact");
+			expect(css).not.toContain(".plan-group:focus-within .hact");
 			expect(css).not.toContain(".plan-group.sel .hact");
 			expect(css).toContain(".plan-group:hover .pmeta");
-			expect(css).toContain(".plan-group:focus-within .pmeta");
+			expect(css).not.toContain(".plan-group:focus-within .pmeta");
+			expect(css).not.toContain(".sess-tip");
 		});
 
 		test("plan menus anchor to their header above the title tooltip", () => {

@@ -163,6 +163,16 @@ export function App() {
 	const planMd = usePlanMd(selectedKey, chat?.working ?? false);
 	const isScoping = selectedKey?.role === "scoping";
 	const side = sideContentFor(entry, selectedKey, chat?.todos ?? []);
+	const draftContextPct =
+		selectedKey === null || entry === undefined
+			? null
+			: (() => {
+					const status = entry.sessions.find(
+						(candidate) => candidate.role === selectedKey.role,
+					);
+					if (status === undefined || !status.live) return null;
+					return status.spend.ctx_pct ?? null;
+				})();
 
 	const sendNow = useCallback(
 		async (key: SessionKey, text: string) => {
@@ -871,6 +881,7 @@ export function App() {
 													busy ? "Queue a follow-up…" : "Ask for a change…"
 												}
 												session={selectedKey}
+												contextPct={draftContextPct}
 												onSend={handleSend}
 												onEdit={notifyEdit}
 												onInput={draft.onDraftInput}

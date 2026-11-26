@@ -18,6 +18,7 @@ function bubble(
 		initialText?: string;
 		onInput?: (text: string) => void;
 		onAttachmentError?: (message: string) => void;
+		contextPct?: number | null;
 	} = {},
 ) {
 	const onSend = props.onSend ?? vi.fn();
@@ -25,6 +26,7 @@ function bubble(
 		<DraftBubble
 			initialText={props.initialText}
 			session={testKey()}
+			contextPct={props.contextPct ?? null}
 			onSend={onSend}
 			onEdit={vi.fn()}
 			onInput={props.onInput}
@@ -247,6 +249,7 @@ describe("draft bubble", () => {
 			<DraftBubble
 				initialText={undefined}
 				session={testKey()}
+				contextPct={null}
 				onSend={onSend}
 				onEdit={vi.fn()}
 				onInput={vi.fn()}
@@ -259,6 +262,7 @@ describe("draft bubble", () => {
 			<DraftBubble
 				initialText="TEMPLATE"
 				session={testKey()}
+				contextPct={null}
 				onSend={onSend}
 				onEdit={vi.fn()}
 				onInput={vi.fn()}
@@ -275,6 +279,7 @@ describe("draft bubble", () => {
 			<DraftBubble
 				initialText={undefined}
 				session={testKey()}
+				contextPct={null}
 				onSend={onSend}
 				onEdit={vi.fn()}
 				onInput={onInput}
@@ -288,6 +293,7 @@ describe("draft bubble", () => {
 			<DraftBubble
 				initialText="TEMPLATE"
 				session={testKey()}
+				contextPct={null}
 				onSend={onSend}
 				onEdit={vi.fn()}
 				onInput={onInput}
