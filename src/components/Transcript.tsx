@@ -20,6 +20,7 @@ import { MessageMarkdown } from "./MessageMarkdown";
 import {
 	groupRuns,
 	type LiveTiming,
+	type RunSummary,
 	summarizeRun,
 	type TranscriptGroup,
 	todoKindLabel,
@@ -70,7 +71,11 @@ export function Transcript({
 			? null
 			: (toolCallId: string, optionId: string) =>
 					onAnswer(session, toolCallId, optionId);
-	const sessionScope =
+	// Run positions are stable because a turn only appends, so position
+	// keys keep box and row expansion intact across streaming chunks and
+	// live-freeze transitions. The session key resets expansion when the
+	// viewed session changes.
+	const sessionKey =
 		session === null ? "null" : `${session.plan}::${session.role}`;
 	return (
 		<>
@@ -87,12 +92,8 @@ export function Transcript({
 				{groups.map((group, index) =>
 					group.kind === "run" ? (
 						<WorkBox
-							// Runs are append-only during a turn, so position keys
-							// keep box and row expansion stable across streaming
-							// chunks and live-freeze transitions. Session scope
-							// resets expansion on session change.
 							// biome-ignore lint/suspicious/noArrayIndexKey: append-only runs keep positions stable
-							key={`run-${sessionScope}-${index}`}
+							key={`run-${sessionKey}-${index}`}
 							items={group.items}
 							onRetry={onRetry}
 							onAnswer={boundAnswer}
@@ -109,11 +110,8 @@ export function Transcript({
 					),
 				)}
 				{needsPlaceholder(groups, turn) && (
-					<WorkBox
+					<EmptyWorkBox
 						key="__live-placeholder__"
-						items={[]}
-						onRetry={onRetry}
-						onAnswer={boundAnswer}
 						live={timing}
 						onStop={onStop}
 					/>
@@ -187,7 +185,7 @@ function WorkBox({
 	live = null,
 	onStop = null,
 }: {
-	items: RunItem[];
+	items: [RunItem, ...RunItem[]];
 	onRetry: (() => void) | null;
 	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
 	live?: LiveTiming | null;
@@ -205,16 +203,10 @@ function WorkBox({
 	}, [hasUnresolvedApproval]);
 	const workRef = useRef<HTMLDivElement>(null);
 	const summary = summarizeRun(items, live ?? undefined);
-	const duration =
-		summary.durationMs === null
-			? null
-			: `${Math.floor(summary.durationMs / 1000)}s`;
-	const verb = isLive ? "Working" : "Worked";
-	const base = duration === null ? verb : `${verb} for ${duration}`;
-	const prefix = summary.entries.length === 0 ? base : `${base} · `;
-	const showReview = isLive && hasUnresolvedApproval;
-	const showStop = isLive && onStop !== null;
-	const isEmpty = items.length === 0;
+
+	function toggle() {
+		setOpen((was) => !was);
+	}
 
 	function focusFirstApproval() {
 		const button = workRef.current?.querySelector(".drow.appr button");
@@ -228,17 +220,6 @@ function WorkBox({
 		window.setTimeout(focusFirstApproval, 0);
 	}
 
-	function handleStop() {
-		onStop?.();
-	}
-
-	function toggle() {
-		if (items.length === 0) return;
-		setOpen((was) => !was);
-	}
-
-	const mctlLabel = open ? "Collapse message" : "Expand message";
-
 	return (
 		<div className={summary.hasFailed ? "work failed" : "work"} ref={workRef}>
 			<div className="summary-row">
@@ -246,26 +227,12 @@ function WorkBox({
 					className="summary"
 					type="button"
 					aria-expanded={open}
-					aria-disabled={isEmpty ? true : undefined}
-					style={isEmpty ? { cursor: "default" } : undefined}
 					title={open ? "Collapse" : "Expand"}
-					onClick={isEmpty ? undefined : toggle}
+					onClick={toggle}
 				>
-					<span className="txt">
-						{prefix}
-						{summary.entries.map((entry, index) => (
-							<span key={entry.label}>
-								{index > 0 && ", "}
-								{entry.label === "failed" ? (
-									<span className="failed">{`${entry.count}x ${entry.label}`}</span>
-								) : (
-									`${entry.count}x ${entry.label}`
-								)}
-							</span>
-						))}
-					</span>
+					<WorkSummaryText summary={summary} live={live} />
 				</button>
-				{showReview && (
+				{isLive && hasUnresolvedApproval && (
 					<button
 						className="review-icon"
 						data-review
@@ -277,61 +244,120 @@ function WorkBox({
 						?
 					</button>
 				)}
-				{showStop && (
-					<button
-						className="stop-icon"
-						data-stop
-						type="button"
-						aria-label="Stop this turn"
-						title="Stop this turn"
-						onClick={handleStop}
-					>
-						<span className="sq" aria-hidden="true" />
-					</button>
-				)}
+				{isLive && onStop !== null && <WorkStopButton onStop={onStop} />}
 				<span className="right">
-					<button
-						type="button"
-						className="mctl"
-						aria-label={mctlLabel}
-						title={mctlLabel}
-						disabled={isEmpty}
-						style={isEmpty ? { opacity: 0.35 } : undefined}
-						onMouseDown={(event) => event.preventDefault()}
-						onClick={(event) => {
-							event.stopPropagation();
-							toggle();
-						}}
-					>
-						{open ? "-" : "+"}
-					</button>
+					<CollapseControl collapsed={!open} onToggle={toggle} />
 				</span>
 			</div>
 			<div className="detail" hidden={!open}>
-				{items.map((item, rowIndex) =>
-					item.kind === "thought" ? (
-						<ThoughtRow
-							// Run items only append, so the live __live__ row keeps
-							// its position when it freezes into a stamped thought.
-							// biome-ignore lint/suspicious/noArrayIndexKey: append-only rows keep positions stable
-							key={rowIndex}
-							ms={item.ms}
-							text={item.text}
-							at={item.at}
-						/>
-					) : (
-						<ItemRow
-							// biome-ignore lint/suspicious/noArrayIndexKey: append-only rows keep positions stable
-							key={rowIndex}
-							item={item}
-							onRetry={onRetry}
-							onAnswer={onAnswer}
-						/>
-					),
-				)}
+				{items.map((item, rowIndex) => (
+					<RunRow
+						// biome-ignore lint/suspicious/noArrayIndexKey: append-only rows keep positions stable
+						key={rowIndex}
+						item={item}
+						onRetry={onRetry}
+						onAnswer={onAnswer}
+					/>
+				))}
 			</div>
 		</div>
 	);
+}
+
+/// The acked-but-empty live box: no run items yet, so nothing to expand.
+/// Always collapsed with a disabled control; the transcript scrolls once
+/// content lands and this is replaced by a real run box.
+function EmptyWorkBox({
+	live,
+	onStop,
+}: {
+	live: LiveTiming | null;
+	onStop: (() => void) | null;
+}) {
+	const summary = summarizeRun([], live ?? undefined);
+	return (
+		<div className="work">
+			<div className="summary-row">
+				<button
+					className="summary"
+					type="button"
+					aria-expanded={false}
+					aria-disabled={true}
+					title="Expand"
+				>
+					<WorkSummaryText summary={summary} live={live} />
+				</button>
+				{onStop !== null && <WorkStopButton onStop={onStop} />}
+				<span className="right">
+					<CollapseControl collapsed disabled />
+				</span>
+			</div>
+			<div className="detail" hidden />
+		</div>
+	);
+}
+
+function WorkSummaryText({
+	summary,
+	live,
+}: {
+	summary: RunSummary;
+	live: LiveTiming | null;
+}) {
+	const duration =
+		summary.durationMs === null
+			? null
+			: `${Math.floor(summary.durationMs / 1000)}s`;
+	const verb = live !== null ? "Working" : "Worked";
+	const base = duration === null ? verb : `${verb} for ${duration}`;
+	const prefix = summary.entries.length === 0 ? base : `${base} · `;
+	return (
+		<span className="txt">
+			{prefix}
+			{summary.entries.map((entry, index) => (
+				<span key={entry.label}>
+					{index > 0 && ", "}
+					{entry.label === "failed" ? (
+						<span className="failed">{`${entry.count}x ${entry.label}`}</span>
+					) : (
+						`${entry.count}x ${entry.label}`
+					)}
+				</span>
+			))}
+		</span>
+	);
+}
+
+function WorkStopButton({ onStop }: { onStop: () => void }) {
+	return (
+		<button
+			className="stop-icon"
+			data-stop
+			type="button"
+			aria-label="Stop this turn"
+			title="Stop this turn"
+			onClick={onStop}
+		>
+			<span className="sq" aria-hidden="true" />
+		</button>
+	);
+}
+
+/// One run row, keyed by position so streaming growth never remounts
+/// open rows. Delegates so the position key is written exactly once.
+function RunRow({
+	item,
+	onRetry,
+	onAnswer,
+}: {
+	item: RunItem;
+	onRetry: (() => void) | null;
+	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
+}) {
+	if (item.kind === "thought") {
+		return <ThoughtRow ms={item.ms} text={item.text} at={item.at} />;
+	}
+	return <ItemRow item={item} onRetry={onRetry} onAnswer={onAnswer} />;
 }
 
 function formatClock(at: number): string {

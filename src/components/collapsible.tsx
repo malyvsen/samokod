@@ -20,9 +20,11 @@ export function useCollapsed(
 export function CollapseControl({
 	collapsed,
 	onToggle,
+	disabled = false,
 }: {
 	collapsed: boolean;
-	onToggle: () => void;
+	onToggle?: () => void;
+	disabled?: boolean;
 }) {
 	const label = collapsed ? "Expand message" : "Collapse message";
 	return (
@@ -31,10 +33,11 @@ export function CollapseControl({
 			className="mctl"
 			aria-label={label}
 			title={label}
+			disabled={disabled}
 			onMouseDown={(event) => event.preventDefault()}
 			onClick={(event) => {
 				event.stopPropagation();
-				onToggle();
+				onToggle?.();
 			}}
 		>
 			{collapsed ? "+" : "-"}

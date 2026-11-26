@@ -3,8 +3,8 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 import { Transcript } from "./components/Transcript";
 import { groupRuns, summarizeRun } from "./components/workGroups";
-import type { SessionStart } from "./sessions/store";
-import type { RunItem } from "./types";
+import type { LiveTurn, SessionStart } from "./sessions/store";
+import type { RunItem, TranscriptItem } from "./types";
 
 const multiline = "first line\nsecond line\n- third";
 const IDLE: SessionStart = { kind: "idle" };
@@ -64,6 +64,25 @@ function emptyTranscript(start: SessionStart | null) {
 			onRetry={vi.fn()}
 			onAnswer={vi.fn()}
 			session={SESSION}
+		/>
+	);
+}
+
+function workTranscript(
+	items: TranscriptItem[],
+	turn: LiveTurn | null,
+	onStop: (() => void) | null = null,
+) {
+	return (
+		<Transcript
+			items={items}
+			start={IDLE}
+			repoLabel="~/repo"
+			onRetry={vi.fn()}
+			onAnswer={vi.fn()}
+			session={SESSION}
+			turn={turn}
+			onStop={onStop}
 		/>
 	);
 }
@@ -900,36 +919,22 @@ describe("transcript row expansion", () => {
 	test("live thought stays open across streaming chunks", () => {
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(5000);
 		try {
-			const props = {
-				start: IDLE,
-				repoLabel: "~/repo",
-				onRetry: vi.fn(),
-				onAnswer: vi.fn(),
-				session: SESSION,
-			} as const;
+			const items: TranscriptItem[] = [{ kind: "user", id: "u1", text: "hi" }];
 			const { container, rerender } = render(
-				<Transcript
-					{...props}
-					items={[{ kind: "user", id: "u1", text: "hi" }]}
-					turn={{
-						since: 1000,
-						live: { startedAt: 4500, updatedAt: 4500, text: "hmm" },
-					}}
-				/>,
+				workTranscript(items, {
+					since: 1000,
+					live: { startedAt: 4500, updatedAt: 4500, text: "hmm" },
+				}),
 			);
 			fireEvent.click(screen.getByTitle("Expand"));
 			fireEvent.click(screen.getByTitle("Show full thought"));
 			expect(screen.getByTitle("Hide full thought")).toBeInTheDocument();
 			nowSpy.mockReturnValue(6000);
 			rerender(
-				<Transcript
-					{...props}
-					items={[{ kind: "user", id: "u1", text: "hi" }]}
-					turn={{
-						since: 1000,
-						live: { startedAt: 4500, updatedAt: 6000, text: "hmm plus more" },
-					}}
-				/>,
+				workTranscript(items, {
+					since: 1000,
+					live: { startedAt: 4500, updatedAt: 6000, text: "hmm plus more" },
+				}),
 			);
 			expect(
 				container
@@ -948,58 +953,37 @@ describe("transcript row expansion", () => {
 	test("box and live thought stay open across live freeze", () => {
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(5000);
 		try {
-			const props = {
-				start: IDLE,
-				repoLabel: "~/repo",
-				onRetry: vi.fn(),
-				onAnswer: vi.fn(),
-				session: SESSION,
-			} as const;
+			const streaming: TranscriptItem[] = [
+				{
+					kind: "tool",
+					id: "t1",
+					line: {
+						id: "l1",
+						text: "read: a",
+						status: "completed",
+						label: "read",
+					},
+					at: 4000,
+				},
+			];
 			const { container, rerender } = render(
-				<Transcript
-					{...props}
-					items={[
-						{
-							kind: "tool",
-							id: "t1",
-							line: {
-								id: "l1",
-								text: "read: a",
-								status: "completed",
-								label: "read",
-							},
-							at: 4000,
-						},
-					]}
-					turn={{
-						since: 1000,
-						live: {
-							startedAt: 4500,
-							updatedAt: 4500,
-							text: "streaming thought",
-						},
-					}}
-				/>,
+				workTranscript(streaming, {
+					since: 1000,
+					live: {
+						startedAt: 4500,
+						updatedAt: 4500,
+						text: "streaming thought",
+					},
+				}),
 			);
 			fireEvent.click(screen.getByTitle("Expand"));
 			fireEvent.click(screen.getByTitle("Show full thought"));
 			expect(screen.getByTitle("Hide full thought")).toBeInTheDocument();
 			nowSpy.mockReturnValue(6000);
 			rerender(
-				<Transcript
-					{...props}
-					items={[
-						{
-							kind: "tool",
-							id: "t1",
-							line: {
-								id: "l1",
-								text: "read: a",
-								status: "completed",
-								label: "read",
-							},
-							at: 4000,
-						},
+				workTranscript(
+					[
+						...streaming,
 						{
 							kind: "thought",
 							id: "frozen-1",
@@ -1018,9 +1002,9 @@ describe("transcript row expansion", () => {
 							},
 							at: 6000,
 						},
-					]}
-					turn={{ since: 1000, live: null }}
-				/>,
+					],
+					{ since: 1000, live: null },
+				),
 			);
 			expect(
 				container
@@ -1036,16 +1020,9 @@ describe("transcript row expansion", () => {
 		}
 	});
 
-	test("frozen box mctl toggles detail and summary still toggles", () => {
+	test("frozen box expands from the summary or the corner control", () => {
 		const { container } = render(
-			<Transcript
-				items={[thought("t1", 1000), tool("t2", "read", 2000)]}
-				start={IDLE}
-				repoLabel="~/repo"
-				onRetry={vi.fn()}
-				onAnswer={vi.fn()}
-				session={SESSION}
-			/>,
+			workTranscript([thought("t1", 1000), tool("t2", "read", 2000)], null),
 		);
 		const summary = container.querySelector(
 			".work .summary",
@@ -1053,10 +1030,9 @@ describe("transcript row expansion", () => {
 		const detail = () => container.querySelector(".work .detail");
 		expect(summary?.getAttribute("aria-expanded")).toBe("false");
 		expect(detail()?.getAttribute("hidden")).not.toBeNull();
-		const mctl = screen.getByRole("button", { name: "Expand message" });
-		expect(mctl.textContent).toBe("+");
-		expect(mctl.classList.contains("mctl")).toBe(true);
-		fireEvent.click(mctl);
+		const control = screen.getByRole("button", { name: "Expand message" });
+		expect(control.textContent).toBe("+");
+		fireEvent.click(control);
 		expect(summary?.getAttribute("aria-expanded")).toBe("true");
 		expect(detail()?.getAttribute("hidden")).toBeNull();
 		const collapse = screen.getByRole("button", { name: "Collapse message" });
@@ -1069,30 +1045,22 @@ describe("transcript row expansion", () => {
 		expect(detail()?.getAttribute("hidden")).toBeNull();
 	});
 
-	test("live box shows the same mctl and toggles", () => {
+	test("live box expands from the corner control", () => {
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(5000);
 		try {
 			const { container } = render(
-				<Transcript
-					items={[{ kind: "user", id: "u1", text: "hi" }]}
-					start={IDLE}
-					repoLabel="~/repo"
-					onRetry={vi.fn()}
-					onAnswer={vi.fn()}
-					session={SESSION}
-					turn={{
-						since: 1000,
-						live: { startedAt: 4500, updatedAt: 4500, text: "hmm" },
-					}}
-				/>,
+				workTranscript([{ kind: "user", id: "u1", text: "hi" }], {
+					since: 1000,
+					live: { startedAt: 4500, updatedAt: 4500, text: "hmm" },
+				}),
 			);
 			const summary = container.querySelector(
 				".work .summary",
 			) as HTMLElement | null;
 			expect(summary?.getAttribute("aria-expanded")).toBe("false");
-			const mctl = screen.getByRole("button", { name: "Expand message" });
-			expect(mctl.textContent).toBe("+");
-			fireEvent.click(mctl);
+			const control = screen.getByRole("button", { name: "Expand message" });
+			expect(control.textContent).toBe("+");
+			fireEvent.click(control);
 			expect(summary?.getAttribute("aria-expanded")).toBe("true");
 			expect(
 				container.querySelector(".work .detail")?.getAttribute("hidden"),
@@ -1452,18 +1420,13 @@ describe("transcript live ack", () => {
 		);
 	});
 
-	test("empty working placeholder is locked non-expandable", () => {
+	test("empty working placeholder cannot expand", () => {
 		const { container } = render(
-			<Transcript
-				items={userOnly()}
-				start={IDLE}
-				repoLabel="~/repo"
-				onRetry={vi.fn()}
-				onAnswer={vi.fn()}
-				session={SESSION}
-				turn={{ since: 1000, live: null }}
-				onStop={vi.fn()}
-			/>,
+			workTranscript(
+				[{ kind: "user", id: "u1", text: "hi" }],
+				{ since: 1000, live: null },
+				vi.fn(),
+			),
 		);
 		const summary = container.querySelector(
 			".work .summary",

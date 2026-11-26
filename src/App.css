@@ -478,8 +478,13 @@ body {
 	line-height: 1;
 }
 
-.mctl:hover {
+.mctl:not(:disabled):hover {
 	color: #fff;
+}
+
+.mctl:disabled {
+	opacity: 0.35;
+	cursor: default;
 }
 
 .msg.user {
@@ -684,11 +689,15 @@ button.arow {
 	outline-offset: -2px;
 }
 
-.work .summary .chev {
-	flex: none;
-	width: 14px;
-	text-align: center;
-	color: #7dffc4;
+.work .summary[aria-disabled="true"] {
+	cursor: default;
+}
+
+.work .summary-row .right {
+	margin-left: auto;
+	display: flex;
+	gap: 4px;
+	align-items: center;
 }
 
 .work .summary .txt {
