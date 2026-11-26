@@ -21,8 +21,13 @@ use crate::plans::{self, Phase};
 use crate::types::{AgentError, PlansUpdate, SessionKey, SessionRole};
 
 use super::queue;
-use super::session::ActivePlan;
+use super::session::{ActivePlan, spawn_system_text};
 use super::{AgentManager, lock_backend};
+
+/// Minimal trigger waking an auto-started agent. Role instructions already
+/// travel as `systemPrompt` on `session/new`, so automatic starts send no
+/// user text.
+const AUTO_START_TRIGGER: &str = "Proceed.";
 
 /// Pump: advance every automatic idle executing, queued, rebasing, or
 /// evergreening plan that is ready, oldest arrivals first, at most one
@@ -236,13 +241,15 @@ impl AgentManager {
                 }
                 self.drop_live(window, &session).await;
                 self.carry_prompted(window, &from.name, &next.name);
-                let mut active = ActivePlan::executing(next.name.clone());
-                // The role goes out as the full first turn below, so later
-                // turns never prefix again.
-                active.prefixed = true;
-                let plan_dir_abs = next.path(&repo_root).to_string_lossy().to_string();
-                let text = opencode::executing_first_message(&plan_dir_abs);
-                self.spawn_with_first_turn(window, &repo_root, &branch, &from.name, active, text)
+                let active = ActivePlan::executing(next.name.clone());
+                let system = spawn_system_text(
+                    &active,
+                    &repo_root,
+                    &branch,
+                    &std::collections::HashMap::new(),
+                    None,
+                );
+                self.spawn_with_trigger(window, &repo_root, &branch, &from.name, active, system)
                     .await
             }
             Transition::Queue { plan } => {
@@ -332,19 +339,15 @@ impl AgentManager {
                 }
                 let next = plans::begin_evergreening(&repo_root, &from)?;
                 self.drop_live(window, &session).await;
-                let mut active = ActivePlan::evergreening(next.name.clone());
-                // The role goes out as the full first turn below, so later
-                // turns never prefix again.
-                active.prefixed = true;
-                let plan_md_abs = next.plan_md(&repo_root).to_string_lossy().to_string();
-                let text = opencode::evergreening_first_message(
-                    &status.path.to_string_lossy(),
-                    &status.worktree_branch,
-                    &plan_md_abs,
-                    &status.target_branch,
-                    &status.commits.join("\n"),
+                let active = ActivePlan::evergreening(next.name.clone());
+                let system = spawn_system_text(
+                    &active,
+                    &repo_root,
+                    &branch,
+                    &std::collections::HashMap::new(),
+                    Some(&status),
                 );
-                self.spawn_with_first_turn(window, &repo_root, &branch, &from.name, active, text)
+                self.spawn_with_trigger(window, &repo_root, &branch, &from.name, active, system)
                     .await
             }
             Transition::BeginRebasing { plan } => {
@@ -401,13 +404,15 @@ impl AgentManager {
                 let from = require_rebasing_plan(&repo_root, &plan)?;
                 let status = self.worktree_status_for(window, &repo_root, &from.name)?;
                 super::gate_rebasing(status.dirty, status.ffable, super::RebasingStep::Start)?;
-                let mut active = ActivePlan::rebasing(from.name.clone());
-                // The role goes out as the full first turn below, so later
-                // turns never prefix again.
-                active.prefixed = true;
-                let plan_md_abs = from.plan_md(&repo_root).to_string_lossy().to_string();
-                let text = rebasing_first_turn_text(&status, &plan_md_abs);
-                self.spawn_with_first_turn(window, &repo_root, &branch, &plan, active, text)
+                let active = ActivePlan::rebasing(from.name.clone());
+                let system = spawn_system_text(
+                    &active,
+                    &repo_root,
+                    &branch,
+                    &std::collections::HashMap::new(),
+                    Some(&status),
+                );
+                self.spawn_with_trigger(window, &repo_root, &branch, &plan, active, system)
                     .await
             }
             Transition::BackToRebasing { plan } => {
@@ -552,8 +557,6 @@ impl AgentManager {
                         raw: "commit or discard worktree changes first".to_string(),
                     });
                 }
-                let plan_md_abs = from.plan_md(&repo_root).to_string_lossy().to_string();
-                let text = rebasing_first_turn_text(&status, &plan_md_abs);
                 let (connection, session_id) = self.ensure_live(window, &session).await?;
                 self.mark_prompted(window, &from.name);
                 self.start_turn(
@@ -561,29 +564,28 @@ impl AgentManager {
                     connection,
                     session_id,
                     session.clone(),
-                    text.clone(),
+                    AUTO_START_TRIGGER.to_string(),
                 )
                 .await?;
-                self.announce_first_prompt(window, &session, &text);
                 Ok(self.plans_update(window))
             }
         }
     }
 
-    /// Shared spawn-plus-first-turn for the three agent-start transitions
+    /// Shared spawn-plus-trigger for the three agent-start transitions
     /// (`Execute`, `BeginEvergreening`, `StartRebasing`): spawn the session
-    /// for the caller's `ActivePlan`, send its role as the full first turn,
-    /// and announce it as a live user bubble. The caller moves the plan and
-    /// drops the old live session first; the plan name travels inside
-    /// `active` so the prompted flag follows it. Follows its own move only.
-    async fn spawn_with_first_turn(
+    /// with role instructions as `systemPrompt`, then send a minimal trigger
+    /// so the agent wakes. The caller moves the plan and drops the old live
+    /// session first; the plan name travels inside `active` so the prompted
+    /// flag follows it. Follows its own move only.
+    async fn spawn_with_trigger(
         &self,
         window: &str,
         repo_root: &std::path::Path,
         branch: &str,
         acted_plan: &str,
         active: ActivePlan,
-        text: String,
+        system: String,
     ) -> Result<PlansUpdate, AgentError> {
         let plan_name = active.name.clone();
         let role = active.role().ok_or_else(|| AgentError::RequestFailed {
@@ -591,13 +593,18 @@ impl AgentManager {
         })?;
         let agent = opencode::agent_for(role);
         let (connection, session_id, key) = self
-            .spawn_session(window, repo_root, branch, active, agent)
+            .spawn_session(window, repo_root, branch, active, agent, &system)
             .await?;
         self.select_if_viewed(window, acted_plan, key.clone());
         self.mark_prompted(window, &plan_name);
-        self.start_turn(window, connection, session_id, key.clone(), text.clone())
-            .await?;
-        self.announce_first_prompt(window, &key, &text);
+        self.start_turn(
+            window,
+            connection,
+            session_id,
+            key.clone(),
+            AUTO_START_TRIGGER.to_string(),
+        )
+        .await?;
         Ok(self.plans_update(window))
     }
 }
@@ -735,16 +742,6 @@ pub(crate) fn next_action(view: &PlanView, rebase_mutex_held: bool) -> Option<Tr
             }
         }
     }
-}
-
-/// Rebasing first turn shared by the fresh spawn and the re-run. Pure.
-fn rebasing_first_turn_text(status: &super::WorktreeLive, plan_md_abs: &str) -> String {
-    opencode::rebasing_first_message(
-        &status.worktree_branch,
-        &status.target_branch,
-        &status.path.to_string_lossy(),
-        plan_md_abs,
-    )
 }
 
 /// First on-disk source for a plan name across the given phases, in order.

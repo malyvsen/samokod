@@ -45,12 +45,6 @@ pub(crate) fn role_phase(role: SessionRole) -> plans::Phase {
 pub(crate) struct ActivePlan {
     pub(crate) name: String,
     pub(crate) phase: plans::Phase,
-    /// Role already delivered for this ACP conversation. Executing,
-    /// evergreening, and rebasing send once, as the full first turn or
-    /// prefixed to it; scoping prefixes its template server-side to the
-    /// first prompt. In-memory only: history replay re-derives it from any
-    /// user message, so no cross-restart memory can go stale.
-    pub(crate) prefixed: bool,
 }
 
 impl ActivePlan {
@@ -58,7 +52,6 @@ impl ActivePlan {
         ActivePlan {
             name,
             phase: plans::Phase::Scoping,
-            prefixed: false,
         }
     }
 
@@ -66,7 +59,6 @@ impl ActivePlan {
         ActivePlan {
             name,
             phase: plans::Phase::Executing,
-            prefixed: false,
         }
     }
 
@@ -74,7 +66,6 @@ impl ActivePlan {
         ActivePlan {
             name,
             phase: plans::Phase::Rebasing,
-            prefixed: false,
         }
     }
 
@@ -82,7 +73,6 @@ impl ActivePlan {
         ActivePlan {
             name,
             phase: plans::Phase::Evergreening,
-            prefixed: false,
         }
     }
 
@@ -137,6 +127,92 @@ impl ActivePlan {
     }
 }
 
+/// System instructions for a fresh ACP session. Pure: placeholders filled,
+/// no IO. Scoping uses the repo-relative display path, executing the
+/// absolute plan dir, rebasing the worktree path plus branches, evergreening
+/// those plus the landed commits. `status` carries fresh worktree coordinates
+/// when the caller already holds them (transition core); otherwise the
+/// worktree map plus checkout branch fill them with empty commits.
+pub(crate) fn spawn_system_text(
+    plan: &ActivePlan,
+    repo_root: &Path,
+    checkout_branch: &str,
+    worktrees: &HashMap<String, crate::worktrees::WorktreeRecord>,
+    status: Option<&super::WorktreeLive>,
+) -> String {
+    match plan.phase {
+        plans::Phase::Scoping => {
+            let display = opencode::plan_display(&plan.plan_ref());
+            opencode::scoping_template(&display)
+        }
+        plans::Phase::Executing => {
+            let plan_dir_abs = plan
+                .plan_ref()
+                .path(repo_root)
+                .to_string_lossy()
+                .to_string();
+            opencode::executing_first_message(&plan_dir_abs)
+        }
+        plans::Phase::Rebasing => {
+            let plan_md_abs = plan
+                .plan_ref()
+                .plan_md(repo_root)
+                .to_string_lossy()
+                .to_string();
+            if let Some(live) = status {
+                opencode::rebasing_first_message(
+                    &live.worktree_branch,
+                    &live.target_branch,
+                    &live.path.to_string_lossy(),
+                    &plan_md_abs,
+                )
+            } else {
+                let path = worktrees
+                    .get(&plan.name)
+                    .map(|record| record.path.clone())
+                    .unwrap_or_else(|| crate::worktrees::worktree_path(repo_root, &plan.name));
+                let worktree_branch = crate::worktrees::branch_name(&plan.name);
+                opencode::rebasing_first_message(
+                    &worktree_branch,
+                    checkout_branch,
+                    &path.to_string_lossy(),
+                    &plan_md_abs,
+                )
+            }
+        }
+        plans::Phase::Evergreening => {
+            let plan_md_abs = plan
+                .plan_ref()
+                .plan_md(repo_root)
+                .to_string_lossy()
+                .to_string();
+            if let Some(live) = status {
+                opencode::evergreening_first_message(
+                    &live.path.to_string_lossy(),
+                    &live.worktree_branch,
+                    &plan_md_abs,
+                    &live.target_branch,
+                    &live.commits.join("\n"),
+                )
+            } else {
+                let path = worktrees
+                    .get(&plan.name)
+                    .map(|record| record.path.clone())
+                    .unwrap_or_else(|| crate::worktrees::worktree_path(repo_root, &plan.name));
+                let worktree_branch = crate::worktrees::branch_name(&plan.name);
+                opencode::evergreening_first_message(
+                    &path.to_string_lossy(),
+                    &worktree_branch,
+                    &plan_md_abs,
+                    checkout_branch,
+                    "",
+                )
+            }
+        }
+        plans::Phase::Queued | plans::Phase::Completed | plans::Phase::Cancelled => String::new(),
+    }
+}
+
 /// One live agent session: its own `opencode acp` process, connection, ACP
 /// session id, and turn state.
 pub(crate) struct LiveSession {
@@ -154,11 +230,10 @@ pub(crate) struct LiveSession {
     pub(crate) cost: f64,
     pub(crate) ctx_pct: f64,
     pub(crate) tool_calls: HashMap<String, crate::acp::ToolCall>,
-    pub(crate) plan: ActivePlan,
 }
 
 impl LiveSession {
-    pub(crate) fn fresh(plan: ActivePlan, roles: crate::repo_state::RepoState) -> Self {
+    pub(crate) fn fresh(roles: crate::repo_state::RepoState) -> Self {
         LiveSession {
             connection: None,
             supports_close: false,
@@ -174,7 +249,6 @@ impl LiveSession {
             cost: 0.0,
             ctx_pct: 0.0,
             tool_calls: HashMap::new(),
-            plan,
         }
     }
 
@@ -227,9 +301,10 @@ impl AgentManager {
     }
 
     /// Spawn a fresh agent process scoped to one plan and open a session on
-    /// it: pin the agent mode, reapply the effective default model then
-    /// effort (effort-last, since a model switch can reshape effort options).
-    /// Shared by lazy first prompts and the eager executing start.
+    /// it with role instructions as `systemPrompt`: pin the agent mode,
+    /// reapply the effective default model then effort (effort-last, since a
+    /// model switch can reshape effort options). Shared by lazy first
+    /// prompts and the eager executing start.
     pub(crate) async fn spawn_session(
         &self,
         window: &str,
@@ -237,6 +312,7 @@ impl AgentManager {
         branch: &str,
         plan: ActivePlan,
         agent: &str,
+        system: &str,
     ) -> Result<(ConnectionTo<Agent>, String, SessionKey), AgentError> {
         let spawn_start = std::time::Instant::now();
         let key = plan.key().ok_or_else(|| AgentError::RequestFailed {
@@ -244,11 +320,11 @@ impl AgentManager {
         })?;
         let effective = self.config_defaults(repo_root);
         let connection = self
-            .ensure_connection_for(window, &key, &plan, opencode::agent_env(&plan.plan_ref()))
+            .ensure_connection_for(window, &key, opencode::agent_env(&plan.plan_ref()))
             .await?;
         let cwd = plan.cwd(repo_root);
         let response = connection
-            .send_request(acp::build_new_session_request(&cwd))
+            .send_request(acp::build_new_session_request(&cwd, system))
             .block_task()
             .await
             .map_err(|error| AgentError::RequestFailed {
@@ -292,15 +368,6 @@ impl AgentManager {
                 .get(&key)
                 .map(|session| session.supports_close)
                 .unwrap_or(false);
-            // A reopened session keeps its one-time prefix state; a fresh
-            // plan starts with the caller's flag.
-            let prefixed = state
-                .sessions
-                .get(&key)
-                .map(|session| session.plan.prefixed)
-                .unwrap_or(plan.prefixed);
-            let mut plan = plan;
-            plan.prefixed = prefixed;
             state.sessions.insert(
                 key.clone(),
                 LiveSession {
@@ -318,7 +385,6 @@ impl AgentManager {
                     cost: 0.0,
                     ctx_pct: 0.0,
                     tool_calls: HashMap::new(),
-                    plan,
                 },
             );
             state.repo_root = Some(repo_root.to_path_buf());
@@ -352,9 +418,8 @@ impl AgentManager {
 
     /// Live connection for one session, spawning lazily on the first
     /// prompt: same plan directory, mode pin, default model/effort
-    /// reapplied. A reopened session keeps its one-time prefix state; a
-    /// fresh plan starts with the caller's flag. Single-flights against a
-    /// racing warm: one spawner wins, the other polls for liveness.
+    /// reapplied. Single-flights against a racing warm: one spawner wins,
+    /// the other polls for liveness.
     pub(crate) async fn ensure_live(
         &self,
         window: &str,
@@ -438,7 +503,9 @@ impl AgentManager {
     /// Spawn path assuming the warm claim is already held. Shared by
     /// `ensure_live` (which claims) and `warm_session` (which holds its
     /// own claim). Pending scoping names spawn without a directory; the
-    /// first prompt materializes it later.
+    /// first prompt materializes it later. Warmed sessions compute the same
+    /// system text as the transition core so the agent wakes with the full
+    /// role instructions and no prompt yet.
     pub(crate) async fn ensure_live_claimed(
         &self,
         window: &str,
@@ -465,24 +532,28 @@ impl AgentManager {
                 raw: "plan is gone".to_string(),
             });
         }
-        let stored_prefixed = lock_backend(&self.state).and_then(|backend| {
-            backend
-                .windows
-                .get(window)?
-                .sessions
-                .get(key)
-                .map(|live| live.plan.prefixed)
-        });
-        let mut plan = ActivePlan::for_session(key);
-        // A known session keeps its prefix state across transport deaths;
-        // anything without an entry starts with the caller's flag.
-        // Eager executing, evergreening, and rebasing sessions bypass this
-        // path: the transition core marks their prefixed flag, since their
-        // role already went out as the full first turn.
-        plan.prefixed = stored_prefixed.unwrap_or(plan.prefixed);
+        let plan = ActivePlan::for_session(key);
+        let worktrees = lock_backend(&self.state)
+            .and_then(|backend| backend.windows.get(window).map(|win| win.worktrees.clone()))
+            .unwrap_or_default();
+        let status = if matches!(plan.phase, plans::Phase::Evergreening) {
+            match self.worktree_status_for(window, &repo_root, &plan.name) {
+                Ok(live) => Some(live),
+                Err(error) => {
+                    log::warn!(
+                        "warmed evergreening {} uses fallback system: {error}",
+                        plan.name
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let system = spawn_system_text(&plan, &repo_root, &branch, &worktrees, status.as_ref());
         let agent = opencode::agent_for(key.role);
         let (connection, session_id, _) = self
-            .spawn_session(window, &repo_root, &branch, plan, agent)
+            .spawn_session(window, &repo_root, &branch, plan, agent, &system)
             .await?;
         Ok((connection, session_id))
     }
@@ -585,12 +656,7 @@ impl AgentManager {
         };
         let plan = ActivePlan::for_session(&session);
         let connection = match self
-            .ensure_connection_for(
-                window,
-                &session,
-                &plan,
-                opencode::agent_env(&plan.plan_ref()),
-            )
+            .ensure_connection_for(window, &session, opencode::agent_env(&plan.plan_ref()))
             .await
         {
             Ok(connection) => connection,
@@ -816,7 +882,6 @@ impl AgentManager {
         &self,
         window: &str,
         key: &SessionKey,
-        plan: &ActivePlan,
         extra_env: HashMap<String, String>,
     ) -> Result<ConnectionTo<Agent>, AgentError> {
         if let Some(connection) = self.connection_snapshot_for(window, key) {
@@ -867,7 +932,6 @@ impl AgentManager {
         let exit_window = window.to_string();
         let exit_key = key.clone();
         let slot_key = key.clone();
-        let slot_plan = plan.clone();
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
         let ready = Arc::new(Mutex::new(Some(ready_tx)));
         let ready_for_handler = Arc::clone(&ready);
@@ -939,7 +1003,6 @@ impl AgentManager {
                     let ready = Arc::clone(&ready_for_handler);
                     let window = slot_window.clone();
                     let key = slot_key.clone();
-                    let plan = slot_plan.clone();
                     async move {
                         let init_response = connection
                             .send_request(acp::build_initialize_request())
@@ -970,9 +1033,7 @@ impl AgentManager {
                                     session.supports_close = supports_close;
                                 }
                                 None => {
-                                    let mut fresh = LiveSession::fresh(
-                                        plan,
-                                        crate::repo_state::RepoState::default(),
+                                    let mut fresh = LiveSession::fresh(crate::repo_state::RepoState::default(),
                                     );
                                     fresh.connection = Some(connection.clone());
                                     fresh.supports_close = supports_close;

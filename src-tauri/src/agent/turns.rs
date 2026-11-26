@@ -6,7 +6,6 @@ use tauri::AppHandle;
 
 use crate::acp::{self, Agent, ConnectionTo};
 use crate::error_hint::{classify_error, is_transport_error};
-use crate::opencode;
 use crate::plans;
 use crate::spend::context_pct;
 use crate::todos::{diff_todos, todos_from_tool};
@@ -49,10 +48,10 @@ impl AgentManager {
 
     /// Send one plain-text prompt, spawning the session lazily on its
     /// first message. Streams arrive as events; the turn end arrives as
-    /// done or failed. The scoping first turn takes the user's text and
-    /// prefixes the template server-side as one message. A reserved
-    /// pending scoping session materializes its directory here, before
-    /// the `ensure_live` path.
+    /// done or failed. User-initiated turns send only the user's text; role
+    /// instructions already travel as `systemPrompt` on `session/new`. A
+    /// reserved pending scoping session materializes its directory here,
+    /// before the `ensure_live` path.
     pub async fn send_prompt(
         &self,
         window: &str,
@@ -72,8 +71,8 @@ impl AgentManager {
                 .ok_or_else(|| AgentError::NoSession {
                     raw: "open a repository first".to_string(),
                 })?;
-            // Working title from the user's text before the server prefix.
-            // Set-once; headings win; empty stays `Untitled`.
+            // Working title from the user's text. Set-once; headings win;
+            // empty stays `Untitled`.
             store_first_title(&self.state, window, &repo_root, &session.plan, &text);
             let pending_match = match lock_backend(&self.state) {
                 Some(backend) => backend
@@ -130,16 +129,12 @@ impl AgentManager {
             live.failed = false;
         }
         self.mark_prompted(window, &session.plan);
-        let mut text = text;
-        if let Some(prefixed) = self.claim_role_prefix(window, &session, &text) {
-            text = prefixed;
-        }
         self.start_turn(window, connection, session_id, session, text)
             .await
     }
 
     /// Guard one turn and stream it as events. Records the prompt so retry
-    /// resends exactly what ran, prefixed or not.
+    /// resends exactly what ran.
     pub(crate) async fn start_turn(
         &self,
         window: &str,
@@ -271,67 +266,6 @@ impl AgentManager {
         self.push_plans(window);
         Ok(())
     }
-
-    /// Claim the one-time role prefix for the first message of one ACP
-    /// conversation. One locked check-and-mark, so a retried turn never
-    /// prefixes twice. Scoping uses the repo-relative display path since it
-    /// runs with cwd at the repo root, while executing and rebasing use
-    /// absolute paths into the checkout. Evergreening never prefixes here:
-    /// the transition core sends its full first turn at spawn.
-    fn claim_role_prefix(&self, window: &str, key: &SessionKey, user_text: &str) -> Option<String> {
-        let mut backend = lock_backend(&self.state)?;
-        let state = backend.windows.get_mut(window)?;
-        let repo_root = state.repo_root.clone()?;
-        let live = state.sessions.get(key)?;
-        if live.plan.prefixed {
-            return None;
-        }
-        let plan = live.plan.clone();
-        let text = match plan.phase {
-            plans::Phase::Scoping => {
-                let display = opencode::plan_display(&plan.plan_ref());
-                prefixed_first_message(&opencode::scoping_template(&display), user_text)
-            }
-            plans::Phase::Executing => {
-                let plan_dir_abs = plan
-                    .plan_ref()
-                    .path(&repo_root)
-                    .to_string_lossy()
-                    .to_string();
-                prefixed_first_message(&opencode::executing_first_message(&plan_dir_abs), user_text)
-            }
-            plans::Phase::Rebasing => {
-                let path = match state.worktrees.get(&plan.name) {
-                    Some(record) => record.path.clone(),
-                    None => crate::worktrees::worktree_path(&repo_root, &plan.name),
-                };
-                let worktree_branch = crate::worktrees::branch_name(&plan.name);
-                let target_branch = state.checkout_branch.clone();
-                let plan_md_abs = plan
-                    .plan_ref()
-                    .plan_md(&repo_root)
-                    .to_string_lossy()
-                    .to_string();
-                prefixed_first_message(
-                    &opencode::rebasing_first_message(
-                        &worktree_branch,
-                        &target_branch,
-                        &path.to_string_lossy(),
-                        &plan_md_abs,
-                    ),
-                    user_text,
-                )
-            }
-            plans::Phase::Queued
-            | plans::Phase::Evergreening
-            | plans::Phase::Completed
-            | plans::Phase::Cancelled => {
-                return None;
-            }
-        };
-        state.sessions.get_mut(key)?.plan.prefixed = true;
-        Some(text)
-    }
 }
 
 /// Raw failure message for an aborted ACP stop reason, or `None` when the
@@ -430,36 +364,27 @@ pub(crate) fn handle_notification(
         );
     }
     // User messages only surface here while history replays. Live turns
-    // already show their bubble (scoping appends optimistically, eager
-    // executing/rebasing first prompts arrive as their own event), so
-    // mapping them outside a replay would double-add every prompt.
+    // already show their bubble, so mapping them outside a replay would
+    // double-add every prompt.
     if let Some(chunk) = crate::updates::user_text_of(&notification.update)
         && lock_backend(state)
-            .map(|mut backend| {
+            .map(|backend| {
                 backend
                     .windows
-                    .get_mut(window)
-                    .map(|win| {
-                        if !win.is_history_loading(key) {
-                            return false;
-                        }
-                        win.mark_prefixed(key);
-                        true
-                    })
+                    .get(window)
+                    .map(|win| win.is_history_loading(key))
                     .unwrap_or(false)
             })
             .unwrap_or(false)
     {
-        for bubble in replay_bubbles(key, &chunk) {
-            emit_event(
-                app,
-                window,
-                AppEvent::UserText {
-                    session: key.clone(),
-                    chunk: bubble,
-                },
-            );
-        }
+        emit_event(
+            app,
+            window,
+            AppEvent::UserText {
+                session: key.clone(),
+                chunk,
+            },
+        );
     }
     match &notification.update {
         acp::SessionUpdate::ToolCall(call) => {
@@ -695,42 +620,6 @@ fn carry_pending_title(
     }
 }
 
-/// First message of one ACP conversation: the role template plus the
-/// user's text. Pure.
-fn prefixed_first_message(template: &str, user_text: &str) -> String {
-    format!("{}\n\n{}", template, user_text.trim())
-}
-
-/// Replayed user text as display bubbles: a scoping first prompt carries
-/// its template, so it splits back into template and message; anything
-/// else is one bubble. Pure.
-/// Executing and rebasing intentionally stay combined: no lead preview
-/// exists for them, so no duplicate is possible. Their live-versus-reload
-/// asymmetry is server-side prefixing, which stays out of scope.
-fn replay_bubbles(key: &SessionKey, chunk: &str) -> Vec<String> {
-    if key.role != SessionRole::Scoping {
-        return vec![chunk.to_string()];
-    }
-    let plan_ref = plans::PlanRef {
-        name: key.plan.clone(),
-        phase: plans::Phase::Scoping,
-    };
-    let template = opencode::scoping_template(&opencode::plan_display(&plan_ref));
-    match split_scoping_replay(&template, chunk) {
-        Some((first, second)) if !second.is_empty() => vec![first, second],
-        Some((first, _)) => vec![first],
-        None => vec![chunk.to_string()],
-    }
-}
-
-/// Split a scoping first prompt into its template and message parts.
-/// Returns `None` when the text carries no template (e.g. a manually
-/// edited template). Pure.
-fn split_scoping_replay(template: &str, text: &str) -> Option<(String, String)> {
-    let remainder = text.strip_prefix(template)?.strip_prefix("\n\n")?;
-    Some((template.to_string(), remainder.to_string()))
-}
-
 /// Render one tool call as both a `▸` line and, for `todowrite` only,
 /// a todos update. Every tool line emits so `task`/`explore` steps carrying
 /// a todos-shaped payload stay visible.
@@ -813,66 +702,43 @@ fn update_todos(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::session::{ActivePlan, spawn_system_text};
 
     #[test]
-    fn prefixed_message_combines_template_and_user_text() {
-        let template = "ROLE TEMPLATE";
-        let text = prefixed_first_message(template, "  do things  ");
-        assert_eq!(text, format!("{template}\n\ndo things"));
+    fn system_text_has_no_placeholders() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        crate::plans::ensure_structure(root).expect("ensure");
+        let worktrees = std::collections::HashMap::new();
+
+        let scoping = ActivePlan::scoping("ts".to_string());
+        let scoping_system = spawn_system_text(&scoping, root, "main", &worktrees, None);
+        assert!(scoping_system.contains(".samokod/plans/scoping/ts/plan.md"));
+        assert!(!scoping_system.contains("{{"));
+
+        let executing = ActivePlan::executing("ts.slug".to_string());
+        let executing_system = spawn_system_text(&executing, root, "main", &worktrees, None);
+        assert!(executing_system.contains("ts.slug/plan.md"));
+        assert!(!executing_system.contains("{{"));
+
+        let rebasing = ActivePlan::rebasing("ts".to_string());
+        let rebasing_system = spawn_system_text(&rebasing, root, "main", &worktrees, None);
+        assert!(rebasing_system.contains("samokod/ts"));
+        assert!(rebasing_system.contains("main"));
+        assert!(!rebasing_system.contains("{{"));
+
+        let evergreening = ActivePlan::evergreening("ts".to_string());
+        let evergreening_system = spawn_system_text(&evergreening, root, "main", &worktrees, None);
+        assert!(evergreening_system.contains("samokod/ts"));
+        assert!(!evergreening_system.contains("{{"));
     }
 
     #[test]
-    fn scoping_replay_splits_prefixed_message() {
-        let display = ".samokod/plans/scoping/ts";
-        let template = opencode::scoping_template(display);
-        let full = format!("{template}\n\ndo things");
-        let key = SessionKey {
-            plan: "ts".to_string(),
-            role: SessionRole::Scoping,
-        };
-        assert_eq!(
-            replay_bubbles(&key, &full),
-            vec![template.clone(), "do things".to_string()]
-        );
-        let (first, second) =
-            split_scoping_replay(&template, &full).expect("splits prefixed message");
-        assert_eq!(first, template);
-        assert_eq!(second, "do things");
-    }
-
-    #[test]
-    fn scoping_replay_keeps_edited_template_whole() {
-        let display = ".samokod/plans/scoping/ts";
-        let template = opencode::scoping_template(display);
-        assert!(split_scoping_replay(&template, "edited template text").is_none());
-        assert!(split_scoping_replay(&template, &template).is_none());
-    }
-
-    #[test]
-    fn executing_replay_stays_single_bubble() {
-        let template = opencode::executing_first_message(".samokod/plans/executing/ts");
-        let full = prefixed_first_message(&template, "do things");
-        let key = SessionKey {
-            plan: "ts".to_string(),
-            role: SessionRole::Executing,
-        };
-        assert_eq!(replay_bubbles(&key, &full), vec![full]);
-    }
-
-    #[test]
-    fn rebasing_replay_stays_single_bubble() {
-        let template = opencode::rebasing_first_message(
-            "samokod-ts",
-            "main",
-            "/repo/.samokod/worktrees/ts",
-            "/repo/.samokod/plans/rebasing/ts/plan.md",
-        );
-        let full = prefixed_first_message(&template, "do things");
-        let key = SessionKey {
-            plan: "ts".to_string(),
-            role: SessionRole::Rebasing,
-        };
-        assert_eq!(replay_bubbles(&key, &full), vec![full]);
+    fn legacy_prefixed_history_shows_single_bubble() {
+        let template = crate::opencode::executing_first_message(".samokod/plans/executing/ts");
+        let legacy = format!("{template}\n\ndo things");
+        assert!(legacy.contains(&template));
+        assert!(legacy.contains("do things"));
     }
 
     #[test]

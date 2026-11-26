@@ -218,7 +218,6 @@ impl Drop for HistoryGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::session::ActivePlan;
     use crate::types::SessionRole;
 
     fn key() -> SessionKey {
@@ -260,10 +259,7 @@ mod tests {
         let key = key();
         state.sessions.insert(
             key.clone(),
-            crate::agent::LiveSession::fresh(
-                ActivePlan::scoping(key.plan.clone()),
-                crate::repo_state::RepoState::default(),
-            ),
+            crate::agent::LiveSession::fresh(crate::repo_state::RepoState::default()),
         );
         state.set_working(&key, true);
         assert!(!state.claim_history(&key));

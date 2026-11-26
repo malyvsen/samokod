@@ -233,15 +233,6 @@ impl WindowState {
             .map(|session| session.working)
             .unwrap_or(false)
     }
-
-    /// Mark one session prefixed. History replay calls this on every user
-    /// chunk: any replayed user message proves its first turn already
-    /// carried the role message.
-    fn mark_prefixed(&mut self, key: &SessionKey) {
-        if let Some(session) = self.sessions.get_mut(key) {
-            session.plan.prefixed = true;
-        }
-    }
 }
 
 /// Empty scoping session: no `plan.md`, no prompted flag (memory or
@@ -1096,20 +1087,6 @@ impl AgentManager {
         Ok(())
     }
 
-    /// Announce an eager executing/rebasing first prompt as a live YOU
-    /// bubble, matching what history replay shows. Shared so the two
-    /// call sites cannot drift apart; retries never call here.
-    fn announce_first_prompt(&self, window: &str, key: &SessionKey, text: &str) {
-        emit_event(
-            &self.app,
-            window,
-            AppEvent::UserText {
-                session: key.clone(),
-                chunk: text.to_string(),
-            },
-        );
-    }
-
     /// Repos owned across windows, sorted by path.
     pub fn list_open_repos(&self) -> Vec<crate::types::OpenRepoEntry> {
         lock_backend(&self.state)
@@ -1459,10 +1436,7 @@ mod tests {
         let win = backend.ensure_window("main");
         win.sessions.insert(
             key.clone(),
-            LiveSession::fresh(
-                ActivePlan::scoping("2026-09-25.10-54-59".to_string()),
-                crate::repo_state::RepoState::default(),
-            ),
+            LiveSession::fresh(crate::repo_state::RepoState::default()),
         );
         win.current = Some(key);
         Mutex::new(backend)
@@ -1503,17 +1477,11 @@ mod tests {
             let win = guard.ensure_window("main");
             win.sessions.insert(
                 first.clone(),
-                LiveSession::fresh(
-                    ActivePlan::scoping("a".to_string()),
-                    crate::repo_state::RepoState::default(),
-                ),
+                LiveSession::fresh(crate::repo_state::RepoState::default()),
             );
             win.sessions.insert(
                 second.clone(),
-                LiveSession::fresh(
-                    ActivePlan::scoping("b".to_string()),
-                    crate::repo_state::RepoState::default(),
-                ),
+                LiveSession::fresh(crate::repo_state::RepoState::default()),
             );
         }
         set_working(&state, "main", &first, true);
@@ -1562,13 +1530,10 @@ mod tests {
         {
             let mut guard = state.lock().expect("state poisoned");
             let win = guard.ensure_window("main");
-            for (key, name) in [(&first, "a"), (&second, "b")] {
+            for key in [&first, &second] {
                 win.sessions.insert(
                     key.clone(),
-                    LiveSession::fresh(
-                        ActivePlan::scoping(name.to_string()),
-                        crate::repo_state::RepoState::default(),
-                    ),
+                    LiveSession::fresh(crate::repo_state::RepoState::default()),
                 );
             }
         }
@@ -1721,10 +1686,7 @@ mod tests {
             for (label, key) in [("a", &key_a), ("b", &key_b)] {
                 backend.ensure_window(label).sessions.insert(
                     key.clone(),
-                    LiveSession::fresh(
-                        ActivePlan::scoping(key.plan.clone()),
-                        crate::repo_state::RepoState::default(),
-                    ),
+                    LiveSession::fresh(crate::repo_state::RepoState::default()),
                 );
             }
         }
@@ -1763,10 +1725,7 @@ mod tests {
             let mut guard = backend.lock().expect("state poisoned");
             guard.ensure_window("window-1").sessions.insert(
                 key.clone(),
-                LiveSession::fresh(
-                    ActivePlan::scoping("a".to_string()),
-                    crate::repo_state::RepoState::default(),
-                ),
+                LiveSession::fresh(crate::repo_state::RepoState::default()),
             );
             guard.ensure_window("window-1").repo_root = Some(PathBuf::from("/repo"));
         }
@@ -2047,10 +2006,7 @@ mod tests {
             plan: "a".to_string(),
             role: SessionRole::Executing,
         };
-        let mut live = LiveSession::fresh(
-            ActivePlan::executing("a".to_string()),
-            crate::repo_state::RepoState::default(),
-        );
+        let mut live = LiveSession::fresh(crate::repo_state::RepoState::default());
         live.working = true;
         live.approval = true;
         let sessions = HashMap::from([(key, live)]);
@@ -2200,10 +2156,7 @@ mod tests {
         };
         state.sessions.insert(
             key.clone(),
-            LiveSession::fresh(
-                ActivePlan::scoping(name.to_string()),
-                crate::repo_state::RepoState::default(),
-            ),
+            LiveSession::fresh(crate::repo_state::RepoState::default()),
         );
         assert!(is_empty_scoping(&state, root, name));
         state.sessions.get_mut(&key).expect("live").last_prompt = Some("hi".to_string());
@@ -2289,34 +2242,6 @@ mod tests {
     }
 
     #[test]
-    fn scoping_starts_unprefixed() {
-        assert!(!ActivePlan::scoping("n".to_string()).prefixed);
-    }
-
-    #[test]
-    fn replayed_user_marks_prefixed() {
-        let mut state = WindowState::default();
-        let key = test_key();
-        state.sessions.insert(
-            key.clone(),
-            LiveSession::fresh(
-                ActivePlan::scoping(key.plan.clone()),
-                crate::repo_state::RepoState::default(),
-            ),
-        );
-        state.mark_prefixed(&key);
-        assert!(state.sessions.get(&key).expect("session").plan.prefixed);
-    }
-
-    #[test]
-    fn mark_prefixed_on_unknown_key_is_noop() {
-        let mut state = WindowState::default();
-        let key = test_key();
-        state.mark_prefixed(&key);
-        assert!(!state.sessions.contains_key(&key));
-    }
-
-    #[test]
     fn executing_runs_inside_its_worktree() {
         use std::path::Path;
         let root = Path::new("/repo");
@@ -2378,10 +2303,7 @@ mod tests {
         };
         sent_state.sessions.insert(
             sent.clone(),
-            LiveSession::fresh(
-                ActivePlan::scoping(sent.plan.clone()),
-                crate::repo_state::RepoState::default(),
-            ),
+            LiveSession::fresh(crate::repo_state::RepoState::default()),
         );
         sent_state
             .sessions
@@ -2454,10 +2376,7 @@ mod tests {
                 plan: name.to_string(),
                 role: SessionRole::Scoping,
             },
-            LiveSession::fresh(
-                ActivePlan::scoping(name.to_string()),
-                crate::repo_state::RepoState::default(),
-            ),
+            LiveSession::fresh(crate::repo_state::RepoState::default()),
         );
         vanish_scoping(&mut state, root, name, "test");
         assert!(
@@ -2786,7 +2705,7 @@ mod tests {
                     .await
                     .map_err(|error| acp::internal_error(error.to_string()))?;
                 let response = connection
-                    .send_request(acp::build_new_session_request(&cwd_owned))
+                    .send_request(acp::build_new_session_request(&cwd_owned, "test system"))
                     .block_task()
                     .await
                     .map_err(|error| acp::internal_error(error.to_string()))?;

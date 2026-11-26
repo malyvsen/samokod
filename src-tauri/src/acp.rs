@@ -3,7 +3,6 @@
 use agent_client_protocol::schema::ProtocolVersion;
 pub use agent_client_protocol::v1::ConnectionTo;
 pub use agent_client_protocol::v1::Responder;
-#[allow(unused_imports)]
 pub use agent_client_protocol::v1::schema::{
     CancelNotification, CloseSessionRequest, ContentBlock, LoadSessionRequest, PermissionOption,
     PermissionOptionId, PermissionOptionKind, PromptRequest, RequestPermissionOutcome,
@@ -11,7 +10,7 @@ pub use agent_client_protocol::v1::schema::{
     SessionConfigId, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigOptionValue, SessionConfigSelectOptions, SessionConfigValueId, SessionId,
     SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, StopReason, SystemPrompt,
-    TextContent, ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind,
+    SystemPromptMode, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 use agent_client_protocol::v1::schema::{ClientCapabilities, InitializeRequest, NewSessionRequest};
 #[cfg(test)]
@@ -48,10 +47,13 @@ pub fn build_initialize_request() -> InitializeRequest {
     InitializeRequest::new(ProtocolVersion::V1).client_capabilities(ClientCapabilities::default())
 }
 
-/// Build the ACP `session/new` request for a repository root. No MCP servers
-/// are passed; OpenCode owns them.
-pub fn build_new_session_request(cwd: &Path) -> NewSessionRequest {
-    NewSessionRequest::new(cwd)
+/// Build the ACP `session/new` request for a repository root with role
+/// instructions as `systemPrompt` in append mode. No MCP servers are
+/// passed; OpenCode owns them.
+pub fn build_new_session_request(cwd: &Path, system: &str) -> NewSessionRequest {
+    NewSessionRequest::new(cwd).system_prompt(
+        SystemPrompt::new(vec![ContentBlock::from(system)]).mode(SystemPromptMode::Append),
+    )
 }
 
 /// Build the ACP `session/load` request restoring a past session. Replay
@@ -356,8 +358,7 @@ mod tests {
 
     #[test]
     fn system_prompt_serializes_as_append() {
-        let system = SystemPrompt::new(vec![ContentBlock::from("role instructions")]);
-        let request = NewSessionRequest::new("/repo").system_prompt(system);
+        let request = build_new_session_request(Path::new("/repo"), "role instructions");
         let value = serde_json::to_value(&request).expect("serialize");
         assert_eq!(value["systemPrompt"]["mode"], "append");
         assert_eq!(

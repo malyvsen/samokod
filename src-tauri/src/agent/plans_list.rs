@@ -876,10 +876,7 @@ mod tests {
             plan: plan.name.clone(),
             role: SessionRole::Scoping,
         };
-        let mut live = LiveSession::fresh(
-            super::super::session::ActivePlan::scoping(plan.name.clone()),
-            crate::repo_state::RepoState::default(),
-        );
+        let mut live = LiveSession::fresh(crate::repo_state::RepoState::default());
         live.cost = 2.5;
         live.ctx_pct = 42.0;
         let sessions = HashMap::from([(key, live)]);
@@ -963,10 +960,7 @@ mod tests {
             };
             HashMap::from([(
                 key,
-                LiveSession::fresh(
-                    super::super::session::ActivePlan::rebasing(name.to_string()),
-                    crate::repo_state::RepoState::default(),
-                ),
+                LiveSession::fresh(crate::repo_state::RepoState::default()),
             )])
         } else {
             HashMap::new()

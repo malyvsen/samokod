@@ -44,8 +44,8 @@ pub fn agent_env(plan: &PlanRef) -> HashMap<String, String> {
 }
 
 /// Full agent config as inline JSON. Permissions only, no `system` field:
-/// role guidance travels as first-message text so OpenCode's per-model base
-/// prompt stays intact. Native V2 shape: `agents` plus an ordered
+/// role guidance travels as ACP `systemPrompt` on `session/new` so
+/// OpenCode's per-model base prompt stays intact. Native V2 shape: `agents` plus an ordered
 /// `permissions` array per agent (last match wins), `shell` for shell
 /// commands, `subagent` for child agents, and `experimental.todo` so the
 /// `todowrite` tool exists (off by default in V2). Pure.
@@ -193,22 +193,20 @@ pub fn plan_display(plan: &PlanRef) -> String {
     format!(".samokod/plans/{}/{}", plan.phase.dir_name(), plan.name)
 }
 
-/// Scoping template with its plan dir filled in. Rendered as its own
-/// bubble; the first scoping prompt carries it on the wire. Pure.
+/// Scoping template with its plan dir filled in. Produces system text for
+/// `session/new`, never rendered as a bubble. Pure.
 pub fn scoping_template(plan_dir: &str) -> String {
     SCOPING_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
-/// Executing role and instruction. Sent once per executing conversation:
-/// as the full first turn on approval, prefixed to the first prompt
-/// otherwise. Pure.
+/// Executing role and instruction. Sent once per executing conversation as
+/// system text on `session/new`. Pure.
 pub fn executing_first_message(plan_dir: &str) -> String {
     EXECUTING_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
-/// Evergreening role and instruction. Sent as the full first turn when
-/// the cleanup path starts the evergreening agent in the same worktree.
-/// Pure.
+/// Evergreening role and instruction. Sent as system text on `session/new`
+/// when the cleanup path starts the evergreening agent. Pure.
 pub fn evergreening_first_message(
     worktree_path: &str,
     worktree_branch: &str,
@@ -224,8 +222,8 @@ pub fn evergreening_first_message(
         .replace("{{COMMITS}}", commits)
 }
 
-/// Rebasing role and instruction. Sent as the full first turn when the
-/// conflict path starts the rebasing agent in the worktree. Pure.
+/// Rebasing role and instruction. Sent as system text on `session/new`
+/// when the conflict path starts the rebasing agent. Pure.
 pub fn rebasing_first_message(
     worktree_branch: &str,
     target_branch: &str,
