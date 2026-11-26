@@ -382,8 +382,8 @@ fn take_pending_repo(window: Window) -> Option<String> {
     crate::cli::take_pending(&label).map(|path| path.to_string_lossy().to_string())
 }
 
-fn log_level(samokod_log: Option<&str>) -> log::LevelFilter {
-    match samokod_log
+fn log_level(attach_terminal: Option<&str>) -> log::LevelFilter {
+    match attach_terminal
         .unwrap_or_default()
         .to_ascii_lowercase()
         .as_str()
@@ -459,12 +459,12 @@ pub fn run() {
         }))
         .setup(|app| {
             app.manage(AgentManager::new(app.handle().clone()));
-            let samokod_log = std::env::var("SAMOKOD_LOG").ok();
+            let attach_terminal = std::env::var("SAMOKOD_ATTACH_TERMINAL").ok();
             let mut log_builder = tauri_plugin_log::Builder::new()
-                .level(log_level(samokod_log.as_deref()))
+                .level(log_level(attach_terminal.as_deref()))
                 .clear_targets()
                 .target(Target::new(TargetKind::LogDir { file_name: None }));
-            if cfg!(debug_assertions) || cli::log_opt_in(samokod_log.as_deref()) {
+            if cfg!(debug_assertions) || cli::log_opt_in(attach_terminal.as_deref()) {
                 log_builder = log_builder.target(Target::new(TargetKind::Stdout));
             }
             app.handle().plugin(log_builder.build())?;

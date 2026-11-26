@@ -16,7 +16,7 @@ use std::sync::{Mutex, OnceLock};
 pub fn maybe_detach() {
     if !should_detach(
         is_detached(),
-        log_opt_in(std::env::var("SAMOKOD_LOG").ok().as_deref()),
+        log_opt_in(std::env::var("SAMOKOD_ATTACH_TERMINAL").ok().as_deref()),
         std::io::stdout().is_terminal(),
         cfg!(debug_assertions),
     ) {
@@ -68,7 +68,7 @@ pub fn launch_root() -> Option<PathBuf> {
     Some(validated_root(&raw, &current_dir_or_fail()))
 }
 
-/// Detach only for a foreground terminal launch without the `SAMOKOD_LOG`
+/// Detach only for a foreground terminal launch without the `SAMOKOD_ATTACH_TERMINAL`
 /// opt-in. Debug builds never detach so dev and tests stay in the foreground.
 fn should_detach(
     already_detached: bool,
@@ -79,7 +79,7 @@ fn should_detach(
     !already_detached && !log_opted_in && stdout_is_tty && !is_debug
 }
 
-/// Non-empty `SAMOKOD_LOG` keeps the launch in the foreground and enables
+/// Non-empty `SAMOKOD_ATTACH_TERMINAL` keeps the launch in the foreground and enables
 /// stdout logs; unset or empty stays file-only in release.
 pub fn log_opt_in(value: Option<&str>) -> bool {
     value.is_some_and(|value| !value.is_empty())
