@@ -1035,6 +1035,75 @@ describe("transcript row expansion", () => {
 			nowSpy.mockRestore();
 		}
 	});
+
+	test("frozen box mctl toggles detail and summary still toggles", () => {
+		const { container } = render(
+			<Transcript
+				items={[thought("t1", 1000), tool("t2", "read", 2000)]}
+				start={IDLE}
+				repoLabel="~/repo"
+				onRetry={vi.fn()}
+				onAnswer={vi.fn()}
+				session={SESSION}
+			/>,
+		);
+		const summary = container.querySelector(
+			".work .summary",
+		) as HTMLElement | null;
+		const detail = () => container.querySelector(".work .detail");
+		expect(summary?.getAttribute("aria-expanded")).toBe("false");
+		expect(detail()?.getAttribute("hidden")).not.toBeNull();
+		const mctl = screen.getByRole("button", { name: "Expand message" });
+		expect(mctl.textContent).toBe("+");
+		expect(mctl.classList.contains("mctl")).toBe(true);
+		fireEvent.click(mctl);
+		expect(summary?.getAttribute("aria-expanded")).toBe("true");
+		expect(detail()?.getAttribute("hidden")).toBeNull();
+		const collapse = screen.getByRole("button", { name: "Collapse message" });
+		expect(collapse.textContent).toBe("-");
+		fireEvent.click(collapse);
+		expect(summary?.getAttribute("aria-expanded")).toBe("false");
+		expect(detail()?.getAttribute("hidden")).not.toBeNull();
+		fireEvent.click(screen.getByTitle("Expand"));
+		expect(summary?.getAttribute("aria-expanded")).toBe("true");
+		expect(detail()?.getAttribute("hidden")).toBeNull();
+	});
+
+	test("live box shows the same mctl and toggles", () => {
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(5000);
+		try {
+			const { container } = render(
+				<Transcript
+					items={[{ kind: "user", id: "u1", text: "hi" }]}
+					start={IDLE}
+					repoLabel="~/repo"
+					onRetry={vi.fn()}
+					onAnswer={vi.fn()}
+					session={SESSION}
+					turn={{
+						since: 1000,
+						live: { startedAt: 4500, updatedAt: 4500, text: "hmm" },
+					}}
+				/>,
+			);
+			const summary = container.querySelector(
+				".work .summary",
+			) as HTMLElement | null;
+			expect(summary?.getAttribute("aria-expanded")).toBe("false");
+			const mctl = screen.getByRole("button", { name: "Expand message" });
+			expect(mctl.textContent).toBe("+");
+			fireEvent.click(mctl);
+			expect(summary?.getAttribute("aria-expanded")).toBe("true");
+			expect(
+				container.querySelector(".work .detail")?.getAttribute("hidden"),
+			).toBeNull();
+			expect(
+				screen.getByRole("button", { name: "Collapse message" }).textContent,
+			).toBe("-");
+		} finally {
+			nowSpy.mockRestore();
+		}
+	});
 });
 
 describe("transcript tool lines", () => {

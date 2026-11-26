@@ -231,6 +231,12 @@ function WorkBox({
 		onStop?.();
 	}
 
+	function toggle() {
+		setOpen((was) => !was);
+	}
+
+	const mctlLabel = open ? "Collapse message" : "Expand message";
+
 	return (
 		<div className={summary.hasFailed ? "work failed" : "work"} ref={workRef}>
 			<div className="summary-row">
@@ -239,9 +245,8 @@ function WorkBox({
 					type="button"
 					aria-expanded={open}
 					title={open ? "Collapse" : "Expand"}
-					onClick={() => setOpen((was) => !was)}
+					onClick={toggle}
 				>
-					{!isLive && <span className="chev">{open ? "▾" : "▸"}</span>}
 					<span className="txt">
 						{prefix}
 						{summary.entries.map((entry, index) => (
@@ -280,6 +285,21 @@ function WorkBox({
 						<span className="sq" aria-hidden="true" />
 					</button>
 				)}
+				<span className="right">
+					<button
+						type="button"
+						className="mctl"
+						aria-label={mctlLabel}
+						title={mctlLabel}
+						onMouseDown={(event) => event.preventDefault()}
+						onClick={(event) => {
+							event.stopPropagation();
+							toggle();
+						}}
+					>
+						{open ? "-" : "+"}
+					</button>
+				</span>
 			</div>
 			<div className="detail" hidden={!open}>
 				{items.map((item, rowIndex) =>
