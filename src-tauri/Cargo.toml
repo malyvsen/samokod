@@ -17,7 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-agent-client-protocol = "2.2.0"
+agent-client-protocol = { version = "5.5.1", features = ["process"] }
 base64 = "0.23"
 jiff = "0.2"
 keepawake = "0.6"

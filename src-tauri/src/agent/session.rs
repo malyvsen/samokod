@@ -875,7 +875,7 @@ impl AgentManager {
 
         tauri::async_runtime::spawn(async move {
             let result = Client
-                .builder()
+                .v1()
                 .on_receive_notification(
                     move |notification: acp::SessionNotification, _cx| {
                         let state = Arc::clone(&notify_state);

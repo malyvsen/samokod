@@ -1,23 +1,24 @@
 // ACP wire boundary. SDK schema types enter the app through this module;
 // nothing past it imports `agent-client-protocol` directly.
-pub use agent_client_protocol::schema::v1::{
+use agent_client_protocol::schema::ProtocolVersion;
+pub use agent_client_protocol::v1::ConnectionTo;
+pub use agent_client_protocol::v1::Responder;
+#[allow(unused_imports)]
+pub use agent_client_protocol::v1::schema::{
     CancelNotification, CloseSessionRequest, ContentBlock, LoadSessionRequest, PermissionOption,
     PermissionOptionId, PermissionOptionKind, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionConfigId, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigOptionValue, SessionConfigSelectOptions, SessionConfigValueId, SessionId,
-    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, StopReason, TextContent,
-    ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind,
+    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, StopReason, SystemPrompt,
+    TextContent, ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
+use agent_client_protocol::v1::schema::{ClientCapabilities, InitializeRequest, NewSessionRequest};
 #[cfg(test)]
-pub use agent_client_protocol::schema::v1::{
+pub use agent_client_protocol::v1::schema::{
     ContentChunk, SessionConfigSelectOption, ToolCallUpdateFields, UsageUpdate,
 };
-use agent_client_protocol::schema::{
-    ProtocolVersion,
-    v1::{ClientCapabilities, InitializeRequest, NewSessionRequest},
-};
-pub use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo};
+pub use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
 #[cfg(test)]
 pub use agent_client_protocol::{on_receive_notification, on_receive_request};
 use std::collections::HashSet;
@@ -80,7 +81,7 @@ pub fn build_cancel_notification(session_id: SessionId) -> CancelNotification {
 
 /// Wrap a failure as an ACP internal error for handler closures.
 pub fn internal_error(message: impl ToString) -> agent_client_protocol::Error {
-    agent_client_protocol::util::internal_error(message)
+    agent_client_protocol::Error::internal_error().data(message.to_string())
 }
 
 /// Shell dirs to search, in priority order: the app process PATH first,
@@ -351,6 +352,18 @@ mod tests {
         .expect("cost is optional");
         assert!(update.cost.is_none());
         assert_eq!(update.used, 1);
+    }
+
+    #[test]
+    fn system_prompt_serializes_as_append() {
+        let system = SystemPrompt::new(vec![ContentBlock::from("role instructions")]);
+        let request = NewSessionRequest::new("/repo").system_prompt(system);
+        let value = serde_json::to_value(&request).expect("serialize");
+        assert_eq!(value["systemPrompt"]["mode"], "append");
+        assert_eq!(
+            value["systemPrompt"]["content"][0]["text"],
+            "role instructions"
+        );
     }
 
     fn fake_opencode_in(dir: &Path) -> PathBuf {

@@ -82,7 +82,7 @@ pub(crate) async fn handle_permission_request(
     window: &str,
     key: &SessionKey,
     request: acp::RequestPermissionRequest,
-    responder: agent_client_protocol::Responder<acp::RequestPermissionResponse>,
+    responder: acp::Responder<acp::RequestPermissionResponse>,
     expected: &super::WindowIncarnation,
 ) {
     let is_current = super::check_current(state, window, expected);
@@ -212,10 +212,7 @@ fn permission_view(
 
 /// Answer one permission request as cancelled. The context names the call
 /// site in the debug log so dropped responders stay traceable.
-fn answer_cancelled(
-    responder: agent_client_protocol::Responder<acp::RequestPermissionResponse>,
-    context: &str,
-) {
+fn answer_cancelled(responder: acp::Responder<acp::RequestPermissionResponse>, context: &str) {
     if responder
         .respond(acp::RequestPermissionResponse::new(
             acp::RequestPermissionOutcome::Cancelled,
@@ -236,7 +233,7 @@ fn emit_replayed_approval(
     key: &SessionKey,
     request: &acp::RequestPermissionRequest,
     options: Vec<PermissionOptionView>,
-    responder: agent_client_protocol::Responder<acp::RequestPermissionResponse>,
+    responder: acp::Responder<acp::RequestPermissionResponse>,
 ) {
     let permission = permission_view(request, options);
     let tool_call_id = permission.tool_call_id.clone();

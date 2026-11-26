@@ -2766,7 +2766,7 @@ mod tests {
         let agent = AcpAgent::new(config);
         let cwd_owned = cwd.to_path_buf();
         Client
-            .builder()
+            .v1()
             .on_receive_notification(
                 async move |_notification: acp::SessionNotification, _cx| Ok(()),
                 acp::on_receive_notification!(),
