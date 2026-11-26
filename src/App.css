@@ -342,45 +342,6 @@ body {
 	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
 }
 
-.topbar {
-	position: relative;
-	/* Above the transcript so the downward plan menu stays clickable. */
-	z-index: 2;
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	padding: 10px 20px;
-	/* Pins bar height when finished phases render borderless text. */
-	min-height: 47px;
-	border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-	background: rgba(5, 5, 8, 0.55);
-}
-
-.brand {
-	font: inherit;
-	font-weight: 700;
-	letter-spacing: 0.12em;
-	font-size: 12px;
-	color: #fff;
-	background: transparent;
-	border: 0;
-	padding: 0;
-	cursor: pointer;
-}
-
-button.brand:hover {
-	color: #7dffc4;
-}
-
-.repo-static {
-	margin-left: auto;
-	font-size: 11px;
-	color: #e8e6e1;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
 .plans-footer {
 	margin-top: auto;
 	border-top: 1px solid rgba(255, 255, 255, 0.12);

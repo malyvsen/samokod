@@ -2,7 +2,13 @@ import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { ConfigOptionView } from "./bindings";
 import { testDefaults, testEntry, testKey } from "./fixtures";
-import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
+import {
+	api,
+	emitAppEvent,
+	emitToggleSettings,
+	openChat,
+	stubMatchMedia,
+} from "./testHarness";
 
 vi.mock("./api", async () => {
 	const { api } = await import("./testHarness");
@@ -78,7 +84,7 @@ describe("pending pickers", () => {
 		await screen.findByText("No plan yet.");
 		expect(screen.queryByText("TODOS")).not.toBeInTheDocument();
 		expect(screen.queryByText("MODEL")).not.toBeInTheDocument();
-		await user.click(screen.getByRole("button", { name: "Toggle settings" }));
+		emitToggleSettings(api);
 		await screen.findByText("default-model");
 		expect(screen.getByText("MODEL")).toBeInTheDocument();
 		expect(screen.getByLabelText("Model")).toBeDisabled();
@@ -95,8 +101,8 @@ describe("pending pickers", () => {
 			config_defaults: testDefaults({ model: "stale-model", effort: null }),
 			scoping_preview: null,
 		});
-		const user = await openChat(api);
-		await user.click(screen.getByRole("button", { name: "Toggle settings" }));
+		await openChat(api);
+		emitToggleSettings(api);
 		expect(screen.getByText("stale-model")).toBeInTheDocument();
 		emitAppEvent(api, {
 			type: "config_options",

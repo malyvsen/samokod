@@ -2,7 +2,13 @@ import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { ConfigOptionView } from "./bindings";
 import { testDefaults, testEntry } from "./fixtures";
-import { api, emitAppEvent, openChat, stubMatchMedia } from "./testHarness";
+import {
+	api,
+	emitAppEvent,
+	emitToggleSettings,
+	openChat,
+	stubMatchMedia,
+} from "./testHarness";
 
 vi.mock("./api", async () => {
 	const { api } = await import("./testHarness");
@@ -91,7 +97,7 @@ async function openChatWith(options: ConfigOptionView[]) {
 		session: executingKey,
 		options,
 	});
-	await user.click(screen.getByRole("button", { name: "Toggle settings" }));
+	emitToggleSettings(api);
 	return { user, key: executingKey };
 }
 

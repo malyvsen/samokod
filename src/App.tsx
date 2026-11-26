@@ -39,7 +39,6 @@ import { QueuedBubbleList } from "./components/QueuedBubble";
 import { RepoPicker } from "./components/RepoPicker";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { CommitsPanel, SidePanel } from "./components/SidePanel";
-import { TopBar } from "./components/TopBar";
 import { Transcript } from "./components/Transcript";
 import {
 	hasSentUserMessage,
@@ -810,118 +809,107 @@ export function App() {
 					onDismissError={() => setPickerError(null)}
 				/>
 			) : (
-				<>
-					<TopBar
-						onToggleSettings={() =>
-							setSidebarMode((mode) =>
-								mode === "plans" ? "settings" : "plans",
-							)
-						}
-					/>
-					<div className="mainrow">
-						<div
-							className={sidebarMode === "plans" ? "plans" : "plans settings"}
-						>
-							{sidebarMode === "plans" ? (
-								<PlansPanel
-									plans={plans}
-									selected={selectedKey}
-									onSelect={handleSelect}
-									onNewPlan={() => void handleNewPlan()}
-									onExecute={(key) => void handleExecute(key)}
-									onCancel={(key) => void handleCancel(key)}
-									onSetMode={(plan, manual) => void handleSetMode(plan, manual)}
-									onSetEvergreen={(plan, evergreen) =>
-										void handleSetEvergreen(plan, evergreen)
-									}
-								/>
-							) : (
-								<SettingsPanel
-									chats={chats}
-									defaults={configDefaults}
-									disabled={busy}
-									onChange={(configId, value) =>
-										void handleConfigChange(configId, value)
-									}
-								/>
-							)}
-							<div className="plans-footer">
-								<span
-									className="repo-dim"
-									title={`${repoRoot ?? "no repo"} · ${branch}`}
-								>
-									{repoLabel} · {branch}
-								</span>
-							</div>
-						</div>
-						<div className="chatcol">
-							<div className="transcript" ref={scrollRef} onScroll={onScroll}>
-								<Transcript
-									items={transcript}
-									lead={chat?.scopingLead ?? null}
-									start={chat?.start ?? null}
-									repoLabel={repoLabel}
-									onRetry={readOnly ? null : handleRetry}
-									onAnswer={handleAnswer}
-									turn={liveTurnOf(chat)}
-									onStop={readOnly ? null : handleStop}
-									session={selectedKey}
-									onHistoryRetry={
-										chat?.start.kind === "failed" && chat.start.error.retryable
-											? handleHistoryRetry
-											: null
-									}
-								>
-									{selectedKey !== null && !readOnly && (
-										<>
-											<QueuedBubbleList
-												items={queue.items}
-												editingId={queue.editingId}
-												editingBlocked={editingBlocked}
-												session={selectedKey}
-												onEdit={handleQueueEdit}
-												onCommit={handleQueueCommit}
-												onCancel={handleQueueCancel}
-												onMove={handleQueueMove}
-												onAttachmentError={handleAttachmentError}
-											/>
-											<DraftBubble
-												key={selectedId}
-												initialText={draft.initialText}
-												placeholder={
-													busy ? "Queue a follow-up…" : "Ask for a change…"
-												}
-												session={selectedKey}
-												contextPct={draftContextPct}
-												onSend={handleSend}
-												onEdit={notifyEdit}
-												onInput={draft.onDraftInput}
-												onAttachmentError={handleAttachmentError}
-											/>
-										</>
-									)}
-									{readOnly && (
-										<div className="ro-note">
-											This session is read-only - the plan is finished.
-										</div>
-									)}
-								</Transcript>
-							</div>
-						</div>
-						{isScoping ? (
-							<PlanMdPane text={planMd} />
-						) : side.kind === "commits" ? (
-							<CommitsPanel
-								commits={side.commits}
-								done={side.done}
-								total={side.total}
-								working={side.working}
+				<div className="mainrow">
+					<div className={sidebarMode === "plans" ? "plans" : "plans settings"}>
+						{sidebarMode === "plans" ? (
+							<PlansPanel
+								plans={plans}
+								selected={selectedKey}
+								onSelect={handleSelect}
+								onNewPlan={() => void handleNewPlan()}
+								onExecute={(key) => void handleExecute(key)}
+								onCancel={(key) => void handleCancel(key)}
+								onSetMode={(plan, manual) => void handleSetMode(plan, manual)}
+								onSetEvergreen={(plan, evergreen) =>
+									void handleSetEvergreen(plan, evergreen)
+								}
 							/>
 						) : (
-							<SidePanel todos={side.todos} />
+							<SettingsPanel
+								chats={chats}
+								defaults={configDefaults}
+								disabled={busy}
+								onChange={(configId, value) =>
+									void handleConfigChange(configId, value)
+								}
+							/>
 						)}
+						<div className="plans-footer">
+							<span
+								className="repo-dim"
+								title={`${repoRoot ?? "no repo"} · ${branch}`}
+							>
+								{repoLabel} · {branch}
+							</span>
+						</div>
 					</div>
-				</>
+					<div className="chatcol">
+						<div className="transcript" ref={scrollRef} onScroll={onScroll}>
+							<Transcript
+								items={transcript}
+								lead={chat?.scopingLead ?? null}
+								start={chat?.start ?? null}
+								repoLabel={repoLabel}
+								onRetry={readOnly ? null : handleRetry}
+								onAnswer={handleAnswer}
+								turn={liveTurnOf(chat)}
+								onStop={readOnly ? null : handleStop}
+								session={selectedKey}
+								onHistoryRetry={
+									chat?.start.kind === "failed" && chat.start.error.retryable
+										? handleHistoryRetry
+										: null
+								}
+							>
+								{selectedKey !== null && !readOnly && (
+									<>
+										<QueuedBubbleList
+											items={queue.items}
+											editingId={queue.editingId}
+											editingBlocked={editingBlocked}
+											session={selectedKey}
+											onEdit={handleQueueEdit}
+											onCommit={handleQueueCommit}
+											onCancel={handleQueueCancel}
+											onMove={handleQueueMove}
+											onAttachmentError={handleAttachmentError}
+										/>
+										<DraftBubble
+											key={selectedId}
+											initialText={draft.initialText}
+											placeholder={
+												busy ? "Queue a follow-up…" : "Ask for a change…"
+											}
+											session={selectedKey}
+											contextPct={draftContextPct}
+											onSend={handleSend}
+											onEdit={notifyEdit}
+											onInput={draft.onDraftInput}
+											onAttachmentError={handleAttachmentError}
+										/>
+									</>
+								)}
+								{readOnly && (
+									<div className="ro-note">
+										This session is read-only - the plan is finished.
+									</div>
+								)}
+							</Transcript>
+						</div>
+					</div>
+					{isScoping ? (
+						<PlanMdPane text={planMd} />
+					) : side.kind === "commits" ? (
+						<CommitsPanel
+							commits={side.commits}
+							done={side.done}
+							total={side.total}
+							working={side.working}
+						/>
+					) : (
+						<SidePanel todos={side.todos} />
+					)}
+				</div>
 			)}
 		</div>
 	);
