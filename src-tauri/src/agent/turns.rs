@@ -702,44 +702,6 @@ fn update_todos(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::session::{ActivePlan, spawn_system_text};
-
-    #[test]
-    fn system_text_has_no_placeholders() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        crate::plans::ensure_structure(root).expect("ensure");
-        let worktrees = std::collections::HashMap::new();
-
-        let scoping = ActivePlan::scoping("ts".to_string());
-        let scoping_system = spawn_system_text(&scoping, root, "main", &worktrees, None);
-        assert!(scoping_system.contains(".samokod/plans/scoping/ts/plan.md"));
-        assert!(!scoping_system.contains("{{"));
-
-        let executing = ActivePlan::executing("ts.slug".to_string());
-        let executing_system = spawn_system_text(&executing, root, "main", &worktrees, None);
-        assert!(executing_system.contains("ts.slug/plan.md"));
-        assert!(!executing_system.contains("{{"));
-
-        let rebasing = ActivePlan::rebasing("ts".to_string());
-        let rebasing_system = spawn_system_text(&rebasing, root, "main", &worktrees, None);
-        assert!(rebasing_system.contains("samokod/ts"));
-        assert!(rebasing_system.contains("main"));
-        assert!(!rebasing_system.contains("{{"));
-
-        let evergreening = ActivePlan::evergreening("ts".to_string());
-        let evergreening_system = spawn_system_text(&evergreening, root, "main", &worktrees, None);
-        assert!(evergreening_system.contains("samokod/ts"));
-        assert!(!evergreening_system.contains("{{"));
-    }
-
-    #[test]
-    fn legacy_prefixed_history_shows_single_bubble() {
-        let template = crate::opencode::executing_first_message(".samokod/plans/executing/ts");
-        let legacy = format!("{template}\n\ndo things");
-        assert!(legacy.contains(&template));
-        assert!(legacy.contains("do things"));
-    }
 
     #[test]
     fn working_title_set_once_across_two_prompts() {

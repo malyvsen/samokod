@@ -48,42 +48,13 @@ pub(crate) struct ActivePlan {
 }
 
 impl ActivePlan {
-    pub(crate) fn scoping(name: String) -> Self {
-        ActivePlan {
-            name,
-            phase: plans::Phase::Scoping,
-        }
-    }
-
-    pub(crate) fn executing(name: String) -> Self {
-        ActivePlan {
-            name,
-            phase: plans::Phase::Executing,
-        }
-    }
-
-    pub(crate) fn rebasing(name: String) -> Self {
-        ActivePlan {
-            name,
-            phase: plans::Phase::Rebasing,
-        }
-    }
-
-    pub(crate) fn evergreening(name: String) -> Self {
-        ActivePlan {
-            name,
-            phase: plans::Phase::Evergreening,
-        }
+    pub(crate) fn new(name: String, phase: plans::Phase) -> Self {
+        ActivePlan { name, phase }
     }
 
     /// Plan for one session key: the role decides the phase. Pure.
     pub(crate) fn for_session(session: &SessionKey) -> Self {
-        match session.role {
-            SessionRole::Scoping => ActivePlan::scoping(session.plan.clone()),
-            SessionRole::Executing => ActivePlan::executing(session.plan.clone()),
-            SessionRole::Evergreening => ActivePlan::evergreening(session.plan.clone()),
-            SessionRole::Rebasing => ActivePlan::rebasing(session.plan.clone()),
-        }
+        ActivePlan::new(session.plan.clone(), role_phase(session.role))
     }
 
     pub(crate) fn role(&self) -> Option<SessionRole> {
@@ -131,19 +102,19 @@ impl ActivePlan {
 /// no IO. Scoping uses the repo-relative display path, executing the
 /// absolute plan dir, rebasing the worktree path plus branches, evergreening
 /// those plus the landed commits. `status` carries fresh worktree coordinates
-/// when the caller already holds them (transition core); otherwise the
-/// worktree map plus checkout branch fill them with empty commits.
+/// when the caller already holds them (transition core, warmed spawns);
+/// without it the coordinates derive from the plan name and checkout branch
+/// with empty commits.
 pub(crate) fn spawn_system_text(
     plan: &ActivePlan,
     repo_root: &Path,
     checkout_branch: &str,
-    worktrees: &HashMap<String, crate::worktrees::WorktreeRecord>,
     status: Option<&super::WorktreeLive>,
 ) -> String {
     match plan.phase {
         plans::Phase::Scoping => {
             let display = opencode::plan_display(&plan.plan_ref());
-            opencode::scoping_template(&display)
+            opencode::scoping_system(&display)
         }
         plans::Phase::Executing => {
             let plan_dir_abs = plan
@@ -151,7 +122,7 @@ pub(crate) fn spawn_system_text(
                 .path(repo_root)
                 .to_string_lossy()
                 .to_string();
-            opencode::executing_first_message(&plan_dir_abs)
+            opencode::executing_system(&plan_dir_abs)
         }
         plans::Phase::Rebasing => {
             let plan_md_abs = plan
@@ -159,26 +130,9 @@ pub(crate) fn spawn_system_text(
                 .plan_md(repo_root)
                 .to_string_lossy()
                 .to_string();
-            if let Some(live) = status {
-                opencode::rebasing_first_message(
-                    &live.worktree_branch,
-                    &live.target_branch,
-                    &live.path.to_string_lossy(),
-                    &plan_md_abs,
-                )
-            } else {
-                let path = worktrees
-                    .get(&plan.name)
-                    .map(|record| record.path.clone())
-                    .unwrap_or_else(|| crate::worktrees::worktree_path(repo_root, &plan.name));
-                let worktree_branch = crate::worktrees::branch_name(&plan.name);
-                opencode::rebasing_first_message(
-                    &worktree_branch,
-                    checkout_branch,
-                    &path.to_string_lossy(),
-                    &plan_md_abs,
-                )
-            }
+            let (worktree_branch, target_branch, path) =
+                worktree_coords(repo_root, checkout_branch, &plan.name, status);
+            opencode::rebasing_system(&worktree_branch, &target_branch, &path, &plan_md_abs)
         }
         plans::Phase::Evergreening => {
             let plan_md_abs = plan
@@ -186,30 +140,44 @@ pub(crate) fn spawn_system_text(
                 .plan_md(repo_root)
                 .to_string_lossy()
                 .to_string();
-            if let Some(live) = status {
-                opencode::evergreening_first_message(
-                    &live.path.to_string_lossy(),
-                    &live.worktree_branch,
-                    &plan_md_abs,
-                    &live.target_branch,
-                    &live.commits.join("\n"),
-                )
-            } else {
-                let path = worktrees
-                    .get(&plan.name)
-                    .map(|record| record.path.clone())
-                    .unwrap_or_else(|| crate::worktrees::worktree_path(repo_root, &plan.name));
-                let worktree_branch = crate::worktrees::branch_name(&plan.name);
-                opencode::evergreening_first_message(
-                    &path.to_string_lossy(),
-                    &worktree_branch,
-                    &plan_md_abs,
-                    checkout_branch,
-                    "",
-                )
-            }
+            let (worktree_branch, target_branch, path) =
+                worktree_coords(repo_root, checkout_branch, &plan.name, status);
+            let commits = status
+                .map(|live| live.commits.join("\n"))
+                .unwrap_or_default();
+            opencode::evergreening_system(
+                &path,
+                &worktree_branch,
+                &plan_md_abs,
+                &target_branch,
+                &commits,
+            )
         }
         plans::Phase::Queued | plans::Phase::Completed | plans::Phase::Cancelled => String::new(),
+    }
+}
+
+/// Worktree coordinates for system text: the live status when the caller
+/// holds it, else derived from the plan name and checkout branch. Pure.
+fn worktree_coords(
+    repo_root: &Path,
+    checkout_branch: &str,
+    plan_name: &str,
+    status: Option<&super::WorktreeLive>,
+) -> (String, String, String) {
+    match status {
+        Some(live) => (
+            live.worktree_branch.clone(),
+            live.target_branch.clone(),
+            live.path.to_string_lossy().to_string(),
+        ),
+        None => (
+            crate::worktrees::branch_name(plan_name),
+            checkout_branch.to_string(),
+            crate::worktrees::worktree_path(repo_root, plan_name)
+                .to_string_lossy()
+                .to_string(),
+        ),
     }
 }
 
@@ -533,15 +501,16 @@ impl AgentManager {
             });
         }
         let plan = ActivePlan::for_session(key);
-        let worktrees = lock_backend(&self.state)
-            .and_then(|backend| backend.windows.get(window).map(|win| win.worktrees.clone()))
-            .unwrap_or_default();
-        let status = if matches!(plan.phase, plans::Phase::Evergreening) {
+        let status = if matches!(
+            plan.phase,
+            plans::Phase::Rebasing | plans::Phase::Evergreening
+        ) {
             match self.worktree_status_for(window, &repo_root, &plan.name) {
                 Ok(live) => Some(live),
                 Err(error) => {
                     log::warn!(
-                        "warmed evergreening {} uses fallback system: {error}",
+                        "warmed {} {} uses derived coordinates: {error}",
+                        plan.phase.dir_name(),
                         plan.name
                     );
                     None
@@ -550,7 +519,7 @@ impl AgentManager {
         } else {
             None
         };
-        let system = spawn_system_text(&plan, &repo_root, &branch, &worktrees, status.as_ref());
+        let system = spawn_system_text(&plan, &repo_root, &branch, status.as_ref());
         let agent = opencode::agent_for(key.role);
         let (connection, session_id, _) = self
             .spawn_session(window, &repo_root, &branch, plan, agent, &system)
@@ -1148,5 +1117,70 @@ impl AgentManager {
     ) -> Option<(ConnectionTo<Agent>, String)> {
         let (connection, session_id, _, _) = self.session_snapshot_for(window, key)?;
         (!connection.is_incoming_closed()).then_some((connection, session_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn live_status(path: &Path, commits: Vec<String>) -> crate::agent::WorktreeLive {
+        crate::agent::WorktreeLive {
+            path: path.to_path_buf(),
+            worktree_branch: "samokod/ts".to_string(),
+            target_branch: "feature".to_string(),
+            dirty: false,
+            ffable: false,
+            commits,
+        }
+    }
+
+    #[test]
+    fn system_text_names_role_paths_without_placeholders() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        crate::plans::ensure_structure(root).expect("ensure");
+
+        let scoping = ActivePlan::new("ts".to_string(), plans::Phase::Scoping);
+        let scoping_system = spawn_system_text(&scoping, root, "main", None);
+        assert!(scoping_system.contains(".samokod/plans/scoping/ts/plan.md"));
+        assert!(!scoping_system.contains("{{"));
+
+        let executing = ActivePlan::new("ts.slug".to_string(), plans::Phase::Executing);
+        let executing_system = spawn_system_text(&executing, root, "main", None);
+        assert!(executing_system.contains("ts.slug/plan.md"));
+        assert!(!executing_system.contains("{{"));
+
+        let rebasing = ActivePlan::new("ts".to_string(), plans::Phase::Rebasing);
+        let rebasing_system = spawn_system_text(&rebasing, root, "main", None);
+        assert!(rebasing_system.contains("samokod/ts"));
+        assert!(rebasing_system.contains("main"));
+        assert!(!rebasing_system.contains("{{"));
+
+        let evergreening = ActivePlan::new("ts".to_string(), plans::Phase::Evergreening);
+        let evergreening_system = spawn_system_text(&evergreening, root, "main", None);
+        assert!(evergreening_system.contains("samokod/ts"));
+        assert!(!evergreening_system.contains("{{"));
+    }
+
+    #[test]
+    fn system_text_prefers_live_worktree_coordinates() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        crate::plans::ensure_structure(root).expect("ensure");
+        let worktree = root.join("custom-checkout");
+        let status = live_status(&worktree, vec!["0923748 feat: blabla".to_string()]);
+
+        let rebasing = ActivePlan::new("ts".to_string(), plans::Phase::Rebasing);
+        let rebasing_system = spawn_system_text(&rebasing, root, "main", Some(&status));
+        assert!(rebasing_system.contains("samokod/ts"));
+        assert!(rebasing_system.contains("feature"));
+        assert!(rebasing_system.contains(&worktree.to_string_lossy().to_string()));
+        assert!(!rebasing_system.contains("{{"));
+
+        let evergreening = ActivePlan::new("ts".to_string(), plans::Phase::Evergreening);
+        let evergreening_system = spawn_system_text(&evergreening, root, "main", Some(&status));
+        assert!(evergreening_system.contains("0923748 feat: blabla"));
+        assert!(!evergreening_system.contains("{{COMMITS}}"));
     }
 }

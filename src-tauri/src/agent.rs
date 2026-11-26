@@ -2218,11 +2218,11 @@ mod tests {
         let root = Path::new("/repo");
         let name = "2026-09-26.14-53-26.shiny-feature".to_string();
         assert_eq!(
-            ActivePlan::executing(name.clone()).cwd(root),
+            ActivePlan::new(name.clone(), crate::plans::Phase::Executing).cwd(root),
             crate::worktrees::worktree_path(root, &name)
         );
         assert_eq!(
-            ActivePlan::scoping(name).cwd(root),
+            ActivePlan::new(name, crate::plans::Phase::Scoping).cwd(root),
             Path::new("/repo").to_path_buf()
         );
     }

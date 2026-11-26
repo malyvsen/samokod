@@ -40,7 +40,7 @@ beforeEach(() => {
 	api.sendPrompt.mockResolvedValue(undefined);
 });
 
-function leadBubbles(): NodeListOf<Element> {
+function userBubbles(): NodeListOf<Element> {
 	return document.querySelectorAll(".msg.user:not(.draft)");
 }
 
@@ -53,7 +53,7 @@ describe("draft bubble in chat", () => {
 		expect(area.textContent).toBe("");
 	});
 
-	test("send without preview shows one bubble", async () => {
+	test("send shows one bubble", async () => {
 		const user = await openChat(api);
 		await screen.findByRole("textbox", { name: "Ask for a change…" });
 		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
@@ -61,7 +61,7 @@ describe("draft bubble in chat", () => {
 		expect(api.sendPrompt).toHaveBeenCalledWith(testKey(), "hello");
 		await screen.findByText("hello");
 		expect(screen.queryByText("TEMPLATE")).not.toBeInTheDocument();
-		const bubbles = leadBubbles();
+		const bubbles = userBubbles();
 		expect(bubbles).toHaveLength(1);
 		expect(bubbles[0]?.textContent).toContain("hello");
 	});

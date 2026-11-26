@@ -1,5 +1,5 @@
 // OpenCode-specific edge driver: agent definitions injected at spawn plus
-// first-message role templates. `acp.rs` stays protocol-only.
+// role instructions sent as ACP `systemPrompt`. `acp.rs` stays protocol-only.
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -19,8 +19,7 @@ const STATE_DENY_GLOB: &str = ".samokod/plans/**/state.json";
 /// edit them, denied last so deny wins.
 const ATTACHMENTS_DENY_GLOB: &str = ".samokod/plans/**/attachments/**";
 
-/// Agent id for a session role. Queued plans carry the executing role
-/// until landing, so no queued case exists here. Pure.
+/// Agent id for a session role. Pure.
 pub fn agent_for(role: SessionRole) -> &'static str {
     match role {
         SessionRole::Scoping => SCOPING_AGENT,
@@ -193,21 +192,19 @@ pub fn plan_display(plan: &PlanRef) -> String {
     format!(".samokod/plans/{}/{}", plan.phase.dir_name(), plan.name)
 }
 
-/// Scoping template with its plan dir filled in. Produces system text for
-/// `session/new`, never rendered as a bubble. Pure.
-pub fn scoping_template(plan_dir: &str) -> String {
+/// Scoping instructions with the plan dir filled in. System text for
+/// `session/new`, never rendered. Pure.
+pub fn scoping_system(plan_dir: &str) -> String {
     SCOPING_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
-/// Executing role and instruction. Sent once per executing conversation as
-/// system text on `session/new`. Pure.
-pub fn executing_first_message(plan_dir: &str) -> String {
+/// Executing role and instructions. System text for `session/new`. Pure.
+pub fn executing_system(plan_dir: &str) -> String {
     EXECUTING_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
-/// Evergreening role and instruction. Sent as system text on `session/new`
-/// when the cleanup path starts the evergreening agent. Pure.
-pub fn evergreening_first_message(
+/// Evergreening role and instructions. System text for `session/new`. Pure.
+pub fn evergreening_system(
     worktree_path: &str,
     worktree_branch: &str,
     plan_md_abs_path: &str,
@@ -222,9 +219,8 @@ pub fn evergreening_first_message(
         .replace("{{COMMITS}}", commits)
 }
 
-/// Rebasing role and instruction. Sent as system text on `session/new`
-/// when the conflict path starts the rebasing agent. Pure.
-pub fn rebasing_first_message(
+/// Rebasing role and instructions. System text for `session/new`. Pure.
+pub fn rebasing_system(
     worktree_branch: &str,
     target_branch: &str,
     worktree_path: &str,
@@ -603,58 +599,58 @@ mod tests {
     }
 
     #[test]
-    fn evergreening_message_fills_every_placeholder() {
-        let message = evergreening_first_message(
+    fn evergreening_system_fills_every_placeholder() {
+        let system = evergreening_system(
             "/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature",
             "samokod/shiny-feature",
             "/repo/.samokod/plans/evergreening/2026-09-26.14-53-26.shiny-feature/plan.md",
             "feature",
             "0923748 feat: blabla\n009fb12 fix: blabla",
         );
-        assert!(message.contains("/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature"));
-        assert!(message.contains("samokod/shiny-feature"));
-        assert!(message.contains(
+        assert!(system.contains("/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature"));
+        assert!(system.contains("samokod/shiny-feature"));
+        assert!(system.contains(
             "/repo/.samokod/plans/evergreening/2026-09-26.14-53-26.shiny-feature/plan.md"
         ));
-        assert!(message.contains("feature"));
-        assert!(message.contains("0923748 feat: blabla"));
-        assert!(message.contains("009fb12 fix: blabla"));
-        assert!(!message.contains("{{WORKTREE_PATH}}"));
-        assert!(!message.contains("{{WORKTREE_BRANCH}}"));
-        assert!(!message.contains("{{PLAN_MD_ABS_PATH}}"));
-        assert!(!message.contains("{{TARGET_BRANCH}}"));
-        assert!(!message.contains("{{COMMITS}}"));
+        assert!(system.contains("feature"));
+        assert!(system.contains("0923748 feat: blabla"));
+        assert!(system.contains("009fb12 fix: blabla"));
+        assert!(!system.contains("{{WORKTREE_PATH}}"));
+        assert!(!system.contains("{{WORKTREE_BRANCH}}"));
+        assert!(!system.contains("{{PLAN_MD_ABS_PATH}}"));
+        assert!(!system.contains("{{TARGET_BRANCH}}"));
+        assert!(!system.contains("{{COMMITS}}"));
     }
 
     #[test]
-    fn rebasing_message_fills_every_placeholder() {
-        let message = rebasing_first_message(
+    fn rebasing_system_fills_every_placeholder() {
+        let system = rebasing_system(
             "samokod/shiny-feature",
             "feature",
             "/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature",
             "/repo/.samokod/plans/rebasing/2026-09-26.14-53-26.shiny-feature/plan.md",
         );
-        assert!(message.contains("samokod/shiny-feature"));
-        assert!(message.contains("`feature`"));
-        assert!(message.contains("/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature"));
-        assert!(!message.contains("{{WORKTREE_BRANCH}}"));
-        assert!(!message.contains("{{TARGET_BRANCH}}"));
-        assert!(!message.contains("{{WORKTREE_PATH}}"));
-        assert!(!message.contains("{{PLAN_MD_ABS_PATH}}"));
+        assert!(system.contains("samokod/shiny-feature"));
+        assert!(system.contains("`feature`"));
+        assert!(system.contains("/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature"));
+        assert!(!system.contains("{{WORKTREE_BRANCH}}"));
+        assert!(!system.contains("{{TARGET_BRANCH}}"));
+        assert!(!system.contains("{{WORKTREE_PATH}}"));
+        assert!(!system.contains("{{PLAN_MD_ABS_PATH}}"));
     }
 
     #[test]
-    fn scoping_template_names_plan_path() {
-        let draft = scoping_template(".samokod/plans/scoping/ts");
-        assert!(draft.contains(".samokod/plans/scoping/ts/plan.md"));
-        assert!(!draft.contains("{{PLAN_DIR}}"));
+    fn scoping_system_names_plan_path() {
+        let system = scoping_system(".samokod/plans/scoping/ts");
+        assert!(system.contains(".samokod/plans/scoping/ts/plan.md"));
+        assert!(!system.contains("{{PLAN_DIR}}"));
     }
 
     #[test]
-    fn executing_message_names_plan_path() {
-        let message = executing_first_message(".samokod/plans/executing/ts.slug");
-        assert!(message.contains(".samokod/plans/executing/ts.slug/plan.md"));
-        assert!(!message.contains("{{PLAN_DIR}}"));
+    fn executing_system_names_plan_path() {
+        let system = executing_system(".samokod/plans/executing/ts.slug");
+        assert!(system.contains(".samokod/plans/executing/ts.slug/plan.md"));
+        assert!(!system.contains("{{PLAN_DIR}}"));
     }
 
     #[test]

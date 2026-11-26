@@ -22,7 +22,7 @@ use crate::types::{AgentError, PlansUpdate, SessionKey, SessionRole};
 
 use super::queue;
 use super::session::{ActivePlan, spawn_system_text};
-use super::{AgentManager, lock_backend};
+use super::{AgentManager, WorktreeLive, lock_backend};
 
 /// Minimal trigger waking an auto-started agent. Role instructions already
 /// travel as `systemPrompt` on `session/new`, so automatic starts send no
@@ -241,15 +241,8 @@ impl AgentManager {
                 }
                 self.drop_live(window, &session).await;
                 self.carry_prompted(window, &from.name, &next.name);
-                let active = ActivePlan::executing(next.name.clone());
-                let system = spawn_system_text(
-                    &active,
-                    &repo_root,
-                    &branch,
-                    &std::collections::HashMap::new(),
-                    None,
-                );
-                self.spawn_with_trigger(window, &repo_root, &branch, &from.name, active, system)
+                let active = ActivePlan::new(next.name.clone(), Phase::Executing);
+                self.spawn_with_trigger(window, &repo_root, &branch, &from.name, active, None)
                     .await
             }
             Transition::Queue { plan } => {
@@ -339,16 +332,16 @@ impl AgentManager {
                 }
                 let next = plans::begin_evergreening(&repo_root, &from)?;
                 self.drop_live(window, &session).await;
-                let active = ActivePlan::evergreening(next.name.clone());
-                let system = spawn_system_text(
-                    &active,
+                let active = ActivePlan::new(next.name.clone(), Phase::Evergreening);
+                self.spawn_with_trigger(
+                    window,
                     &repo_root,
                     &branch,
-                    &std::collections::HashMap::new(),
+                    &from.name,
+                    active,
                     Some(&status),
-                );
-                self.spawn_with_trigger(window, &repo_root, &branch, &from.name, active, system)
-                    .await
+                )
+                .await
             }
             Transition::BeginRebasing { plan } => {
                 let (repo_root, _) =
@@ -404,15 +397,8 @@ impl AgentManager {
                 let from = require_rebasing_plan(&repo_root, &plan)?;
                 let status = self.worktree_status_for(window, &repo_root, &from.name)?;
                 super::gate_rebasing(status.dirty, status.ffable, super::RebasingStep::Start)?;
-                let active = ActivePlan::rebasing(from.name.clone());
-                let system = spawn_system_text(
-                    &active,
-                    &repo_root,
-                    &branch,
-                    &std::collections::HashMap::new(),
-                    Some(&status),
-                );
-                self.spawn_with_trigger(window, &repo_root, &branch, &plan, active, system)
+                let active = ActivePlan::new(from.name.clone(), Phase::Rebasing);
+                self.spawn_with_trigger(window, &repo_root, &branch, &plan, active, Some(&status))
                     .await
             }
             Transition::BackToRebasing { plan } => {
@@ -577,7 +563,8 @@ impl AgentManager {
     /// with role instructions as `systemPrompt`, then send a minimal trigger
     /// so the agent wakes. The caller moves the plan and drops the old live
     /// session first; the plan name travels inside `active` so the prompted
-    /// flag follows it. Follows its own move only.
+    /// flag follows it. `status` carries fresh worktree coordinates for the
+    /// rebasing and evergreening starts. Follows its own move only.
     async fn spawn_with_trigger(
         &self,
         window: &str,
@@ -585,8 +572,9 @@ impl AgentManager {
         branch: &str,
         acted_plan: &str,
         active: ActivePlan,
-        system: String,
+        status: Option<&WorktreeLive>,
     ) -> Result<PlansUpdate, AgentError> {
+        let system = spawn_system_text(&active, repo_root, branch, status);
         let plan_name = active.name.clone();
         let role = active.role().ok_or_else(|| AgentError::RequestFailed {
             raw: "cannot open a session for a finished plan".to_string(),

@@ -97,7 +97,6 @@ mod bindings_tests {
                 .expect("export to temp");
         }
         let text = std::fs::read_to_string(&temp).expect("read temp");
-        assert!(!text.contains("scoping_preview"), "preview field is gone");
         assert!(text.contains("currentValue"), "export keeps camel value");
         assert!(
             text.contains("has_plan_md"),

@@ -49,7 +49,7 @@ impl AgentManager {
     }
 
     /// Lightweight push: list plus selection only. Responses carry the
-    /// preview and defaults; pushes never do.
+    /// config defaults; pushes never do.
     pub(crate) fn push_plans(&self, window: &str) {
         let (plans, selected) = match lock_backend(&self.state) {
             Some(backend) => {
@@ -444,8 +444,8 @@ fn fallback_selected(plans: &[PlanEntry], current: Option<&SessionKey>) -> Sessi
 }
 
 /// Sorted plans plus selection for one locked state: the shared prefix of
-/// every plans payload. Responses extend it with defaults and the scoping
-/// preview; pushes emit it as-is.
+/// every plans payload. Responses extend it with config defaults; pushes
+/// emit it as-is.
 fn listed(
     state: &WindowState,
     current: Option<&SessionKey>,
