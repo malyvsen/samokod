@@ -99,6 +99,7 @@ function PlanGroup({
 	const marker = markerKindFor(attention, expanded);
 	const progress = headerProgress(plan);
 	const meta = progress === null ? null : headerMeta(progress, attention);
+	const tip = progress === null ? null : barTip(progress);
 	return (
 		<div
 			className={`plan-group tree${expanded ? " sel" : ""}${marker === null ? " quiet" : ""}`}
@@ -124,7 +125,7 @@ function PlanGroup({
 				onSetMode={onSetMode}
 				onSetEvergreen={onSetEvergreen}
 			/>
-			{meta === null || progress === null ? null : (
+			{meta === null ? null : (
 				<>
 					<span className="bgutter">
 						<Spine expanded={expanded} openIdx={openIdx} openPath={openPath} />
@@ -135,7 +136,7 @@ function PlanGroup({
 						>
 							<i style={{ width: `${meta.pct}%` }} />
 						</div>
-						<div className="hbar-tip">{barTip(progress)}</div>
+						{tip === null ? null : <div className="hbar-tip">{tip}</div>}
 					</div>
 				</>
 			)}

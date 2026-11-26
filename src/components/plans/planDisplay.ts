@@ -112,7 +112,8 @@ export function formatEta(secs: number): string {
 	return `${Math.max(1, Math.floor(secs / 60))}m`;
 }
 
-export function barTip(progress: HeaderProgress): string {
+/// Hover text for the progress bar, or null when neither part is known.
+export function barTip(progress: HeaderProgress): string | null {
 	const parts: string[] = [];
 	if (progress.elapsedSecs !== null) {
 		parts.push(`${formatEta(progress.elapsedSecs)} elapsed`);
@@ -120,7 +121,7 @@ export function barTip(progress: HeaderProgress): string {
 	if (progress.etaSecs !== null) {
 		parts.push(`${formatEta(progress.etaSecs)} left`);
 	}
-	return parts.join(" · ");
+	return parts.length === 0 ? null : parts.join(" · ");
 }
 
 export interface HeaderMeta {
@@ -193,17 +194,4 @@ const ROLE_LABELS: Record<SessionRole, string> = {
 
 export function roleLabel(role: SessionRole): string {
 	return ROLE_LABELS[role];
-}
-
-export function planTotalCost(plan: PlanEntry): number | null {
-	let total = 0;
-	let known = false;
-	for (const status of plan.sessions) {
-		const cost = status.spend.cost;
-		if (cost != null) {
-			total += cost;
-			known = true;
-		}
-	}
-	return known ? total : null;
 }

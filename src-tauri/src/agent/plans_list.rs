@@ -246,14 +246,15 @@ fn progress_view(
     started: Option<std::time::SystemTime>,
 ) -> ProgressView {
     let now = std::time::SystemTime::now();
-    let eta_secs = started.and_then(|started| {
-        estimate_remaining(done, total, started, now).map(|remaining| remaining.as_secs())
-    });
-    let elapsed_secs = started.and_then(|started| {
-        now.duration_since(started)
-            .ok()
-            .map(|elapsed| elapsed.as_secs())
-    });
+    let (eta_secs, elapsed_secs) = match started {
+        None => (None, None),
+        Some(started) => (
+            estimate_remaining(done, total, started, now).map(|remaining| remaining.as_secs()),
+            now.duration_since(started)
+                .ok()
+                .map(|elapsed| elapsed.as_secs()),
+        ),
+    };
     ProgressView {
         done,
         total,

@@ -54,6 +54,7 @@ import {
 import { usePinnedTranscript } from "./sessions/scroll";
 import {
 	agentStatusOf,
+	draftContextFor,
 	drainStatusFor,
 	followRename,
 	isReadOnly,
@@ -163,16 +164,7 @@ export function App() {
 	const planMd = usePlanMd(selectedKey, chat?.working ?? false);
 	const isScoping = selectedKey?.role === "scoping";
 	const side = sideContentFor(entry, selectedKey, chat?.todos ?? []);
-	const draftContextPct =
-		selectedKey === null || entry === undefined
-			? null
-			: (() => {
-					const status = entry.sessions.find(
-						(candidate) => candidate.role === selectedKey.role,
-					);
-					if (status === undefined || !status.live) return null;
-					return status.spend.ctx_pct ?? null;
-				})();
+	const draftContextPct = draftContextFor(entry, selectedKey);
 
 	const sendNow = useCallback(
 		async (key: SessionKey, text: string) => {

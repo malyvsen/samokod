@@ -73,6 +73,21 @@ export function sideContentFor(
 	return { kind: "todos", todos };
 }
 
+/// Context percent for the draft bubble corner: the selected session's
+/// live spend context, null when nothing is selected or the session is not
+/// live. Pure.
+export function draftContextFor(
+	entry: PlanEntry | undefined,
+	selectedKey: SessionKey | null,
+): number | null {
+	if (selectedKey === null || entry === undefined) return null;
+	const status = entry.sessions.find(
+		(candidate) => candidate.role === selectedKey.role,
+	);
+	if (status === undefined || !status.live) return null;
+	return status.spend.ctx_pct ?? null;
+}
+
 /// Finished plans are read-only: the selection stays on the session, but
 /// no input, retry, or config change may run against it.
 export function isReadOnly(entry: PlanEntry | undefined): boolean {

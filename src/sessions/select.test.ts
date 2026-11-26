@@ -4,6 +4,7 @@ import { testEntryWith, testKey, testStatus } from "../fixtures";
 import { sessionKeyOf } from "../types";
 import {
 	agentStatusOf,
+	draftContextFor,
 	followRename,
 	isReadOnly,
 	isSessionBusy,
@@ -214,6 +215,39 @@ describe("sideContentFor", () => {
 			kind: "todos",
 			todos: [...todos],
 		});
+	});
+});
+
+describe("draftContextFor", () => {
+	test("live session returns its context", () => {
+		const entry = testEntryWith("aaa", "scoping", "First", false, [
+			testStatus("scoping", {
+				live: true,
+				spend: { cost: 1.24, ctx_pct: 38.4 },
+			}),
+		]);
+		expect(draftContextFor(entry, { plan: "aaa", role: "scoping" })).toBe(38.4);
+	});
+
+	test("idle session returns null", () => {
+		const entry = testEntryWith("aaa", "scoping", "First", false, [
+			testStatus("scoping", {
+				live: false,
+				spend: { cost: 1.24, ctx_pct: 38.4 },
+			}),
+		]);
+		expect(draftContextFor(entry, { plan: "aaa", role: "scoping" })).toBeNull();
+	});
+
+	test("missing selection returns null", () => {
+		const entry = testEntryWith("aaa", "scoping", "First", false, [
+			testStatus("scoping", {
+				live: true,
+				spend: { cost: 1.24, ctx_pct: 38.4 },
+			}),
+		]);
+		expect(draftContextFor(entry, null)).toBeNull();
+		expect(draftContextFor(undefined, null)).toBeNull();
 	});
 });
 

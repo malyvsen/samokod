@@ -1329,6 +1329,26 @@ describe("plans panel", () => {
 			expect(group.querySelector(".hbar-tip")).toBeNull();
 		});
 
+		test("bar without known times renders no hover tip", () => {
+			const plan = testEntryWith(
+				"2026-09-25.10-54-59.slug",
+				"executing",
+				"Shiny",
+				true,
+				[
+					testStatus("scoping"),
+					testStatus("executing", {
+						working: true,
+						progress: { done: 2, total: 5, eta_secs: null, elapsed_secs: null },
+					}),
+				],
+			);
+			render(<PlansPanel {...panelProps([plan], null)} />);
+			const group = planGroup("Shiny, executing, opens Executing");
+			expect(group.querySelector(".hbar-cell")).not.toBeNull();
+			expect(group.querySelector(".hbar-tip")).toBeNull();
+		});
+
 		test("mode switch uses green auto and blue manual", () => {
 			const css = appCss();
 			const auto = /\.sbtn\.mode\s*\{[^}]*\}/.exec(css)?.[0] ?? "";

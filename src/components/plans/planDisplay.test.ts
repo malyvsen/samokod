@@ -472,6 +472,12 @@ describe("barTip", () => {
 			"5m left",
 		);
 	});
+
+	test("returns null when neither part is known", () => {
+		expect(
+			barTip({ done: 0, total: 0, etaSecs: null, elapsedSecs: null }),
+		).toBe(null);
+	});
 });
 
 describe("headerMeta", () => {
