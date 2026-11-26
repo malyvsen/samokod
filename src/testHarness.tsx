@@ -125,14 +125,9 @@ export async function openChat(
 	overrides: {
 		plans?: PlanEntry[];
 		selected?: SessionKey;
-		scoping_preview?: string | null;
 	} = {},
 ): Promise<UserEvent> {
-	if (
-		overrides.plans !== undefined ||
-		overrides.selected !== undefined ||
-		overrides.scoping_preview !== undefined
-	) {
+	if (overrides.plans !== undefined || overrides.selected !== undefined) {
 		const plans = overrides.plans ?? [testEntry()];
 		apiMock.openRepo.mockResolvedValue({
 			repo_root: "/repo",
@@ -140,10 +135,6 @@ export async function openChat(
 			plans,
 			selected: overrides.selected ?? testKey(plans[0]?.name ?? "a"),
 			config_defaults: testDefaults(),
-			scoping_preview:
-				overrides.scoping_preview !== undefined
-					? overrides.scoping_preview
-					: "TEMPLATE",
 		});
 	}
 	const { App } = await import("./App");

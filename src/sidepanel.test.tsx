@@ -26,7 +26,6 @@ beforeEach(() => {
 		plans: [testEntry()],
 		selected: { plan: "2026-09-25.10-54-59", role: "scoping" },
 		config_defaults: testDefaults(),
-		scoping_preview: null,
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
@@ -133,12 +132,10 @@ describe("rebasing sidebar", () => {
 			plans,
 			selected: { plan: executing.name, role: "executing" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		const user = await openChat(api, {
 			plans,
 			selected: { plan: rebasing.name, role: "rebasing" },
-			scoping_preview: null,
 		});
 		await screen.findByText("COMMITS");
 		expect(screen.getByText("plan work")).toBeInTheDocument();

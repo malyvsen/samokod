@@ -32,7 +32,6 @@ beforeEach(() => {
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
-		scoping_preview: null,
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
@@ -191,7 +190,6 @@ describe("message queue", () => {
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		}));
 		api.sendPrompt.mockReturnValue(new Promise(() => {}));
 		const user = await openChat(api, {
@@ -232,7 +230,6 @@ describe("message queue", () => {
 			plans,
 			selected: session,
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		}));
 		api.sendPrompt.mockReturnValue(new Promise(() => {}));
 		const user = await openChat(api, {

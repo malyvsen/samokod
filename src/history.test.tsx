@@ -26,7 +26,6 @@ beforeEach(() => {
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
-		scoping_preview: null,
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
@@ -35,6 +34,8 @@ beforeEach(() => {
 describe("history", () => {
 	test("empty session shows fresh copy", async () => {
 		await openChat(api);
+		emitAppEvent(api, { type: "history_preparing", session: testKey() });
+		emitAppEvent(api, { type: "history_done", session: testKey() });
 		expect(screen.getByText(/fresh session/)).toBeInTheDocument();
 		expect(screen.getByText("no messages yet")).toBeInTheDocument();
 	});

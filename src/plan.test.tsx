@@ -26,7 +26,6 @@ beforeEach(() => {
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
-		scoping_preview: null,
 	});
 	api.warmSession.mockResolvedValue(undefined);
 	api.loadHistory.mockResolvedValue(undefined);
@@ -75,7 +74,6 @@ describe("plan", () => {
 			],
 			selected: testKey(),
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.executePlan.mockResolvedValue({
 			plans: [
@@ -88,7 +86,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "2026-09-25.10-54-59", role: "executing" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		const user = await openChat(api);
 		await openPlanMenu(user);
@@ -115,7 +112,6 @@ describe("plan", () => {
 			],
 			selected: testKey(),
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.executePlan.mockRejectedValue(new Error("nope"));
 		const user = await openChat(api);
@@ -136,7 +132,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "2026-09-25.10-54-59.draft-idea", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.sendPrompt.mockResolvedValue(undefined);
 		const user = await openChat(api);
@@ -160,7 +155,6 @@ describe("plan", () => {
 			plans: [testEntry("bbb", "scoping", "Beta", true)],
 			selected: { plan: "bbb", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		const user = await openChat(api);
 		emitAppEvent(api, {
@@ -213,7 +207,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "aaa", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.sendPrompt.mockResolvedValue(undefined);
 		const user = await openChat(api);
@@ -263,13 +256,11 @@ describe("plan", () => {
 			],
 			selected: { plan: "aaa", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		let resolveExecute!: (value: {
 			plans: ReturnType<typeof testEntry>[];
 			selected: { plan: string; role: "executing" };
 			config_defaults: ReturnType<typeof testDefaults>;
-			scoping_preview: string | null;
 		}) => void;
 		api.executePlan.mockImplementation(
 			() =>
@@ -306,7 +297,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "bbb.slug", role: "executing" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		await screen.findByText("Beta");
 		expect(screen.getByText("aaa chat")).toBeInTheDocument();
@@ -324,13 +314,11 @@ describe("plan", () => {
 			],
 			selected: { plan: "aaa", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		let resolveCancel!: (value: {
 			plans: ReturnType<typeof testEntry>[];
 			selected: { plan: string; role: "scoping" };
 			config_defaults: ReturnType<typeof testDefaults>;
-			scoping_preview: string | null;
 		}) => void;
 		api.cancelPlan.mockImplementation(
 			() =>
@@ -367,7 +355,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "bbb.cancelled", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		await screen.findByText("Beta");
 		expect(screen.getByText("aaa chat")).toBeInTheDocument();
@@ -382,13 +369,11 @@ describe("plan", () => {
 			plans: [testEntry("aaa", "scoping", "Alpha", true)],
 			selected: { plan: "aaa", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.executePlan.mockResolvedValue({
 			plans: [testEntry("aaa.slug", "executing", "Alpha", true)],
 			selected: { plan: "aaa.slug", role: "executing" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		const user = await openChat(api);
 		await user.click(
@@ -409,7 +394,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "aaa", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.sendPrompt.mockResolvedValue(undefined);
 		const user = await openChat(api);
@@ -522,7 +506,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "aaa", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.selectPlan.mockImplementation(async (session: unknown) => ({
 			plans: [
@@ -531,7 +514,6 @@ describe("plan", () => {
 			],
 			selected: session as { plan: string; role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		}));
 		const user = await openChat(api);
 		const aaa = { plan: "aaa", role: "scoping" } as const;
@@ -610,7 +592,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "aaa", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.selectPlan.mockImplementation(async (session: unknown) => ({
 			plans: [
@@ -619,7 +600,6 @@ describe("plan", () => {
 			],
 			selected: session,
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		}));
 		api.sendPrompt.mockResolvedValue(undefined);
 		const user = await openChat(api);
@@ -655,7 +635,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "aaa", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.selectPlan.mockResolvedValue({
 			plans: [
@@ -664,7 +643,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "bbb", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		const user = await openChat(api);
 		const aaa = { plan: "aaa", role: "scoping" } as const;
@@ -699,7 +677,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "2026-09-25.11-00-00", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		const user = await openChat(api);
 		emitAppEvent(api, {
@@ -744,7 +721,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "aaa", role: "scoping" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.selectPlan.mockRejectedValue(new Error("gone"));
 		const user = await openChat(api);
@@ -809,13 +785,11 @@ describe("plan", () => {
 			],
 			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.setPlanMode.mockResolvedValue({
 			plans: [testEntry()],
 			selected: testKey(),
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		const user = await openChat(api);
 		await openShinyMenu(user);
@@ -837,7 +811,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.setPlanMode.mockRejectedValue(new Error("denied"));
 		const user = await openChat(api);
@@ -862,13 +835,11 @@ describe("plan", () => {
 			],
 			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.setPlanEvergreen.mockResolvedValue({
 			plans: [testEntry()],
 			selected: testKey(),
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		const user = await openChat(api);
 		await openShinyMenu(user);
@@ -890,7 +861,6 @@ describe("plan", () => {
 			],
 			selected: { plan: "2026-09-25.10-54-59.slug", role: "executing" },
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.setPlanEvergreen.mockRejectedValue(new Error("denied"));
 		const user = await openChat(api);

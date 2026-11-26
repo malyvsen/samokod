@@ -62,7 +62,6 @@ describe("pending pickers", () => {
 			plans: [testEntry()],
 			selected: testKey(),
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.createPlan.mockResolvedValue({
 			plans: [
@@ -71,7 +70,6 @@ describe("pending pickers", () => {
 			],
 			selected: { plan: "2026-09-25.11-00-00", role: "scoping" },
 			config_defaults: testDefaults({ model: "default-model", effort: null }),
-			scoping_preview: null,
 		});
 		const user = await openChat(api);
 		await user.click(screen.getByRole("button", { name: "New plan" }));
@@ -99,7 +97,6 @@ describe("pending pickers", () => {
 			plans: [testEntry(executingPlan, "executing", "Shiny", true)],
 			selected: executingKey,
 			config_defaults: testDefaults({ model: "stale-model", effort: null }),
-			scoping_preview: null,
 		});
 		await openChat(api);
 		emitToggleSettings(api);

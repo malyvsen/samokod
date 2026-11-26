@@ -14,7 +14,6 @@ use crate::types::{
 };
 
 use super::AgentManager;
-use super::scoping_preview_for;
 use super::session::LiveSession;
 use super::{BackendState, WindowState, emit_event, lock_backend};
 
@@ -26,14 +25,12 @@ impl AgentManager {
         let branch = state.checkout_branch.clone();
         let (repo_root, plans, selected) = listed(state, None);
         let config_defaults = self.config_defaults(&repo_root);
-        let scoping_preview = scoping_preview_for(state, &repo_root, &selected);
         OpenRepoResult {
             repo_root: repo_root.to_string_lossy().to_string(),
             branch,
             plans,
             selected,
             config_defaults,
-            scoping_preview,
         }
     }
 
@@ -44,12 +41,10 @@ impl AgentManager {
         let state = backend.windows.get(window).expect("window gone");
         let (repo_root, plans, selected) = listed(state, state.current.as_ref());
         let config_defaults = self.config_defaults(&repo_root);
-        let scoping_preview = scoping_preview_for(state, &repo_root, &selected);
         PlansUpdate {
             plans,
             selected,
             config_defaults,
-            scoping_preview,
         }
     }
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-export type CollapsibleKind = "agent" | "user" | "lead" | "queued";
+export type CollapsibleKind = "agent" | "user" | "queued";
 
 export function isLongMessage(text: string): boolean {
 	if (text.length > 600) return true;

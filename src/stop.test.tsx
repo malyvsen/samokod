@@ -26,7 +26,6 @@ beforeEach(() => {
 		plans: [testEntry()],
 		selected: testKey(),
 		config_defaults: testDefaults(),
-		scoping_preview: null,
 	});
 });
 
@@ -38,7 +37,6 @@ async function startWorkingExecuting() {
 		plans: [testEntry(name, "executing", "Shiny", true)],
 		selected: { plan: name, role: "executing" },
 		config_defaults: testDefaults(),
-		scoping_preview: null,
 	});
 	api.sendPrompt.mockReturnValue(new Promise(() => {}));
 	const user = await openChat(api);
@@ -72,7 +70,6 @@ describe("stop", () => {
 			plans: [testEntry()],
 			selected: testKey(),
 			config_defaults: testDefaults(),
-			scoping_preview: null,
 		});
 		api.sendPrompt.mockReturnValue(new Promise(() => {}));
 		const user = await openChat(api);

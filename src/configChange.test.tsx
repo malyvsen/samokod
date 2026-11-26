@@ -89,7 +89,6 @@ async function openChatWith(options: ConfigOptionView[]) {
 		plans: [testEntry(executingPlan, "executing", "Shiny", true)],
 		selected: executingKey,
 		config_defaults: testDefaults(),
-		scoping_preview: null,
 	});
 	const user = await openChat(api);
 	emitAppEvent(api, {

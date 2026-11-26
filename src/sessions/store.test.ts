@@ -11,7 +11,6 @@ import {
 	liveTurnOf,
 	markSent,
 	updateEntry,
-	withScopingLead,
 } from "./store";
 
 const KEY_ID = sessionKeyOf(testKey());
@@ -163,74 +162,6 @@ describe("history events", () => {
 			error: { raw: "boom", hint: "history hint", retryable: false },
 		});
 		expect(chat.transcript).toHaveLength(1);
-	});
-});
-
-describe("scoping lead", () => {
-	test("empty chat starts with no lead", () => {
-		expect(emptyChat().scopingLead).toBeNull();
-	});
-
-	test("history_begin preserves lead while keeping the transcript", () => {
-		let chats = updateEntry(withChat(), testKey(), (chat) => ({
-			...chat,
-			scopingLead: "TEMPLATE",
-			transcript: [{ kind: "user", id: "u1", text: "hello" }],
-		}));
-		chats = applySessionEvent(chats, {
-			type: "history_begin",
-			session: testKey(),
-		});
-		const chat = chatOf(chats);
-		expect(chat.scopingLead).toBe("TEMPLATE");
-		expect(chat.transcript).toHaveLength(1);
-		expect(chat.transcript[0]).toMatchObject({ kind: "user", text: "hello" });
-	});
-
-	test("fresh-plan preparing then done preserves lead without begin", () => {
-		let chats = updateEntry(withChat(), testKey(), (chat) => ({
-			...chat,
-			scopingLead: "TEMPLATE",
-		}));
-		chats = applySessionEvent(chats, {
-			type: "history_preparing",
-			session: testKey(),
-		});
-		chats = applySessionEvent(chats, {
-			type: "history_done",
-			session: testKey(),
-		});
-		expect(chatOf(chats).scopingLead).toBe("TEMPLATE");
-	});
-
-	test("response lead seeds once and sticks", () => {
-		const seeded = withScopingLead({}, testKey(), null);
-		expect(chatOf(seeded).scopingLead).toBeNull();
-		const shown = withScopingLead(withChat(), testKey(), "TEMPLATE");
-		expect(chatOf(shown).scopingLead).toBe("TEMPLATE");
-		expect(withScopingLead(shown, testKey(), "TEMPLATE")).toBe(shown);
-		expect(withScopingLead(shown, testKey(), null)).toBe(shown);
-		expect(withScopingLead(shown, testKey(), "NEXT")).toBe(shown);
-	});
-
-	test("carried history drops the lead on rename", () => {
-		const before = withScopingLead(withChat(), testKey(), "TEMPLATE");
-		const after = carryHistory(
-			before,
-			testKey(),
-			{
-				plans: [],
-				selected: { plan: "renamed", role: "scoping" },
-				config_defaults: { model: null, effort: null },
-				scoping_preview: null,
-			},
-			false,
-			7000,
-		);
-		expect(after[sessionKeyOf(testKey())]).toBeUndefined();
-		const carried =
-			after[sessionKeyOf({ plan: "renamed", role: "scoping" })] ?? emptyChat();
-		expect(carried.scopingLead).toBeNull();
 	});
 });
 
@@ -755,7 +686,6 @@ describe("turn ack", () => {
 				plans: [],
 				selected: { plan: "renamed", role: "executing" },
 				config_defaults: { model: null, effort: null },
-				scoping_preview: null,
 			},
 			true,
 			8000,

@@ -28,7 +28,6 @@ import {
 
 export function Transcript({
 	items,
-	lead = null,
 	start,
 	repoLabel,
 	onRetry,
@@ -40,7 +39,6 @@ export function Transcript({
 	session,
 }: {
 	items: TranscriptItem[];
-	lead?: string | null;
 	start: SessionStart | null;
 	repoLabel: string;
 	onRetry: (() => void) | null;
@@ -51,9 +49,6 @@ export function Transcript({
 	children?: ReactNode;
 	session: SessionKey | null;
 }) {
-	const showLead =
-		lead !== null &&
-		!items.some((item) => item.kind === "user" && item.text === lead);
 	const now = useNow(turn !== null);
 	const displayItems = withPendingThought(items, turn, now);
 	const groups = groupRuns(displayItems);
@@ -81,14 +76,6 @@ export function Transcript({
 		<>
 			<EmptyHint items={items} start={start} repoLabel={repoLabel} />
 			<div className="tcol">
-				{showLead && (
-					<MessageBubble
-						collapseKind="lead"
-						tone="user"
-						label="YOU"
-						text={lead}
-					/>
-				)}
 				{groups.map((group, index) =>
 					group.kind === "run" ? (
 						<WorkBox

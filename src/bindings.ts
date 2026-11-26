@@ -52,8 +52,7 @@ export type AppEvent_Deserialize = { type: "agent_text"; session: SessionKey; ch
 { type: "agent_thought"; session: SessionKey; chunk: string } | 
 /**
  *  Replayed user message chunk. Only emitted while a session's history
- *  loads, plus the eager executing/rebasing first prompt which emits
- *  live; live scoping turns append the user bubble optimistically instead.
+ *  loads.
  */
 { type: "user_text"; session: SessionKey; chunk: string } | { type: "tool_line"; session: SessionKey; line: ToolLineView } | { type: "turn_done"; session: SessionKey } | { type: "turn_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "agent_exited"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "permission_asked"; session: SessionKey; permission: PermissionView } | { type: "permission_resolved"; session: SessionKey; tool_call_id: string } | { type: "config_options"; session: SessionKey; options: ConfigOptionView_Deserialize[] } | { type: "todos_changed"; session: SessionKey; todos: TodoView[]; changes: TodoChangeView[] } | { type: "spend_tick"; session: SessionKey; cost: number | null; ctx_pct: number | null } | { type: "branch_changed"; branch: string } | { type: "session_reset"; session: SessionKey } | 
 /**
@@ -99,8 +98,7 @@ export type AppEvent_Serialize = { type: "agent_text"; session: SessionKey; chun
 { type: "agent_thought"; session: SessionKey; chunk: string } | 
 /**
  *  Replayed user message chunk. Only emitted while a session's history
- *  loads, plus the eager executing/rebasing first prompt which emits
- *  live; live scoping turns append the user bubble optimistically instead.
+ *  loads.
  */
 { type: "user_text"; session: SessionKey; chunk: string } | { type: "tool_line"; session: SessionKey; line: ToolLineView } | { type: "turn_done"; session: SessionKey } | { type: "turn_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "agent_exited"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "permission_asked"; session: SessionKey; permission: PermissionView } | { type: "permission_resolved"; session: SessionKey; tool_call_id: string } | { type: "config_options"; session: SessionKey; options: ConfigOptionView_Serialize[] } | { type: "todos_changed"; session: SessionKey; todos: TodoView[]; changes: TodoChangeView[] } | { type: "spend_tick"; session: SessionKey; cost: number | null; ctx_pct: number | null } | { type: "branch_changed"; branch: string } | { type: "session_reset"; session: SessionKey } | 
 /**
@@ -183,7 +181,6 @@ export type OpenRepoResult_Deserialize = {
 	plans: PlanEntry_Deserialize[],
 	selected: SessionKey,
 	config_defaults: RepoDefaults_Deserialize,
-	scoping_preview?: string | null,
 };
 
 /**
@@ -196,7 +193,6 @@ export type OpenRepoResult_Serialize = {
 	plans: PlanEntry_Serialize[],
 	selected: SessionKey,
 	config_defaults: RepoDefaults_Serialize,
-	scoping_preview: string | null,
 };
 
 /**
@@ -290,7 +286,6 @@ export type PlansUpdate_Deserialize = {
 	plans: PlanEntry_Deserialize[],
 	selected: SessionKey,
 	config_defaults: RepoDefaults_Deserialize,
-	scoping_preview?: string | null,
 };
 
 /**
@@ -301,7 +296,6 @@ export type PlansUpdate_Serialize = {
 	plans: PlanEntry_Serialize[],
 	selected: SessionKey,
 	config_defaults: RepoDefaults_Serialize,
-	scoping_preview: string | null,
 };
 
 /**  Local state persisted under the OS app-data directory. */

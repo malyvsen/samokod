@@ -28,7 +28,6 @@ export interface ChatState {
 	approval: boolean;
 	failed: boolean;
 	start: SessionStart;
-	scopingLead: string | null;
 	live: LiveThought | null;
 }
 
@@ -49,7 +48,6 @@ export function emptyChat(): ChatState {
 		approval: false,
 		failed: false,
 		start: { kind: "idle" },
-		scopingLead: null,
 		live: null,
 	};
 }
@@ -100,27 +98,6 @@ export function removeEntry(chats: Chats, key: SessionKey): Chats {
 	const next = { ...chats };
 	delete next[sessionKeyOf(key)];
 	return next;
-}
-
-/// Seeds the scoping lead from a response while ensuring the chat exists,
-/// so a selected session always has an entry. The lead runs once: missing
-/// never overwrites and a present lead sticks, keeping the same object
-/// when nothing changes.
-export function withScopingLead(
-	chats: Chats,
-	key: SessionKey,
-	lead: string | null | undefined,
-): Chats {
-	const id = sessionKeyOf(key);
-	const existing = chats[id];
-	if (existing !== undefined) {
-		if (lead == null || existing.scopingLead !== null) return chats;
-		return { ...chats, [id]: { ...existing, scopingLead: lead } };
-	}
-	return {
-		...chats,
-		[id]: { ...emptyChat(), scopingLead: lead ?? null },
-	};
 }
 
 /// Arrival time for items created by live events. Replayed history stays
@@ -426,7 +403,6 @@ export function applySessionEvent(
 }
 
 /// Move the acted-on transcript to its history row when the plan renamed.
-/// The carried lead always clears: a renamed plan is never fresh.
 /// `markSelectedRunning` opens the new selected session working; callers
 /// pass whether the acted plan is viewed so background work moves its own
 /// bucket without touching the viewed transcript.
@@ -447,7 +423,6 @@ export function carryHistory(
 	next[sessionKeyOf(historyKey)] = {
 		...markIdle(entry),
 		live: null,
-		scopingLead: null,
 	};
 	if (
 		markSelectedRunning &&

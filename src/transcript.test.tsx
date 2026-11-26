@@ -244,48 +244,6 @@ describe("transcript user messages", () => {
 	});
 });
 
-describe("transcript lead", () => {
-	test("lead hides when a user item already carries exactly that text", () => {
-		const { container } = render(
-			<Transcript
-				items={[{ kind: "user", id: "u1", text: "TEMPLATE" }]}
-				lead="TEMPLATE"
-				start={IDLE}
-				repoLabel="~/repo"
-				onRetry={vi.fn()}
-				onAnswer={vi.fn()}
-				session={SESSION}
-			/>,
-		);
-		const bubbles = container.querySelectorAll(".msg.user");
-		expect(bubbles).toHaveLength(1);
-		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
-	});
-
-	test("lead renders first alongside a different user text", () => {
-		const { container } = render(
-			<Transcript
-				items={[{ kind: "user", id: "u1", text: "hello" }]}
-				lead="TEMPLATE"
-				start={IDLE}
-				repoLabel="~/repo"
-				onRetry={vi.fn()}
-				onAnswer={vi.fn()}
-				session={SESSION}
-			/>,
-		);
-		const bubbles = container.querySelectorAll(".msg.user");
-		expect(bubbles).toHaveLength(2);
-		expect(bubbles[0]?.textContent).toContain("TEMPLATE");
-		expect(bubbles[1]?.textContent).toContain("hello");
-	});
-
-	test("absent lead renders nothing extra", () => {
-		const { container } = render(transcript("hello"));
-		expect(container.querySelectorAll(".msg.user")).toHaveLength(1);
-	});
-});
-
 describe("transcript agent tables", () => {
 	const table = "| File | Status |\n| --- | --- |\n| `a.ts` | ok |";
 

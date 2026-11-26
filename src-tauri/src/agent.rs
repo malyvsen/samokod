@@ -7,7 +7,6 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::awake;
-use crate::opencode;
 use crate::plans;
 use crate::repo_state::{ConfigRole, RepoState};
 use crate::types::{
@@ -349,34 +348,6 @@ pub(crate) fn abandon_empty_scoping(
     }
     vanish_scoping(state, repo_root, &prev.plan, trigger);
     true
-}
-
-/// Scoping lead preview for one session. Returns the rendered template
-/// only while the session is fresh under `is_empty_scoping`, `None` for
-/// non-fresh, non-scoping, or gone plans. List payloads stay infallible,
-/// so a gone plan yields no preview instead of an error. Reads the locked
-/// state plus disk.
-pub(crate) fn scoping_preview_for(
-    state: &WindowState,
-    repo_root: &Path,
-    session: &SessionKey,
-) -> Option<String> {
-    if session.role != SessionRole::Scoping {
-        return None;
-    }
-    let is_pending = state.pending_scoping.contains_key(&session.plan);
-    let plan_ref = plans::PlanRef {
-        name: session.plan.clone(),
-        phase: plans::Phase::Scoping,
-    };
-    if !is_pending && !plan_ref.path(repo_root).is_dir() {
-        return None;
-    }
-    if !is_empty_scoping(state, repo_root, &session.plan) {
-        return None;
-    }
-    let display = opencode::plan_display(&plan_ref);
-    Some(opencode::scoping_template(&display))
 }
 
 /// Reserved timestamp name for a lazy scoping session: collision-proof
@@ -2253,81 +2224,6 @@ mod tests {
         assert_eq!(
             ActivePlan::scoping(name).cwd(root),
             Path::new("/repo").to_path_buf()
-        );
-    }
-
-    #[test]
-    fn scoping_preview_follows_freshness_gate() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        let name = "2026-09-26.08-41-03";
-        let key = SessionKey {
-            plan: name.to_string(),
-            role: SessionRole::Scoping,
-        };
-        let state = WindowState {
-            pending_scoping: HashMap::from([(name.to_string(), None)]),
-            ..Default::default()
-        };
-        let preview = scoping_preview_for(&state, root, &key).expect("fresh pending renders");
-        assert!(preview.contains(".samokod/plans/scoping/2026-09-26.08-41-03"));
-        assert!(!preview.contains("{{PLAN_DIR}}"));
-
-        plans::materialize_scoping(root, name).expect("materialize");
-        std::fs::write(
-            root.join(".samokod/plans/scoping/2026-09-26.08-41-03/plan.md"),
-            "# T\n",
-        )
-        .expect("write");
-        assert_eq!(
-            scoping_preview_for(&WindowState::default(), root, &key),
-            None
-        );
-
-        let mut prompted = WindowState::default();
-        plans::materialize_scoping(root, "2026-09-26.08-41-04").expect("materialize");
-        let other = SessionKey {
-            plan: "2026-09-26.08-41-04".to_string(),
-            role: SessionRole::Scoping,
-        };
-        assert!(scoping_preview_for(&WindowState::default(), root, &other).is_some());
-        prompted.prompted.insert(other.plan.clone());
-        assert_eq!(scoping_preview_for(&prompted, root, &other), None);
-
-        let mut sent_state = WindowState::default();
-        plans::materialize_scoping(root, "2026-09-26.08-41-05").expect("materialize");
-        let sent = SessionKey {
-            plan: "2026-09-26.08-41-05".to_string(),
-            role: SessionRole::Scoping,
-        };
-        sent_state.sessions.insert(
-            sent.clone(),
-            LiveSession::fresh(crate::repo_state::RepoState::default()),
-        );
-        sent_state
-            .sessions
-            .get_mut(&sent)
-            .expect("live")
-            .last_prompt = Some("hi".to_string());
-        assert_eq!(scoping_preview_for(&sent_state, root, &sent), None);
-
-        let executing = SessionKey {
-            plan: name.to_string(),
-            role: SessionRole::Executing,
-        };
-        assert_eq!(
-            scoping_preview_for(&WindowState::default(), root, &executing),
-            None
-        );
-
-        let gone = SessionKey {
-            plan: "2026-09-26.08-41-99".to_string(),
-            role: SessionRole::Scoping,
-        };
-        assert_eq!(
-            scoping_preview_for(&WindowState::default(), root, &gone),
-            None
         );
     }
 

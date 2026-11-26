@@ -135,7 +135,6 @@ describe("cli launch", () => {
 			plans: [testEntry()],
 			selected: testKey(),
 			config_defaults: testDefaults(),
-			scoping_preview: "TEMPLATE",
 		});
 		render(<App />);
 		await screen.findByRole("textbox", { name: "Ask for a change…" });

@@ -82,7 +82,6 @@ import {
 	markSent,
 	removeEntry,
 	updateEntry,
-	withScopingLead,
 } from "./sessions/store";
 import type { AgentStatus, TranscriptItem } from "./types";
 import { isWorkRole, sameSession, sessionKeyOf } from "./types";
@@ -137,17 +136,11 @@ export function App() {
 		[applyChats],
 	);
 
-	const applyPlans = useCallback(
-		(update: PlansUpdate) => {
-			setPlans(update.plans);
-			setSelectedKey(update.selected);
-			setConfigDefaults(update.config_defaults);
-			applyChats((current) =>
-				withScopingLead(current, update.selected, update.scoping_preview),
-			);
-		},
-		[applyChats],
-	);
+	const applyPlans = useCallback((update: PlansUpdate) => {
+		setPlans(update.plans);
+		setSelectedKey(update.selected);
+		setConfigDefaults(update.config_defaults);
+	}, []);
 
 	const applyOwnedUpdate = useCallback(
 		(oldPlan: string, update: PlansUpdate) => {
@@ -156,11 +149,8 @@ export function App() {
 			if (selectedRef.current?.plan === oldPlan) {
 				setSelectedKey(followRename(update.plans, oldPlan, update.selected));
 			}
-			applyChats((current) =>
-				withScopingLead(current, update.selected, update.scoping_preview),
-			);
 		},
-		[applyChats],
+		[],
 	);
 
 	const entry = selectedEntry(plans, selectedKey);
@@ -843,7 +833,6 @@ export function App() {
 						<div className="transcript" ref={scrollRef} onScroll={onScroll}>
 							<Transcript
 								items={transcript}
-								lead={chat?.scopingLead ?? null}
 								start={chat?.start ?? null}
 								repoLabel={repoLabel}
 								onRetry={readOnly ? null : handleRetry}

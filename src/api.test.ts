@@ -53,7 +53,6 @@ describe("session commands", () => {
 			plans: [],
 			selected: testKey(),
 			config_defaults: { model: null, effort: null },
-			scoping_preview: null,
 		});
 		await selectPlan(testKey(), null);
 		expect(invoke).toHaveBeenCalledWith("select_plan", {
@@ -67,7 +66,6 @@ describe("session commands", () => {
 			plans: [],
 			selected: testKey(),
 			config_defaults: { model: null, effort: null },
-			scoping_preview: null,
 		});
 		await selectPlan(testKey(), "hello");
 		expect(invoke).toHaveBeenCalledWith("select_plan", {
@@ -81,7 +79,6 @@ describe("session commands", () => {
 			plans: [],
 			selected: testKey(),
 			config_defaults: { model: null, effort: null },
-			scoping_preview: null,
 		});
 		await executePlan(testKey());
 		expect(invoke).toHaveBeenCalledWith("execute_plan", {
@@ -94,7 +91,6 @@ describe("session commands", () => {
 			plans: [],
 			selected: testKey(),
 			config_defaults: { model: null, effort: null },
-			scoping_preview: null,
 		});
 		await setPlanMode("2026-09-25.10-54-59", true);
 		expect(invoke).toHaveBeenCalledWith("set_plan_mode", {
@@ -108,7 +104,6 @@ describe("session commands", () => {
 			plans: [],
 			selected: testKey(),
 			config_defaults: { model: null, effort: null },
-			scoping_preview: null,
 		});
 		await setPlanEvergreen("2026-09-25.10-54-59", false);
 		expect(invoke).toHaveBeenCalledWith("set_plan_evergreen", {
