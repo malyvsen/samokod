@@ -390,7 +390,7 @@ fn log_level(value: Option<&str>) -> log::LevelFilter {
 
 #[cfg(test)]
 mod tests {
-    use super::log_level;
+    use super::{EmitTarget, log_level, resolve_emit_target};
 
     #[test]
     fn log_level_maps_known_names() {
@@ -401,6 +401,15 @@ mod tests {
         assert_eq!(log_level(None), log::LevelFilter::Info);
         assert_eq!(log_level(Some("")), log::LevelFilter::Info);
         assert_eq!(log_level(Some("verbose")), log::LevelFilter::Info);
+    }
+
+    #[test]
+    fn menu_events_target_focused_window_or_broadcast() {
+        assert_eq!(
+            resolve_emit_target(Some("main".to_string())),
+            EmitTarget::To("main".to_string())
+        );
+        assert_eq!(resolve_emit_target(None), EmitTarget::Broadcast);
     }
 }
 
@@ -436,27 +445,53 @@ fn handle_second_launch(app: &AppHandle, args: &[String], cwd: String) {
     }
 }
 
-/// Forward the native Settings item to the focused window, falling back
-/// to a broadcast when no window resolves as focused so single-window use
+/// Forward a menu event to the focused window, falling back to a
+/// broadcast when no window resolves as focused so single-window use
 /// always works.
-fn emit_toggle_settings(app: &AppHandle) {
-    let focused = app
-        .webview_windows()
-        .into_values()
-        .find(|window| window.is_focused().unwrap_or(false))
-        .map(|window| window.label().to_string());
-    match focused {
-        Some(label) => {
-            if let Err(error) = app.emit_to(label, "samokod://toggle-settings", ()) {
-                log::warn!("Toggle settings menu failed: {error}");
+fn emit_to_focused_or_broadcast(app: &AppHandle, event: &str) {
+    match resolve_emit_target(focused_window_label(app)) {
+        EmitTarget::To(label) => {
+            if let Err(error) = app.emit_to(label, event, ()) {
+                log::warn!("{event} menu failed: {error}");
             }
         }
-        None => {
-            if let Err(error) = app.emit("samokod://toggle-settings", ()) {
-                log::warn!("Toggle settings menu failed: {error}");
+        EmitTarget::Broadcast => {
+            if let Err(error) = app.emit(event, ()) {
+                log::warn!("{event} menu failed: {error}");
             }
         }
     }
+}
+
+fn focused_window_label(app: &AppHandle) -> Option<String> {
+    app.webview_windows()
+        .into_values()
+        .find(|window| window.is_focused().unwrap_or(false))
+        .map(|window| window.label().to_string())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum EmitTarget {
+    To(String),
+    Broadcast,
+}
+
+/// Pure routing for `emit_to_focused_or_broadcast`: a focused window gets
+/// the window-targeted emit, otherwise the app broadcasts. Pure so unit
+/// tests pin the routing without an `AppHandle`.
+fn resolve_emit_target(focused: Option<String>) -> EmitTarget {
+    match focused {
+        Some(label) => EmitTarget::To(label),
+        None => EmitTarget::Broadcast,
+    }
+}
+
+fn emit_toggle_settings(app: &AppHandle) {
+    emit_to_focused_or_broadcast(app, "samokod://toggle-settings");
+}
+
+fn emit_new_plan(app: &AppHandle) {
+    emit_to_focused_or_broadcast(app, "samokod://new-plan");
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -488,9 +523,15 @@ pub fn run() {
             Ok(())
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
+            "new-plan" => emit_new_plan(app),
             "new-window" => {
                 if let Err(error) = create_window(app) {
                     log::warn!("New Window menu failed: {error}");
+                }
+            }
+            "open-picker" => {
+                if let Err(error) = create_window(app) {
+                    log::warn!("Open menu failed: {error}");
                 }
             }
             "toggle-settings" => emit_toggle_settings(app),
