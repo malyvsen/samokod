@@ -56,11 +56,18 @@ pub fn build_new_session_request(cwd: &Path, system: &str) -> NewSessionRequest 
     )
 }
 
-/// Build the ACP `session/load` request restoring a past session. Replay
-/// notifications flow through the existing global handler; no separate
-/// session handle is created.
-pub fn build_load_session_request(session_id: &str, cwd: &Path) -> LoadSessionRequest {
-    LoadSessionRequest::new(SessionId::new(session_id), cwd)
+/// Build the ACP `session/load` request restoring a past session with
+/// role instructions as `systemPrompt` in append mode. Replay notifications
+/// flow through the existing global handler; no separate session handle is
+/// created.
+pub fn build_load_session_request(
+    session_id: &str,
+    cwd: &Path,
+    system: &str,
+) -> LoadSessionRequest {
+    LoadSessionRequest::new(SessionId::new(session_id), cwd).system_prompt(
+        SystemPrompt::new(vec![ContentBlock::from(system)]).mode(SystemPromptMode::Append),
+    )
 }
 
 /// Build a `session/set_config_option` request from a string config id and value id.
@@ -359,6 +366,17 @@ mod tests {
     #[test]
     fn system_prompt_serializes_as_append() {
         let request = build_new_session_request(Path::new("/repo"), "role instructions");
+        let value = serde_json::to_value(&request).expect("serialize");
+        assert_eq!(value["systemPrompt"]["mode"], "append");
+        assert_eq!(
+            value["systemPrompt"]["content"][0]["text"],
+            "role instructions"
+        );
+    }
+
+    #[test]
+    fn load_resends_system_prompt_as_append() {
+        let request = build_load_session_request("sess-1", Path::new("/repo"), "role instructions");
         let value = serde_json::to_value(&request).expect("serialize");
         assert_eq!(value["systemPrompt"]["mode"], "append");
         assert_eq!(

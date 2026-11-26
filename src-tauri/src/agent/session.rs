@@ -527,14 +527,15 @@ impl AgentManager {
         Ok((connection, session_id))
     }
 
-    /// Restore a past session's history via `session/load`: the replay
-    /// streams through the same global notification path as live turns, so
-    /// the transcript rebuilds with no extra mapping except user bubbles.
-    /// Single-flights on the history slot; a live turn owns its session,
-    /// so replays never run over a working key. Finished plans replay
-    /// read-only history the same way. Plans without a persisted ID have
-    /// no past at all (a brand-new plan), so a live session starts instead
-    /// and the transcript stays empty.
+    /// Restore a past session's history via `session/load` with the same
+    /// role instructions as `session/new`: the replay streams through the
+    /// same global notification path as live turns, so the transcript
+    /// rebuilds with no extra mapping except user bubbles. Single-flights
+    /// on the history slot; a live turn owns its session, so replays never
+    /// run over a working key. Finished plans replay read-only history the
+    /// same way. Plans without a persisted ID have no past at all (a
+    /// brand-new plan), so a live session starts instead and the transcript
+    /// stays empty.
     pub async fn load_history(&self, window: &str, session: SessionKey) -> Result<(), AgentError> {
         log::info!(
             "load_history window={window} session={}::{:?}",
@@ -596,11 +597,11 @@ impl AgentManager {
         };
         // Guard drop aborts on early return: a missing repo no longer wedges
         // the key on `history_loading` forever.
-        let (repo_root, _) = self
-            .reopen_snapshot(window)
-            .ok_or_else(|| AgentError::NoSession {
-                raw: "open a repository first".to_string(),
-            })?;
+        let (repo_root, branch) =
+            self.reopen_snapshot(window)
+                .ok_or_else(|| AgentError::NoSession {
+                    raw: "open a repository first".to_string(),
+                })?;
         emit_event(
             &self.app,
             window,
@@ -650,8 +651,27 @@ impl AgentManager {
             },
         );
         let cwd = plan.cwd(&repo_root);
+        let status = if matches!(
+            plan.phase,
+            plans::Phase::Rebasing | plans::Phase::Evergreening
+        ) {
+            match self.worktree_status_for(window, &repo_root, &plan.name) {
+                Ok(live) => Some(live),
+                Err(error) => {
+                    log::warn!(
+                        "loaded {} {} uses derived coordinates: {error}",
+                        plan.phase.dir_name(),
+                        plan.name
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let system = spawn_system_text(&plan, &repo_root, &branch, status.as_ref());
         match connection
-            .send_request(acp::build_load_session_request(&session_id, &cwd))
+            .send_request(acp::build_load_session_request(&session_id, &cwd, &system))
             .block_task()
             .await
         {
