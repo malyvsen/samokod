@@ -180,6 +180,18 @@ export function onAppEvent(handler: (event: AppEvent) => void): () => void {
 }
 
 export function onToggleSettings(handler: () => void): () => void {
+	return onMenuSignal("samokod://toggle-settings", "toggle-settings", handler);
+}
+
+export function onNewPlan(handler: () => void): () => void {
+	return onMenuSignal("samokod://new-plan", "new-plan", handler);
+}
+
+function onMenuSignal(
+	event: string,
+	label: string,
+	handler: () => void,
+): () => void {
 	const { track, cleanup } = trackingSubscriptions();
 	// The backend emits window-targeted when a window is focused and
 	// broadcasts otherwise; both channel subscriptions receive the emit,
@@ -195,15 +207,15 @@ export function onToggleSettings(handler: () => void): () => void {
 	}
 	const window = getCurrentWebviewWindow();
 	window
-		.listen("samokod://toggle-settings", fire)
+		.listen(event, fire)
 		.then(track)
 		.catch((error: unknown) => {
-			console.warn("failed to subscribe to toggle-settings events", error);
+			console.warn(`failed to subscribe to ${label} events`, error);
 		});
-	listen("samokod://toggle-settings", fire)
+	listen(event, fire)
 		.then(track)
 		.catch((error: unknown) => {
-			console.warn("failed to subscribe to toggle-settings events", error);
+			console.warn(`failed to subscribe to ${label} events`, error);
 		});
 	return cleanup;
 }

@@ -10,6 +10,7 @@ import {
 	listOpenRepos,
 	loadHistory,
 	onAppEvent,
+	onNewPlan,
 	onToggleSettings,
 	openRepo,
 	refreshBranch,
@@ -119,6 +120,9 @@ export function App() {
 	const selectedRef = useRef<SessionKey | null>(null);
 	selectedRef.current = selectedKey;
 	const chatsRef = useRef<Chats>({});
+	const viewRef = useRef(view);
+	viewRef.current = view;
+	const handleNewPlanRef = useRef<() => void>(() => {});
 
 	// Single write path for chats. The ref publishes synchronously so events
 	// arriving before the next render chain off each other instead of racing.
@@ -276,6 +280,8 @@ export function App() {
 	useEffect(() => onAppEvent(handleEvent), [handleEvent]);
 
 	useEffect(() => onToggleSettings(() => setSidebarMode(flipSidebarMode)), []);
+
+	useEffect(() => onNewPlan(() => handleNewPlanRef.current()), []);
 
 	// Picker marks come from the initial list plus the global
 	// `open_repos_changed` handler above.
@@ -683,6 +689,11 @@ export function App() {
 			}
 		}
 	}
+
+	handleNewPlanRef.current = () => {
+		if (viewRef.current.kind === "picker") return;
+		void handleNewPlan();
+	};
 
 	async function handleExecute(key: SessionKey) {
 		updateChat(key, (chat) => markSent(chat));

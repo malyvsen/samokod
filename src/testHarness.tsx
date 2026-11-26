@@ -32,6 +32,7 @@ export const api = {
 	planMdText: vi.fn(async () => null as string | null),
 	onAppEvent: vi.fn(() => () => {}),
 	onToggleSettings: vi.fn(() => () => {}),
+	onNewPlan: vi.fn(() => () => {}),
 	listOpenRepos: vi.fn(async () => [] as OpenRepoEntry[]),
 	focusWindow: vi.fn(async () => {}),
 	newWindow: vi.fn(async () => "window-1"),
@@ -88,6 +89,15 @@ export function emitToggleSettings(apiMock: typeof api): void {
 		apiMock.onToggleSettings,
 		"toggle-settings",
 	);
+	act(() => {
+		for (const handler of handlers) {
+			handler();
+		}
+	});
+}
+
+export function emitNewPlan(apiMock: typeof api): void {
+	const handlers = mockHandlers<() => void>(apiMock.onNewPlan, "new-plan");
 	act(() => {
 		for (const handler of handlers) {
 			handler();
