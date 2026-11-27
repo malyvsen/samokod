@@ -50,17 +50,12 @@ export function pendingOptions(defaults: RepoDefaults): {
 export function splitOptions(options: ConfigOptionView[]): {
 	model: ConfigOptionView | undefined;
 	effort: ConfigOptionView | undefined;
-	extras: ConfigOptionView[];
 } {
 	const model = options.find(isModel);
 	const effort = options.find(isEffort);
-	const extras = options.filter(
-		(option) => !isModel(option) && !isEffort(option) && !isMode(option),
-	);
 	return {
 		model: model === undefined ? undefined : withSortedValues(model),
 		effort,
-		extras,
 	};
 }
 
@@ -74,10 +69,6 @@ function isModel(option: ConfigOptionView): boolean {
 
 function isEffort(option: ConfigOptionView): boolean {
 	return categoryOf(option) === "thought_level" || option.id === "effort";
-}
-
-function isMode(option: ConfigOptionView): boolean {
-	return categoryOf(option) === "mode";
 }
 
 function withSortedValues(option: ConfigOptionView): ConfigOptionView {
@@ -146,6 +137,16 @@ export function EffortPlaceholder() {
 		<span className="dwrap">
 			<button className="dsel" type="button" disabled>
 				<span className="dlabel">Effort unavailable</span>
+			</button>
+		</span>
+	);
+}
+
+export function ModelPlaceholder() {
+	return (
+		<span className="dwrap">
+			<button className="dsel" type="button" disabled>
+				<span className="dlabel">Model unavailable</span>
 			</button>
 		</span>
 	);

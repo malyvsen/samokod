@@ -153,6 +153,41 @@ describe("settings selectors", () => {
 		expect(placeholder.closest("button")).toBeDisabled();
 	});
 
+	test("shows a placeholder without a model option", () => {
+		const effortOnly: ConfigOptionView[] = [
+			{
+				id: "effort",
+				name: "Effort",
+				currentValue: "low",
+				category: "thought_level",
+				options: [{ value: "low", name: "Low" }],
+			},
+		];
+		render(selectors(effortOnly, false, vi.fn()));
+		expect(screen.getByText("MODEL")).toBeInTheDocument();
+		const placeholder = screen.getByText("Model unavailable");
+		expect(placeholder.closest("button")).toBeDisabled();
+		expect(screen.getByText("EFFORT")).toBeInTheDocument();
+	});
+
+	test("never renders extras", () => {
+		const withExtra: ConfigOptionView[] = [
+			...standard,
+			{
+				id: "custom",
+				name: "Custom",
+				currentValue: "x",
+				category: "custom",
+				options: [{ value: "x", name: "X" }],
+			},
+		];
+		render(selectors(withExtra, false, vi.fn()));
+		expect(screen.getByText("MODEL")).toBeInTheDocument();
+		expect(screen.getByText("EFFORT")).toBeInTheDocument();
+		expect(screen.queryByLabelText("Custom")).not.toBeInTheDocument();
+		expect(screen.queryByText("X")).not.toBeInTheDocument();
+	});
+
 	test("sorts models alphabetically while keeping effort order", async () => {
 		const user = userEvent.setup();
 		const unsorted: ConfigOptionView[] = [
