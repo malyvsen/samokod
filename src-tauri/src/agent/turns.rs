@@ -7,7 +7,7 @@ use tauri::AppHandle;
 use crate::acp::{self, Agent, ConnectionTo};
 use crate::error_hint::{classify_error, is_transport_error};
 use crate::plans;
-use crate::spend::context_pct;
+use crate::spend::{context_pct, kept_cost};
 use crate::todos::{diff_todos, todos_from_tool};
 use crate::types::{AgentError, AppEvent, SessionKey, SessionRole, TodoView};
 
@@ -312,16 +312,6 @@ fn fail_turn(
     push_sorted(state, app, window);
 }
 
-/// Resolve spend for one `usage_update`: the live and emitted cost plus
-/// the cost to persist, if any. A missing cost means "no info", never
-/// "zero", so the kept total survives cost-less ticks. Pure.
-fn resolve_usage_cost(kept: f64, incoming: Option<f64>) -> (f64, Option<f64>) {
-    match incoming {
-        Some(cost) => (cost, Some(cost)),
-        None => (kept, None),
-    }
-}
-
 pub(crate) fn handle_notification(
     state: &Mutex<BackendState>,
     app: &AppHandle,
@@ -459,9 +449,8 @@ pub(crate) fn handle_notification(
             );
         }
         acp::SessionUpdate::UsageUpdate(update) => {
-            // Upstream contract: since anomalyco/opencode#66631 the parent
-            // cost is the session-family total; a missing field means "no
-            // info", never "zero", so a cost-less tick keeps the last total.
+            // A missing cost means "no info", never zero: keep the last
+            // total for live state, ticks, and storage.
             let incoming = update.cost.as_ref().map(|cost| cost.amount);
             let ctx_pct = context_pct(update.used, update.size);
             // Snapshot the repo root under the lock, then persist after it
@@ -470,17 +459,14 @@ pub(crate) fn handle_notification(
                 let win = backend.windows.get_mut(window)?;
                 let root = win.repo_root.clone();
                 let kept = win.sessions.get(key).map(|live| live.cost).unwrap_or(0.0);
-                let (cost, persist) = resolve_usage_cost(kept, incoming);
+                let cost = kept_cost(kept, incoming);
                 if let Some(live) = win.sessions.get_mut(key) {
                     live.cost = cost;
                     live.ctx_pct = ctx_pct;
                 }
-                Some((root, cost, persist))
+                Some((root, cost))
             });
-            let (repo_root, cost, persist) = match outcome {
-                Some((root, cost, persist)) => (root, cost, persist),
-                None => (None, incoming.unwrap_or(0.0), incoming),
-            };
+            let (repo_root, cost) = outcome.unwrap_or((None, incoming.unwrap_or(0.0)));
             emit_event(
                 app,
                 window,
@@ -491,7 +477,7 @@ pub(crate) fn handle_notification(
                 },
             );
             push_sorted(state, app, window);
-            if let (Some(repo_root), Some(cost)) = (repo_root, persist) {
+            if let (Some(repo_root), Some(cost)) = (repo_root, incoming) {
                 super::session_ids::record_cost(&repo_root, key, cost);
             }
         }
@@ -970,55 +956,5 @@ mod tests {
             .modified()
             .expect("mtime");
         assert_eq!(before, after);
-    }
-
-    #[test]
-    fn cost_less_tick_keeps_known_cost_without_rewrite() {
-        use crate::types::SessionRole;
-
-        let kept = 1.24;
-        let (cost, persist) = super::resolve_usage_cost(kept, None);
-        assert_eq!(cost, kept);
-        assert_eq!(persist, None);
-        assert_eq!(crate::spend::context_pct(100, 200), 50.0);
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
-        plans::ensure_structure(root).expect("ensure");
-        let name = "2026-09-26.08-41-03";
-        let scoping = plans::PlanRef {
-            name: name.to_string(),
-            phase: plans::Phase::Scoping,
-        };
-        std::fs::create_dir_all(scoping.path(root)).expect("mkdir");
-        let key = crate::types::SessionKey {
-            plan: name.to_string(),
-            role: SessionRole::Scoping,
-        };
-        super::super::session_ids::record_cost(root, &key, kept);
-        let path = scoping.path(root).join(plans::STATE_FILE);
-        let before = std::fs::metadata(&path)
-            .expect("metadata")
-            .modified()
-            .expect("mtime");
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        // The handler skips `record_cost` when the tick carries no cost,
-        // so the stored total survives untouched.
-        if let Some(cost) = persist {
-            super::super::session_ids::record_cost(root, &key, cost);
-        }
-        let after = std::fs::metadata(&path)
-            .expect("metadata")
-            .modified()
-            .expect("mtime");
-        assert_eq!(before, after);
-        assert_eq!(
-            plans::load_state(&scoping.path(root)).cost(SessionRole::Scoping),
-            kept
-        );
-
-        let (cost, persist) = super::resolve_usage_cost(kept, Some(2.5));
-        assert_eq!(cost, 2.5);
-        assert_eq!(persist, Some(2.5));
     }
 }
