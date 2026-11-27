@@ -738,6 +738,62 @@ mod tests {
     }
 
     #[test]
+    fn scoping_system_enforces_commit_per_step() {
+        let system = scoping_system(".samokod/plans/scoping/ts");
+        assert!(system.contains("scoping agent"));
+        assert!(system.contains("starts with the word Commit"));
+        assert!(system.contains("(non-commit step)"));
+        assert!(system.contains("never be broken"));
+    }
+
+    #[test]
+    fn scoping_system_resolves_unknowns_without_manual_steps() {
+        let system = scoping_system(".samokod/plans/scoping/ts");
+        assert!(system.contains("Run every experiment"));
+        assert!(system.contains("no spikes"));
+        assert!(system.contains("what must hold"));
+        assert!(system.contains("visually confirm"));
+        assert!(system.contains("automated proxy"));
+    }
+
+    #[test]
+    fn executing_system_commits_per_step_with_clean_tree() {
+        let system = executing_system(".samokod/plans/executing/ts.slug");
+        assert!(system.contains("executing agent"));
+        assert!(system.contains("commit immediately"));
+        assert!(system.contains("Never batch"));
+        assert!(system.contains("git status --short"));
+        assert!(system.contains("must come back clean"));
+        assert!(system.contains("no commit stays red"));
+    }
+
+    #[test]
+    fn all_systems_leave_no_placeholders() {
+        let dir = ".samokod/plans/scoping/ts";
+        let systems = [
+            scoping_system(dir),
+            executing_system(dir),
+            rebasing_system(
+                "samokod/ts",
+                "main",
+                "/repo/worktree",
+                "/repo/.samokod/plans/rebasing/ts/plan.md",
+            ),
+            evergreening_system(
+                "/repo/worktree",
+                "samokod/ts",
+                "/repo/.samokod/plans/evergreening/ts/plan.md",
+                "main",
+                "abc feat: x",
+            ),
+        ];
+        for system in &systems {
+            assert!(!system.contains("{{"));
+            assert!(!system.contains("}}"));
+        }
+    }
+
+    #[test]
     fn plan_display_names_phase_dir() {
         let scoping = PlanRef {
             name: "ts".to_string(),

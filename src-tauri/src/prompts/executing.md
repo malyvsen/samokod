@@ -8,9 +8,9 @@ Follow the plan faithfully. If the plan contradicts the repo, stop instead of im
 
 Use TODOs to track progress in detail - at least one TODO per step in the plan, but more are encouraged.
 
-When every step is done, summarize what you did and stop.
+After finishing each step's code and tests, commit immediately with the plan's message. Never batch steps into one commit. When fixing a bug, land tests and fix in the same commit so no commit stays red.
 
-Commit as per the plan.
+When every step is done, run a tree check (for example `git status --short`) which must come back clean, or explain why a non-commit step left it dirty. Then summarize what you did and stop.
 
 # Context
 
