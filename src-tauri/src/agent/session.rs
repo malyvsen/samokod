@@ -950,7 +950,7 @@ impl AgentManager {
                             Ok(())
                         }
                     },
-                    agent_client_protocol::on_receive_notification!(),
+                    acp::on_receive_notification!(),
                 )
                 .on_receive_request(
                     move |request: acp::RequestPermissionRequest, responder, _cx| {
@@ -980,7 +980,7 @@ impl AgentManager {
                             Ok(())
                         }
                     },
-                    agent_client_protocol::on_receive_request!(),
+                    acp::on_receive_request!(),
                 )
                 .connect_with(agent, |connection: ConnectionTo<Agent>| {
                     let slot = Arc::clone(&slot);

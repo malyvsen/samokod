@@ -1,5 +1,7 @@
-// OpenCode-specific edge driver: agent definitions injected at spawn plus
-// role instructions via an `instructions` file. `acp.rs` stays protocol-only.
+// OpenCode-specific edge: agent definitions injected at spawn, the
+// permissions shape per role, and role instructions via an
+// `instructions` file. Pure JSON plus file writes, no ACP wire types:
+// protocol types and request builders live in `acp.rs`, never here.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -397,6 +399,47 @@ mod tests {
     fn todos_are_enabled() {
         let config = config(&test_plan());
         assert_eq!(config["experimental"]["todo"], true);
+    }
+
+    #[test]
+    fn boundary_stays_opencode_only() {
+        let source = include_str!("opencode.rs");
+        // Needles built without literals so this test's own source
+        // doesn't trip the check.
+        let forbidden = ["crate", "acp"].join("::");
+        assert!(
+            !source.contains(&forbidden),
+            "opencode.rs must never import the ACP wire boundary"
+        );
+        let wire = ["agent_client", "protocol"].join("_");
+        assert!(
+            !source.contains(&wire),
+            "OpenCode config stays protocol-agnostic JSON"
+        );
+    }
+
+    #[test]
+    fn config_boundary_holds_todo_order_and_absolute_instructions() {
+        let plan = test_plan();
+        let abs = std::env::temp_dir().join("samokod-boundary-instructions.md");
+        let raw = agent_config(&plan, &abs);
+        let parsed: Value = serde_json::from_str(&raw).expect("config stays valid JSON");
+        assert_eq!(
+            parsed["experimental"]["todo"], true,
+            "todowrite stays enabled"
+        );
+        let permissions = parsed["agents"][SCOPING_AGENT]["permissions"]
+            .as_array()
+            .expect("permissions stay an ordered array");
+        assert!(permissions.len() >= 2, "permission order is the contract");
+        let instructions = parsed["instructions"][0]
+            .as_str()
+            .expect("instructions carry one path");
+        assert_eq!(instructions, abs.to_string_lossy().to_string());
+        assert!(
+            std::path::Path::new(instructions).is_absolute(),
+            "OpenCode resolves relative instructions against the workspace"
+        );
     }
 
     #[test]

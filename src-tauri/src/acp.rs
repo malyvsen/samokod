@@ -1,5 +1,9 @@
-// ACP wire boundary. SDK schema types enter the app through this module;
-// nothing past it imports `agent-client-protocol` directly.
+// ACP wire boundary: wire types plus request builders plus the
+// `opencode acp` process lookup used to open the transport. Only this
+// module imports `agent-client-protocol`; the rest of the app goes
+// through `crate::acp`. OpenCode specifics (agent definitions,
+// permissions shape, instructions text) live in `opencode.rs`, never
+// here.
 use agent_client_protocol::schema::ProtocolVersion;
 pub use agent_client_protocol::v1::ConnectionTo;
 pub use agent_client_protocol::v1::Responder;
@@ -18,7 +22,6 @@ pub use agent_client_protocol::v1::schema::{
     ContentChunk, SessionConfigSelectOption, ToolCallUpdateFields, UsageUpdate,
 };
 pub use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
-#[cfg(test)]
 pub use agent_client_protocol::{on_receive_notification, on_receive_request};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -269,6 +272,54 @@ mod tests {
             Default::default(),
             "filesystem capabilities must stay empty so tools run server-side"
         );
+    }
+
+    #[test]
+    fn boundary_stays_protocol_only() {
+        let source = include_str!("acp.rs");
+        // Needles built without literals so this test's own source
+        // doesn't trip the check.
+        let forbidden = ["crate", "opencode"].join("::");
+        assert!(
+            !source.contains(&forbidden),
+            "acp.rs must never import the OpenCode edge"
+        );
+        let config_call = ["opencode", "agent_config"].join("::");
+        let env_call = ["opencode", "session_env"].join("::");
+        assert!(
+            !source.contains(&config_call) && !source.contains(&env_call),
+            "agent config stays in opencode.rs"
+        );
+    }
+
+    #[test]
+    fn new_session_carries_cwd_without_mcp() {
+        let cwd = std::path::Path::new("/repo");
+        let request = build_new_session_request(cwd);
+        assert_eq!(request.cwd, cwd);
+        assert!(request.mcp_servers.is_empty());
+    }
+
+    #[test]
+    fn load_session_carries_id_and_cwd() {
+        let cwd = std::path::Path::new("/repo");
+        let request = build_load_session_request("ses_1", cwd);
+        assert_eq!(request.session_id.to_string(), "ses_1");
+        assert_eq!(request.cwd, cwd);
+    }
+
+    #[test]
+    fn cancel_carries_session_id() {
+        let notification = build_cancel_notification(SessionId::new("ses_1"));
+        assert_eq!(notification.session_id.to_string(), "ses_1");
+    }
+
+    #[test]
+    fn set_config_carries_ids() {
+        let session = SessionId::new("ses_1");
+        let request = build_set_config_request(&session, "mode", "samokod-scoping");
+        assert_eq!(request.session_id.to_string(), "ses_1");
+        assert_eq!(request.config_id.to_string(), "mode");
     }
 
     #[test]
