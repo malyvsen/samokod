@@ -88,10 +88,7 @@ import type { AgentStatus, TranscriptItem } from "./types";
 import { isWorkRole, sameSession, sessionKeyOf } from "./types";
 import "./App.css";
 
-type View = { kind: "picker" } | { kind: "chat" };
-
 export function App() {
-	const [view, setView] = useState<View>({ kind: "picker" });
 	const [repoRoot, setRepoRoot] = useState<string | null>(null);
 	const [branch, setBranch] = useState("HEAD");
 	const [recent, setRecent] = useState<RecentRepo[]>([]);
@@ -284,7 +281,7 @@ export function App() {
 	// Picker marks come from the initial list plus the global
 	// `open_repos_changed` handler above.
 	useEffect(() => {
-		if (view.kind !== "picker") return;
+		if (repoRoot !== null) return;
 		let cancelled = false;
 		listOpenRepos()
 			.then((repos) => {
@@ -297,10 +294,10 @@ export function App() {
 		return () => {
 			cancelled = true;
 		};
-	}, [view.kind]);
+	}, [repoRoot]);
 
 	useEffect(() => {
-		if (view.kind !== "chat") return;
+		if (repoRoot === null) return;
 		function onFocus() {
 			refreshBranch()
 				.then((fetched) => {
@@ -314,7 +311,7 @@ export function App() {
 		return () => {
 			window.removeEventListener("focus", onFocus);
 		};
-	}, [view.kind]);
+	}, [repoRoot]);
 
 	const transcript = chat?.transcript ?? [];
 	const { scrollRef, onScroll } = usePinnedTranscript(selectedId, transcript);
@@ -416,7 +413,6 @@ export function App() {
 				setBranch(opened.branch);
 				applyChats(() => ({}));
 				applyPlans(opened);
-				setView({ kind: "chat" });
 				setPickerError(null);
 				setRecent((await getPrefs()).recent ?? []);
 			} catch (error) {
@@ -654,7 +650,7 @@ export function App() {
 	}
 
 	async function handleNewPlan() {
-		if (view.kind === "picker") return;
+		if (repoRoot === null) return;
 		const current = selectedRef.current;
 		const currentDraft =
 			current === null ? null : (draft.draftFor(current) ?? null);
@@ -793,7 +789,7 @@ export function App() {
 			</div>
 			<div className="aurora b" />
 			<div className="grain" />
-			{view.kind === "picker" ? (
+			{repoRoot === null ? (
 				<RepoPicker
 					title="SAMOKOD"
 					subtitle="open a git repository to start planning"

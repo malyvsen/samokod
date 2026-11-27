@@ -128,14 +128,6 @@ export function takePendingRepo(): Promise<string | null> {
 	return commands.takePendingRepo();
 }
 
-export async function focusWindow(label: string): Promise<void> {
-	await unwrap(commands.focusWindow(label));
-}
-
-export function newWindow(): Promise<string> {
-	return unwrap(commands.newWindow());
-}
-
 // True for the owned-repos broadcast (`emit` in the backend), which
 // reaches every window. Everything else is window-targeted (`emit_to`)
 // and arrives only on the owning WebviewWindow.

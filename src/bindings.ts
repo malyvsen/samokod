@@ -23,8 +23,6 @@ export const commands = {
 	saveAttachment: (session: SessionKey, dataBase64: string) => typedError<string, string>(__TAURI_INVOKE("save_attachment", { session, dataBase64 })),
 	warmSession: (session: SessionKey) => typedError<null, string>(__TAURI_INVOKE("warm_session", { session })),
 	loadHistory: (session: SessionKey) => typedError<null, string>(__TAURI_INVOKE("load_history", { session })),
-	newWindow: () => typedError<string, string>(__TAURI_INVOKE("new_window")),
-	focusWindow: (label: string) => typedError<null, string>(__TAURI_INVOKE("focus_window", { label })),
 	listOpenRepos: () => __TAURI_INVOKE<OpenRepoEntry[]>("list_open_repos"),
 	takePendingRepo: () => __TAURI_INVOKE<string | null>("take_pending_repo"),
 };

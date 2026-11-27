@@ -34,8 +34,6 @@ export const api = {
 	onToggleSettings: vi.fn(() => () => {}),
 	onNewPlan: vi.fn(() => () => {}),
 	listOpenRepos: vi.fn(async () => [] as OpenRepoEntry[]),
-	focusWindow: vi.fn(async () => {}),
-	newWindow: vi.fn(async () => "window-1"),
 	takePendingRepo: vi.fn(async () => null as string | null),
 };
 

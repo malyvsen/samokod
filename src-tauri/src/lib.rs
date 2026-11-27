@@ -37,9 +37,7 @@ use crate::menu::{
 use crate::prefs::{load_prefs, record_open, save_prefs};
 use crate::repo::{RepoInfo, validate_repo};
 use crate::types::{AppEvent, ConfigOptionView, OpenRepoResult, PlansUpdate, Prefs, SessionKey};
-use crate::windows::{
-    create_window, focus_window as focus_window_by_label, open_picker_window, window_label,
-};
+use crate::windows::{create_window, open_picker_window, window_label};
 
 fn specta_builder() -> Builder<tauri::Wry> {
     Builder::new()
@@ -65,8 +63,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
             save_attachment,
             warm_session,
             load_history,
-            new_window,
-            focus_window,
             list_open_repos,
             take_pending_repo
         ])
@@ -355,18 +351,6 @@ async fn load_history(
         .load_history(&window_label(&window), session)
         .await
         .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-#[specta::specta]
-async fn new_window(app: AppHandle) -> Result<String, String> {
-    create_window(&app)
-}
-
-#[tauri::command]
-#[specta::specta]
-fn focus_window(app: AppHandle, label: String) -> Result<(), String> {
-    focus_window_by_label(&app, &label)
 }
 
 #[tauri::command]
