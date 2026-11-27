@@ -1217,11 +1217,12 @@ pub(crate) fn check_current(
 /// Every emission logs its window label plus session key or selection so
 /// the log file alone proves which window each event targeted.
 fn emit_event(app: &AppHandle, window: &str, event: AppEvent) {
+    let level = event.log_level();
     let summary = event.log_summary();
     if let Err(error) = app.emit_to(window, "samokod://event", event) {
         log::warn!("failed to emit window={window} {summary}: {error}");
     } else {
-        log::info!("emit window={window} {summary}");
+        log::log!(level, "emit window={window} {summary}");
     }
 }
 

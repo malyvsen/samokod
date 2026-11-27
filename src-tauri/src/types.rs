@@ -401,6 +401,19 @@ pub struct OpenRepoEntry {
 }
 
 impl AppEvent {
+    /// Log level for the emit line: turn lifecycle stays at `info` so the
+    /// log file greps for queue recipes, high-volume per-chunk progress
+    /// drops to `debug`. Pure.
+    pub fn log_level(&self) -> log::Level {
+        match self {
+            AppEvent::AgentText { .. }
+            | AppEvent::AgentThought { .. }
+            | AppEvent::ToolLine { .. }
+            | AppEvent::SpendTick { .. } => log::Level::Debug,
+            _ => log::Level::Info,
+        }
+    }
+
     /// One-line log summary: wire name plus session key or selection.
     /// Pure, so the log shape is unit-tested without emitting.
     pub fn log_summary(&self) -> String {
@@ -566,6 +579,77 @@ mod tests {
             .log_summary(),
             "plans_changed selected=2026-10-21.10-03-18::Scoping"
         );
+    }
+
+    #[test]
+    fn per_chunk_events_log_at_debug_and_lifecycle_at_info() {
+        let key = SessionKey {
+            plan: "2026-10-21.10-03-18".to_string(),
+            role: SessionRole::Scoping,
+        };
+        let line = ToolLineView {
+            id: "call_1".to_string(),
+            text: "read: foo".to_string(),
+            status: ToolStatus::Completed,
+            label: "read".to_string(),
+        };
+        for event in [
+            AppEvent::AgentText {
+                session: key.clone(),
+                chunk: "hi".to_string(),
+            },
+            AppEvent::AgentThought {
+                session: key.clone(),
+                chunk: "hmm".to_string(),
+            },
+            AppEvent::ToolLine {
+                session: key.clone(),
+                line,
+            },
+            AppEvent::SpendTick {
+                session: key.clone(),
+                cost: 1.0,
+                ctx_pct: 2.0,
+            },
+        ] {
+            assert_eq!(event.log_level(), log::Level::Debug);
+        }
+        for event in [
+            AppEvent::TurnDone {
+                session: key.clone(),
+            },
+            AppEvent::TurnFailed {
+                session: key.clone(),
+                raw: "boom".to_string(),
+                hint: "retry".to_string(),
+                retryable: true,
+            },
+            AppEvent::HistoryDone {
+                session: key.clone(),
+            },
+            AppEvent::HistoryFailed {
+                session: key.clone(),
+                raw: "gone".to_string(),
+                hint: "retry".to_string(),
+                retryable: true,
+            },
+            AppEvent::PermissionAsked {
+                session: key.clone(),
+                permission: PermissionView {
+                    tool_call_id: "call_1".to_string(),
+                    title: "Run".to_string(),
+                    tool: "bash".to_string(),
+                    options: Vec::new(),
+                    rule_hint: "once".to_string(),
+                },
+            },
+            AppEvent::PlansChanged {
+                plans: Vec::new(),
+                selected: key.clone(),
+            },
+        ] {
+            assert_eq!(event.log_level(), log::Level::Info);
+        }
     }
 
     #[test]
