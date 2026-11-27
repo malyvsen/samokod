@@ -287,12 +287,17 @@ describe("plans panel", () => {
 			).toBeNull();
 		});
 
-		test("evergreening and rebasing menus skip the evergreen row", async () => {
+		test("evergreening skips the evergreen row while rebasing keeps it", async () => {
 			const user = userEvent.setup();
-			for (const plan of [evergreeningPlan(), rebasingPlan()]) {
+			const evergreening = evergreeningPlan();
+			const rebasing = rebasingPlan();
+			for (const [plan, role, showsEvergreen] of [
+				[evergreening, "evergreening", false],
+				[rebasing, "rebasing", true],
+			] as const) {
 				const props = panelProps([plan], {
 					plan: plan.name,
-					role: plan.phase === "rebasing" ? "rebasing" : "evergreening",
+					role,
 				});
 				const { unmount } = render(<PlansPanel {...props} />);
 				await openMenu(user, "Shiny");
@@ -302,16 +307,45 @@ describe("plans panel", () => {
 						name: "Auto-advance",
 					}),
 				).toBeInTheDocument();
-				expect(
-					within(menu).queryByRole("menuitemcheckbox", {
-						name: "Evergreen",
-					}),
-				).toBeNull();
+				if (showsEvergreen) {
+					expect(
+						within(menu).getByRole("menuitemcheckbox", {
+							name: "Evergreen",
+						}),
+					).toBeInTheDocument();
+				} else {
+					expect(
+						within(menu).queryByRole("menuitemcheckbox", {
+							name: "Evergreen",
+						}),
+					).toBeNull();
+				}
 				expect(
 					within(menu).getByRole("menuitem", { name: "Cancel" }),
 				).toBeInTheDocument();
 				unmount();
 			}
+		});
+
+		test("queued menus keep the evergreen row", async () => {
+			const user = userEvent.setup();
+			const plan = testEntryWith("queued-1", "queued", "Queued", true, [
+				testStatus("scoping"),
+				testStatus("executing"),
+			]);
+			const props = panelProps([plan], {
+				plan: plan.name,
+				role: "executing",
+			});
+			render(<PlansPanel {...props} />);
+			await openMenu(user, "Queued");
+			const menu = menuOf("Queued");
+			expect(
+				within(menu).getByRole("menuitemcheckbox", { name: "Evergreen" }),
+			).toBeInTheDocument();
+			expect(
+				within(menu).getByRole("menuitem", { name: "Cancel" }),
+			).toBeInTheDocument();
 		});
 
 		test("execute stays disabled without plan.md", async () => {
@@ -1088,18 +1122,22 @@ describe("plans panel", () => {
 			expect(within(menu).queryByRole("menuitemcheckbox")).toBeNull();
 		});
 
-		test("completed plans render no menu when costs are unknown", () => {
+		test("completed plans keep the menu with no cost recorded", async () => {
 			const plan = testEntryWith("done", "completed", "Done", true, [
 				testStatus("scoping", { spend: { cost: null, ctx_pct: null } }),
 				testStatus("executing", { spend: { cost: null, ctx_pct: null } }),
 			]);
+			const user = userEvent.setup();
 			render(
 				<PlansPanel
 					{...panelProps([plan], { plan: plan.name, role: "executing" })}
 				/>,
 			);
+			await openMenu(user, "Done");
+			const menu = menuOf("Done");
+			expect(within(menu).getByText("No cost recorded")).toBeInTheDocument();
 			expect(
-				screen.queryByRole("button", { name: "Plan options for Done" }),
+				within(menu).queryByRole("menuitem", { name: "Cancel" }),
 			).toBeNull();
 		});
 

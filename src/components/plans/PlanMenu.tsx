@@ -26,9 +26,6 @@ export function PlanMenu({
 	const everOn = plan.evergreen;
 	const total = planTotalCost(plan);
 	const finished = plan.phase === "completed" || plan.phase === "cancelled";
-	if (finished && total === null) {
-		return null;
-	}
 	const breakdown =
 		total === null ? null : <CostBreakdown plan={plan} total={total} />;
 
@@ -96,7 +93,9 @@ export function PlanMenu({
 								</span>
 								Auto-advance
 							</button>
-							{plan.phase === "executing" ? (
+							{plan.phase === "executing" ||
+							plan.phase === "queued" ||
+							plan.phase === "rebasing" ? (
 								<EvergreenOption
 									on={everOn}
 									onToggle={() => onSetEvergreen(plan.name, !everOn)}
@@ -111,7 +110,13 @@ export function PlanMenu({
 							)}
 						</>
 					) : null}
-					{finished ? breakdown : null}
+					{finished
+						? (breakdown ?? (
+								<div className="dopt static">
+									<span>No cost recorded</span>
+								</div>
+							))
+						: null}
 					{finished ? null : (
 						<button
 							className="dopt danger"
