@@ -3,6 +3,7 @@ import { assertNever } from "../assert";
 import type {
 	PermissionOptionView,
 	PermissionView,
+	Phase,
 	SessionKey,
 	ToolLineView,
 	ToolStatus,
@@ -37,6 +38,7 @@ export function Transcript({
 	onStop = null,
 	children,
 	session,
+	phase = null,
 }: {
 	items: TranscriptItem[];
 	start: SessionStart | null;
@@ -48,6 +50,7 @@ export function Transcript({
 	onStop?: (() => void) | null;
 	children?: ReactNode;
 	session: SessionKey | null;
+	phase?: Phase | null;
 }) {
 	const now = useNow(turn !== null);
 	const displayItems = withPendingThought(items, turn, now);
@@ -86,6 +89,7 @@ export function Transcript({
 							onAnswer={boundAnswer}
 							live={index === liveIndex ? timing : null}
 							onStop={onStop}
+							phase={phase}
 						/>
 					) : (
 						<ItemRow
@@ -93,6 +97,7 @@ export function Transcript({
 							item={group.item}
 							onRetry={onRetry}
 							onAnswer={boundAnswer}
+							phase={phase}
 						/>
 					),
 				)}
@@ -171,12 +176,14 @@ function WorkBox({
 	onAnswer,
 	live = null,
 	onStop = null,
+	phase,
 }: {
 	items: [RunItem, ...RunItem[]];
 	onRetry: (() => void) | null;
 	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
 	live?: LiveTiming | null;
 	onStop?: (() => void) | null;
+	phase: Phase | null;
 }) {
 	const isLive = live !== null;
 	const hasUnresolvedApproval = items.some(
@@ -244,6 +251,7 @@ function WorkBox({
 						item={item}
 						onRetry={onRetry}
 						onAnswer={onAnswer}
+						phase={phase}
 					/>
 				))}
 			</div>
@@ -336,15 +344,19 @@ function RunRow({
 	item,
 	onRetry,
 	onAnswer,
+	phase,
 }: {
 	item: RunItem;
 	onRetry: (() => void) | null;
 	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
+	phase: Phase | null;
 }) {
 	if (item.kind === "thought") {
 		return <ThoughtRow ms={item.ms} text={item.text} at={item.at} />;
 	}
-	return <ItemRow item={item} onRetry={onRetry} onAnswer={onAnswer} />;
+	return (
+		<ItemRow item={item} onRetry={onRetry} onAnswer={onAnswer} phase={phase} />
+	);
 }
 
 function formatClock(at: number): string {
@@ -385,10 +397,12 @@ function ItemRow({
 	item,
 	onRetry,
 	onAnswer,
+	phase,
 }: {
 	item: Exclude<TranscriptItem, { kind: "thought" }>;
 	onRetry: (() => void) | null;
 	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
+	phase: Phase | null;
 }) {
 	switch (item.kind) {
 		case "user":
@@ -436,6 +450,9 @@ function ItemRow({
 			const reject = permission.options.find(
 				(option: PermissionOptionView) => option.kind === "reject",
 			);
+			const readOnly = phase === "completed" || phase === "cancelled";
+			const readOnlyTitle =
+				readOnly && phase !== null ? `Plan is ${phase}` : undefined;
 			return (
 				<div className="drow appr">
 					{item.at !== undefined && (
@@ -447,7 +464,8 @@ function ItemRow({
 							<button
 								className="tbtn primary"
 								type="button"
-								disabled={item.resolved || onAnswer === null}
+								disabled={item.resolved || readOnly || onAnswer === null}
+								title={readOnlyTitle}
 								onClick={() => onAnswer?.(permission.tool_call_id, allow.id)}
 							>
 								allow once
@@ -457,7 +475,8 @@ function ItemRow({
 							<button
 								className="tbtn danger"
 								type="button"
-								disabled={item.resolved || onAnswer === null}
+								disabled={item.resolved || readOnly || onAnswer === null}
+								title={readOnlyTitle}
 								onClick={() => onAnswer?.(permission.tool_call_id, reject.id)}
 							>
 								reject

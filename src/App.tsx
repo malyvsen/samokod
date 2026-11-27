@@ -847,6 +847,7 @@ export function App() {
 								turn={liveTurnOf(chat)}
 								onStop={readOnly ? null : handleStop}
 								session={selectedKey}
+								phase={entry?.phase ?? null}
 								onHistoryRetry={
 									chat?.start.kind === "failed" && chat.start.error.retryable
 										? handleHistoryRetry
@@ -883,7 +884,7 @@ export function App() {
 								)}
 								{readOnly && (
 									<div className="ro-note">
-										This session is read-only - the plan is finished.
+										This session is read-only - Plan is {entry?.phase}.
 									</div>
 								)}
 							</Transcript>
