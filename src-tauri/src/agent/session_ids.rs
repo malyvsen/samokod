@@ -362,6 +362,18 @@ mod tests {
     }
 
     #[test]
+    fn missing_dir_holds_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::plans::ensure_structure(dir.path()).expect("ensure");
+        hold_manual(dir.path(), "2026-09-30.10-00-00");
+        let plan = PlanRef {
+            name: "2026-09-30.10-00-00".to_string(),
+            phase: Phase::Executing,
+        };
+        assert!(!plan.path(dir.path()).join(plans::STATE_FILE).is_file());
+    }
+
+    #[test]
     fn hold_manual_is_idempotent() {
         let dir = tempfile::tempdir().expect("tempdir");
         crate::plans::ensure_structure(dir.path()).expect("ensure");

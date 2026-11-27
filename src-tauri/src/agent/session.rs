@@ -12,9 +12,7 @@ use crate::plans;
 use crate::types::{AgentError, AppEvent, SessionKey, SessionRole};
 
 use super::AgentManager;
-use super::config::{
-    config_views, log_roles, option_id_for_role, pin_agent_mode, send_config_option,
-};
+use super::config::{config_views, pin_agent_mode, reapply_defaults};
 use super::permissions::handle_permission_request;
 use super::plans_list::push_sorted;
 use super::start::{
@@ -305,9 +303,8 @@ impl AgentManager {
 
     /// Spawn a fresh agent process scoped to one plan and open a session on
     /// it with role instructions via the `instructions` file: pin the agent
-    /// mode, reapply the effective default model then effort (effort-last,
-    /// since a model switch can reshape effort options). Shared by lazy
-    /// first prompts and the eager executing start.
+    /// mode, then reapply defaults via `config::reapply_defaults`. Shared
+    /// by lazy first prompts and the eager executing start.
     pub(crate) async fn spawn_session(
         &self,
         window: &str,
@@ -333,35 +330,15 @@ impl AgentManager {
                 raw: error.to_string(),
             })?;
         let session_id = response.session_id.to_string();
-        let mut options =
+        let options =
             pin_agent_mode(&connection, &acp::SessionId::new(session_id.clone()), agent).await?;
-        // Reapply model first, then effort; each absent or inapplicable role
-        // is skipped with a warn-log while the open continues on defaults.
-        // Per-repo choices win, otherwise the global defaults apply.
-        let mut applied = crate::repo_state::RepoState::default();
-        for role in crate::repo_state::ConfigRole::ALL {
-            let Some(wanted) = role.get_default(&effective).cloned() else {
-                continue;
-            };
-            let Some(id) = option_id_for_role(&options, role) else {
-                log::warn!("default {} has no matching option, skipping", role.name());
-                continue;
-            };
-            let session = acp::SessionId::new(session_id.clone());
-            match send_config_option(&connection, &session, &id, &wanted).await {
-                Ok(updated) => {
-                    options = updated;
-                    role.set(&mut applied, Some(wanted));
-                }
-                Err(error) => {
-                    log::warn!(
-                        "failed to reapply default {} {wanted}: {error}",
-                        role.name()
-                    )
-                }
-            }
-        }
-        log_roles("applied", &applied);
+        let (options, applied) = reapply_defaults(
+            &connection,
+            &acp::SessionId::new(session_id.clone()),
+            options,
+            &effective,
+        )
+        .await;
         {
             let mut backend = lock_backend(&self.state).expect("state poisoned");
             let state = backend.ensure_window(window);

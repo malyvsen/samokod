@@ -116,9 +116,16 @@ pub fn instructions_path(window: &str, key: &SessionKey) -> PathBuf {
     ))
 }
 
-/// Write role instructions for OpenCode's `instructions` source. Best
-/// effort: logs on failure and keeps the session.
-pub fn write_instructions_file(path: &Path, instructions: &str) {
+/// Write role instructions for OpenCode's `instructions` source. The one
+/// write site: `session_env` funnels every spawn and history replay
+/// through here. Unchanged content skips the rewrite so respawns leave
+/// the file alone; best effort otherwise, logging on failure and keeping
+/// the session.
+fn write_instructions_file(path: &Path, instructions: &str) {
+    match std::fs::read_to_string(path) {
+        Ok(existing) if existing == instructions => return,
+        _ => {}
+    }
     if let Err(error) = std::fs::write(path, instructions) {
         log::warn!(
             "failed to write instructions file {}: {error}",
@@ -127,7 +134,9 @@ pub fn write_instructions_file(path: &Path, instructions: &str) {
     }
 }
 
-/// Best-effort cleanup for one session's instructions file.
+/// Best-effort cleanup for one session's instructions file. The one
+/// remove site: `drop_live` and `remove_window` funnel every teardown
+/// through here. A missing file stays quiet; other failures warn.
 pub fn remove_instructions_file(window: &str, key: &SessionKey) {
     let path = instructions_path(window, key);
     if let Err(error) = std::fs::remove_file(&path)
@@ -915,5 +924,46 @@ mod tests {
         let back = std::fs::read_to_string(&path).expect("read back");
         assert_eq!(back, instructions);
         assert!(!back.contains("{{"));
+    }
+
+    #[test]
+    fn unchanged_write_skips_rewrite() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("role.md");
+        let instructions = scoping_instructions(".samokod/plans/scoping/ts");
+        write_instructions_file(&path, &instructions);
+        let before = std::fs::metadata(&path)
+            .expect("metadata")
+            .modified()
+            .expect("mtime");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        write_instructions_file(&path, &instructions);
+        let after = std::fs::metadata(&path)
+            .expect("metadata")
+            .modified()
+            .expect("mtime");
+        assert_eq!(before, after);
+        let changed = executing_instructions(".samokod/plans/executing/ts.slug");
+        write_instructions_file(&path, &changed);
+        assert_eq!(std::fs::read_to_string(&path).expect("read back"), changed);
+    }
+
+    #[test]
+    fn remove_is_quiet_without_file_and_cleans_with_file() {
+        let key = SessionKey {
+            plan: "2026-09-26.remove-probe".to_string(),
+            role: SessionRole::Rebasing,
+        };
+        // Missing file stays quiet.
+        remove_instructions_file("remove-probe-window", &key);
+        let plan = test_plan();
+        let instructions = scoping_instructions(".samokod/plans/scoping/ts");
+        let _env = session_env("remove-probe-window", &key, &plan, &instructions);
+        let path = instructions_path("remove-probe-window", &key);
+        assert!(path.is_file());
+        remove_instructions_file("remove-probe-window", &key);
+        assert!(!path.exists());
+        // Second remove stays quiet.
+        remove_instructions_file("remove-probe-window", &key);
     }
 }

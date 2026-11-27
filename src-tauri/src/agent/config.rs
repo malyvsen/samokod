@@ -1,10 +1,13 @@
 // Session config: reading and reapplying model/effort options per
-// session, with repo-wide and global defaults.
+// session, with repo-wide and global defaults. All model/effort
+// lifecycle lives here: classifying options, reapplying defaults on
+// spawn, applying global changes, and persisting moved roles.
 use crate::acp::{
     self, Agent, ConnectionTo, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigSelectOptions,
 };
-use crate::types::{AgentError, ConfigOptionValueView, ConfigOptionView, SessionKey};
+use crate::repo_state::{ConfigRole, RepoState};
+use crate::types::{AgentError, ConfigOptionValueView, ConfigOptionView, RepoDefaults, SessionKey};
 
 use super::AgentManager;
 
@@ -65,11 +68,10 @@ impl AgentManager {
                             .get(&key)
                             .map(|live| live.last_roles.clone())
                             .unwrap_or_default();
-                        let moved: Vec<crate::repo_state::ConfigRole> =
-                            crate::repo_state::ConfigRole::ALL
-                                .into_iter()
-                                .filter(|role| role.get(&current) != role.get(&roles))
-                                .collect();
+                        let moved: Vec<ConfigRole> = ConfigRole::ALL
+                            .into_iter()
+                            .filter(|role| role.get(&current) != role.get(&roles))
+                            .collect();
                         if let Some(live) = win.sessions.get_mut(&key) {
                             live.last_roles = roles.clone();
                         }
@@ -90,6 +92,88 @@ impl AgentManager {
         }
         Ok(last)
     }
+
+    /// Effective model/effort defaults for one repo: the per-repo file
+    /// wins, else the last manually selected global values.
+    pub(crate) fn config_defaults(&self, repo_root: &std::path::Path) -> RepoDefaults {
+        let stored = crate::repo_state::load_repo_state(repo_root);
+        crate::repo_state::effective_defaults(&stored, &self.app_prefs())
+    }
+
+    /// Persist moved model/effort roles per-repo and globally. The repo
+    /// write is skipped without a current repo; the global write always
+    /// runs so a new repo inherits the last manual choice. Prefs failures
+    /// only warn, never failing the config change.
+    pub(crate) fn persist_moved_roles(
+        &self,
+        window: &str,
+        moved: &[ConfigRole],
+        roles: &RepoState,
+    ) {
+        if moved.is_empty() {
+            return;
+        }
+        if let Some(repo) = self.current_repo(window) {
+            for role in moved {
+                crate::repo_state::set_role(&repo, *role, role.get(roles).map(String::as_str));
+            }
+        }
+        let Some(dir) = self.prefs_dir() else {
+            return;
+        };
+        let mut prefs = crate::prefs::load_prefs(&dir);
+        for role in moved {
+            crate::prefs::record_global_choice(
+                &mut prefs,
+                *role,
+                role.get(roles).map(String::as_str),
+            );
+        }
+        if let Err(error) = crate::prefs::save_prefs(&dir, &prefs) {
+            log::warn!("failed to save global defaults: {error}");
+        }
+    }
+}
+
+/// Reapply the effective default model then effort on one fresh session
+/// (effort-last, since a model switch can reshape effort options). Each
+/// absent or inapplicable role is skipped with a warn-log while the open
+/// continues on defaults. Returns the refreshed option list and the
+/// applied roles for `last_roles`. Spawn and global change share this
+/// round-trip shape with `send_config_option`; one log shape via
+/// `log_roles`.
+pub(crate) async fn reapply_defaults(
+    connection: &ConnectionTo<Agent>,
+    session_id: &acp::SessionId,
+    options: Vec<ConfigOptionView>,
+    effective: &RepoDefaults,
+) -> (Vec<ConfigOptionView>, RepoState) {
+    // Per-repo choices win, otherwise the global defaults apply.
+    let mut options = options;
+    let mut applied = RepoState::default();
+    for role in ConfigRole::ALL {
+        let Some(wanted) = role.get_default(effective).cloned() else {
+            continue;
+        };
+        let Some(id) = option_id_for_role(&options, role) else {
+            log::warn!("default {} has no matching option, skipping", role.name());
+            continue;
+        };
+        match send_config_option(connection, session_id, &id, &wanted).await {
+            Ok(updated) => {
+                options = updated;
+                role.set(&mut applied, Some(wanted));
+            }
+            Err(error) => {
+                log::warn!(
+                    "failed to reapply default {} {wanted}: {error}",
+                    role.name()
+                )
+            }
+        }
+    }
+    log_roles("applied", &applied);
+    (options, applied)
 }
 
 /// Select one agent by mode id. Fails loud: a scoping session running as
@@ -107,10 +191,7 @@ pub(crate) async fn pin_agent_mode(
 }
 
 /// Agent-advertised option id currently filling a storage role.
-pub(crate) fn option_id_for_role(
-    options: &[ConfigOptionView],
-    role: crate::repo_state::ConfigRole,
-) -> Option<String> {
+pub(crate) fn option_id_for_role(options: &[ConfigOptionView], role: ConfigRole) -> Option<String> {
     options
         .iter()
         .find(|option| crate::repo_state::classify_option(option) == Some(role))
@@ -124,7 +205,7 @@ fn role_label(value: Option<&str>) -> &str {
 
 /// One info-log for both roles after a select or reapply. Pure formatting,
 /// logging edge.
-pub(crate) fn log_roles(action: &str, roles: &crate::repo_state::RepoState) {
+pub(crate) fn log_roles(action: &str, roles: &RepoState) {
     log::info!(
         "{action} model={} effort={}",
         role_label(roles.model.as_deref()),

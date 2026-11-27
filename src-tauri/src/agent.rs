@@ -8,9 +8,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::awake;
 use crate::plans;
-use crate::repo_state::{ConfigRole, RepoState};
 use crate::types::{
-    AgentError, AppEvent, OpenRepoResult, PlansUpdate, Prefs, RepoDefaults, SessionKey, SessionRole,
+    AgentError, AppEvent, OpenRepoResult, PlansUpdate, Prefs, SessionKey, SessionRole,
 };
 
 mod advance;
@@ -427,42 +426,6 @@ impl AgentManager {
         self.prefs_dir()
             .map(|dir| crate::prefs::load_prefs(&dir))
             .unwrap_or_default()
-    }
-
-    /// Effective model/effort defaults for one repo: the per-repo file
-    /// wins, else the last manually selected global values.
-    fn config_defaults(&self, repo_root: &Path) -> RepoDefaults {
-        let stored = crate::repo_state::load_repo_state(repo_root);
-        crate::repo_state::effective_defaults(&stored, &self.app_prefs())
-    }
-
-    /// Persist moved model/effort roles per-repo and globally. The repo
-    /// write is skipped without a current repo; the global write always
-    /// runs so a new repo inherits the last manual choice. Prefs failures
-    /// only warn, never failing the config change.
-    fn persist_moved_roles(&self, window: &str, moved: &[ConfigRole], roles: &RepoState) {
-        if moved.is_empty() {
-            return;
-        }
-        if let Some(repo) = self.current_repo(window) {
-            for role in moved {
-                crate::repo_state::set_role(&repo, *role, role.get(roles).map(String::as_str));
-            }
-        }
-        let Some(dir) = self.prefs_dir() else {
-            return;
-        };
-        let mut prefs = crate::prefs::load_prefs(&dir);
-        for role in moved {
-            crate::prefs::record_global_choice(
-                &mut prefs,
-                *role,
-                role.get(roles).map(String::as_str),
-            );
-        }
-        if let Err(error) = crate::prefs::save_prefs(&dir, &prefs) {
-            log::warn!("failed to save global defaults: {error}");
-        }
     }
 
     /// Per-window read for one-liner snapshots. Short critical section,
@@ -1100,9 +1063,18 @@ impl AgentManager {
         crate::windows::create_pending_window(&self.app, PathBuf::from(&canonical))
     }
 
-    /// Drop one window's state, killing its live sessions. Broadcasts the
-    /// refreshed owned-repos list when the window existed.
+    /// Drop one window's state, killing its live sessions, and remove
+    /// every session's instructions file through the one remove site.
+    /// Broadcasts the refreshed owned-repos list when the window existed.
     pub fn remove_window(&self, window: &str) {
+        let keys: Vec<SessionKey> = lock_backend(&self.state)
+            .and_then(|backend| {
+                backend
+                    .windows
+                    .get(window)
+                    .map(|win| win.sessions.keys().cloned().collect())
+            })
+            .unwrap_or_default();
         let (existed, repos) = match lock_backend(&self.state) {
             Some(mut backend) => {
                 let existed = backend.remove_window(window);
@@ -1111,6 +1083,9 @@ impl AgentManager {
             }
             None => (false, Vec::new()),
         };
+        for key in &keys {
+            crate::opencode::remove_instructions_file(window, key);
+        }
         log::info!("remove_window window={window} existed={existed}");
         if existed {
             emit_open_repos(&self.app, repos);
