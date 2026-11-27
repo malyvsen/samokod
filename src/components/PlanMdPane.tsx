@@ -5,7 +5,10 @@ export function PlanMdPane({ text }: { text: string | null }) {
 		<div className="side planmd-pane">
 			<div className="planmd">
 				{text === null ? (
-					<div className="empty">No plan yet.</div>
+					<div className="empty">
+						No plan yet. Keep scoping - the plan appears here once the agent
+						writes it. Execute unlocks then.
+					</div>
 				) : (
 					<MessageMarkdown text={text} />
 				)}

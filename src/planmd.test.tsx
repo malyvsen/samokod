@@ -42,16 +42,19 @@ beforeEach(() => {
 });
 
 describe("plan md pane", () => {
-	test("empty state is exactly No plan yet", () => {
+	test("empty state explains what produces the plan", () => {
 		render(<PlanMdPane text={null} />);
-		expect(screen.getByText("No plan yet.")).toBeInTheDocument();
+		expect(
+			screen.getByText(/No plan yet\. Keep scoping - /),
+		).toBeInTheDocument();
+		expect(screen.getByText(/Execute unlocks then\./)).toBeInTheDocument();
 	});
 
 	test("populated renders markdown", () => {
 		render(<PlanMdPane text={"# Shiny\n\nSteps."} />);
 		expect(screen.getByText("Shiny")).toBeInTheDocument();
 		expect(screen.getByText("Steps.")).toBeInTheDocument();
-		expect(screen.queryByText("No plan yet.")).not.toBeInTheDocument();
+		expect(screen.queryByText(/No plan yet\./)).not.toBeInTheDocument();
 	});
 
 	test("scoping selects text instead of editing", () => {
@@ -67,7 +70,7 @@ describe("scoping right pane", () => {
 	test("empty scoping shows No plan yet without todos or selectors", async () => {
 		api.planMdText.mockResolvedValue(null);
 		await openChat(api);
-		await screen.findByText("No plan yet.");
+		await screen.findByText(/No plan yet\./);
 		expect(screen.queryByText("TODOS")).not.toBeInTheDocument();
 		expect(screen.queryByText("MODEL")).not.toBeInTheDocument();
 	});
@@ -93,7 +96,7 @@ describe("scoping right pane", () => {
 		});
 		await screen.findByText("TODOS");
 		expect(screen.queryByText("Live plan")).not.toBeInTheDocument();
-		expect(screen.queryByText("No plan yet.")).not.toBeInTheDocument();
+		expect(screen.queryByText(/No plan yet\./)).not.toBeInTheDocument();
 	});
 
 	test("chat and plan share a 50-50 split", () => {

@@ -363,9 +363,14 @@ describe("plans panel", () => {
 				/>,
 			);
 			await openMenu(user, "Bare");
-			expect(
-				within(menuOf("Bare")).getByRole("menuitem", { name: "Execute" }),
-			).toBeDisabled();
+			const execute = within(menuOf("Bare")).getByRole("menuitem", {
+				name: "Execute",
+			});
+			expect(execute).toBeDisabled();
+			expect(execute).toHaveAttribute(
+				"title",
+				"Plan must be written before execution",
+			);
 		});
 
 		test("toggles keep the menu open while actions close it", async () => {

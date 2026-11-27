@@ -79,7 +79,7 @@ describe("pending pickers", () => {
 				role: "scoping",
 			}),
 		);
-		await screen.findByText("No plan yet.");
+		await screen.findByText(/No plan yet\./);
 		expect(screen.queryByText("TODOS")).not.toBeInTheDocument();
 		expect(screen.queryByText("MODEL")).not.toBeInTheDocument();
 		emitToggleSettings(api);

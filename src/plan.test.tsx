@@ -624,7 +624,7 @@ describe("plan", () => {
 		expect(api.selectPlan).toHaveBeenCalledWith(bbb, null);
 		await screen.findByText("bbb chat");
 		expect(screen.queryByText("aaa chat")).not.toBeInTheDocument();
-		expect(screen.getByText("No plan yet.")).toBeInTheDocument();
+		expect(screen.getByText(/No plan yet\./)).toBeInTheDocument();
 		expect(screen.queryByText("TODOS")).not.toBeInTheDocument();
 		await user.click(
 			screen.getByRole("button", { name: "Alpha, scoping, opens Scoping" }),

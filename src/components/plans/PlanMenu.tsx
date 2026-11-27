@@ -61,7 +61,11 @@ export function PlanMenu({
 									setOpen(false);
 									onExecute(target);
 								}}
-								title="Move to executing and start the agent"
+								title={
+									scopingWorking || !plan.has_plan_md
+										? "Plan must be written before execution"
+										: "Move to executing and start the agent"
+								}
 							>
 								Execute
 							</button>
