@@ -46,32 +46,35 @@ pub(crate) async fn wait_until(timeout: Duration, mut predicate: impl FnMut() ->
 /// Snapshot: true while a background warm runs for the key. Short
 /// critical section; closed windows and poisoned locks read as not
 /// warming so waiters stop instead of hanging. Pure read.
-pub(crate) fn is_warming(state: &Arc<Mutex<BackendState>>, window: &str, key: &SessionKey) -> bool {
-    lock_backend(state)
-        .map(|backend| {
-            backend
-                .windows
-                .get(window)
-                .map(|win| win.is_warming(key))
-                .unwrap_or(false)
-        })
-        .unwrap_or(false)
+pub(crate) fn is_warming(state: &Mutex<BackendState>, window: &str, key: &SessionKey) -> bool {
+    has_flag(state, window, key, WindowState::is_warming)
 }
 
 /// Snapshot: true while a history replay runs for the key. Short
 /// critical section; closed windows and poisoned locks read as not
 /// loading so waiters stop instead of hanging. Pure read.
 pub(crate) fn is_history_loading(
-    state: &Arc<Mutex<BackendState>>,
+    state: &Mutex<BackendState>,
     window: &str,
     key: &SessionKey,
+) -> bool {
+    has_flag(state, window, key, WindowState::is_history_loading)
+}
+
+/// One flag read without creating the window: closed windows and
+/// poisoned locks read as clear so waiters stop. Pure read.
+fn has_flag(
+    state: &Mutex<BackendState>,
+    window: &str,
+    key: &SessionKey,
+    probe: impl FnOnce(&WindowState, &SessionKey) -> bool,
 ) -> bool {
     lock_backend(state)
         .map(|backend| {
             backend
                 .windows
                 .get(window)
-                .map(|win| win.is_history_loading(key))
+                .map(|win| probe(win, key))
                 .unwrap_or(false)
         })
         .unwrap_or(false)
@@ -82,24 +85,36 @@ pub(crate) fn is_history_loading(
 /// replay waits on a racing warm) or the remaining `ENSURE_LIVE_TIMEOUT`
 /// budget (live waits on a racing warm).
 pub(crate) async fn wait_while_warming(
-    state: &Arc<Mutex<BackendState>>,
+    state: &Mutex<BackendState>,
     window: &str,
     key: &SessionKey,
     timeout: Duration,
 ) -> bool {
-    wait_until(timeout, || !is_warming(state, window, key)).await
+    wait_while_flag(state, window, key, timeout, WindowState::is_warming).await
 }
 
 /// Wait until no history replay runs for the key. True when the replay
 /// settled within `timeout`, false on expiry. Callers pass
 /// `HISTORY_TIMEOUT`.
 pub(crate) async fn wait_while_history_loading(
-    state: &Arc<Mutex<BackendState>>,
+    state: &Mutex<BackendState>,
     window: &str,
     key: &SessionKey,
     timeout: Duration,
 ) -> bool {
-    wait_until(timeout, || !is_history_loading(state, window, key)).await
+    wait_while_flag(state, window, key, timeout, WindowState::is_history_loading).await
+}
+
+/// Wait until one start flag clears. Short critical section per poll;
+/// closed windows read as clear so waiters stop. Pure polling.
+async fn wait_while_flag(
+    state: &Mutex<BackendState>,
+    window: &str,
+    key: &SessionKey,
+    timeout: Duration,
+    probe: impl Fn(&WindowState, &SessionKey) -> bool + Copy,
+) -> bool {
+    wait_until(timeout, || !has_flag(state, window, key, probe)).await
 }
 
 impl WindowState {
@@ -170,9 +185,38 @@ impl WindowState {
     }
 }
 
+/// One held start slot: window plus key with the backend it settles in.
+/// Never creates the window on claim or release: a closed window simply
+/// fails the claim and drops the release.
+type SlotHandle = (Arc<Mutex<BackendState>>, String, SessionKey);
+
+/// Claim one start slot without creating the window. `None` means the
+/// window closed or another owner holds the slot. Pure lock dance.
+fn claim_slot(
+    state: &Arc<Mutex<BackendState>>,
+    window: &str,
+    key: &SessionKey,
+    claim: impl FnOnce(&mut WindowState) -> bool,
+) -> Option<SlotHandle> {
+    let claimed = lock_backend(state)
+        .map(|mut backend| backend.claim_start_slot(window, claim))
+        .unwrap_or(false);
+    claimed.then(|| (Arc::clone(state), window.to_string(), key.clone()))
+}
+
+/// Settle one held slot without creating the window. Pure lock dance.
+fn settle_slot(handle: Option<SlotHandle>, settle: impl FnOnce(&mut WindowState, &SessionKey)) {
+    if let Some((state, window, key)) = handle
+        && let Some(mut backend) = lock_backend(&state)
+        && let Some(win) = backend.windows.get_mut(&window)
+    {
+        settle(win, &key);
+    }
+}
+
 /// RAII warm claim: releases on drop so every early return settles it.
 pub(crate) struct WarmGuard {
-    inner: Option<(Arc<Mutex<BackendState>>, String, SessionKey)>,
+    inner: Option<SlotHandle>,
 }
 
 impl WarmGuard {
@@ -183,16 +227,8 @@ impl WarmGuard {
         window: &str,
         key: &SessionKey,
     ) -> Option<Self> {
-        let claimed = lock_backend(state)
-            .map(|mut backend| backend.claim_start_slot(window, |win| win.claim_warm(key)))
-            .unwrap_or(false);
-        if claimed {
-            Some(WarmGuard {
-                inner: Some((Arc::clone(state), window.to_string(), key.clone())),
-            })
-        } else {
-            None
-        }
+        claim_slot(state, window, key, |win| win.claim_warm(key))
+            .map(|inner| WarmGuard { inner: Some(inner) })
     }
 
     /// True while the guard still holds its claim. Test helper.
@@ -204,19 +240,14 @@ impl WarmGuard {
 
 impl Drop for WarmGuard {
     fn drop(&mut self) {
-        if let Some((state, window, key)) = self.inner.take()
-            && let Some(mut backend) = lock_backend(&state)
-            && let Some(win) = backend.windows.get_mut(&window)
-        {
-            win.release_warm(&key);
-        }
+        settle_slot(self.inner.take(), WindowState::release_warm);
     }
 }
 
 /// RAII history claim: explicit `finish` / `fail` consume the guard,
 /// drop defaults to abort so a missing repo never wedges the key.
 pub(crate) struct HistoryGuard {
-    inner: Option<(Arc<Mutex<BackendState>>, String, SessionKey)>,
+    inner: Option<SlotHandle>,
 }
 
 impl HistoryGuard {
@@ -227,36 +258,22 @@ impl HistoryGuard {
         window: &str,
         key: &SessionKey,
     ) -> Option<Self> {
-        let claimed = lock_backend(state)
-            .map(|mut backend| backend.claim_start_slot(window, |win| win.claim_history(key)))
-            .unwrap_or(false);
-        if claimed {
-            Some(HistoryGuard {
-                inner: Some((Arc::clone(state), window.to_string(), key.clone())),
-            })
-        } else {
-            None
-        }
+        claim_slot(state, window, key, |win| win.claim_history(key))
+            .map(|inner| HistoryGuard { inner: Some(inner) })
     }
 
     /// Settle a finished replay, consuming the guard.
-    pub(crate) fn finish(mut self) {
-        if let Some((state, window, key)) = self.inner.take()
-            && let Some(mut backend) = lock_backend(&state)
-            && let Some(win) = backend.windows.get_mut(&window)
-        {
-            win.finish_history(&key);
-        }
+    pub(crate) fn finish(self) {
+        self.settle(WindowState::finish_history);
     }
 
     /// Release a failed replay, consuming the guard.
-    pub(crate) fn fail(mut self) {
-        if let Some((state, window, key)) = self.inner.take()
-            && let Some(mut backend) = lock_backend(&state)
-            && let Some(win) = backend.windows.get_mut(&window)
-        {
-            win.abort_history(&key);
-        }
+    pub(crate) fn fail(self) {
+        self.settle(WindowState::abort_history);
+    }
+
+    fn settle(mut self, settle: impl FnOnce(&mut WindowState, &SessionKey)) {
+        settle_slot(self.inner.take(), settle);
     }
 
     /// True while the guard still holds its claim. Test helper.
@@ -268,12 +285,7 @@ impl HistoryGuard {
 
 impl Drop for HistoryGuard {
     fn drop(&mut self) {
-        if let Some((state, window, key)) = self.inner.take()
-            && let Some(mut backend) = lock_backend(&state)
-            && let Some(win) = backend.windows.get_mut(&window)
-        {
-            win.abort_history(&key);
-        }
+        settle_slot(self.inner.take(), WindowState::abort_history);
     }
 }
 

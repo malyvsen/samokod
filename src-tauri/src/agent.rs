@@ -1067,13 +1067,8 @@ impl AgentManager {
     /// every session's instructions file through the one remove site.
     /// Broadcasts the refreshed owned-repos list when the window existed.
     pub fn remove_window(&self, window: &str) {
-        let keys: Vec<SessionKey> = lock_backend(&self.state)
-            .and_then(|backend| {
-                backend
-                    .windows
-                    .get(window)
-                    .map(|win| win.sessions.keys().cloned().collect())
-            })
+        let keys: Vec<SessionKey> = self
+            .with_window(window, |win| win.sessions.keys().cloned().collect())
             .unwrap_or_default();
         let (existed, repos) = match lock_backend(&self.state) {
             Some(mut backend) => {
@@ -1308,8 +1303,9 @@ mod tests {
     use super::*;
     use crate::acp::{
         self, AcpAgent, AcpAgentConfig, Agent, Client, ConnectionTo, SessionConfigOption,
-        SessionConfigOptionCategory, SessionConfigSelectOption, SessionConfigValueId,
+        SessionConfigOptionCategory, SessionConfigValueId,
     };
+    use agent_client_protocol::v1::schema::SessionConfigSelectOption;
     use std::collections::HashMap;
     use std::path::Path;
 

@@ -129,9 +129,13 @@ pub(crate) fn spawn_instructions_text(
                 .plan_md(repo_root)
                 .to_string_lossy()
                 .to_string();
-            let (worktree_branch, target_branch, path) =
-                worktree_coords(repo_root, checkout_branch, &plan.name, status);
-            opencode::rebasing_instructions(&worktree_branch, &target_branch, &path, &plan_md_abs)
+            let coords = worktree_coords(repo_root, checkout_branch, &plan.name, status);
+            opencode::rebasing_instructions(
+                &coords.branch,
+                &coords.target,
+                &coords.path,
+                &plan_md_abs,
+            )
         }
         plans::Phase::Evergreening => {
             let plan_md_abs = plan
@@ -139,21 +143,29 @@ pub(crate) fn spawn_instructions_text(
                 .plan_md(repo_root)
                 .to_string_lossy()
                 .to_string();
-            let (worktree_branch, target_branch, path) =
-                worktree_coords(repo_root, checkout_branch, &plan.name, status);
+            let coords = worktree_coords(repo_root, checkout_branch, &plan.name, status);
             let commits = status
                 .map(|live| live.commits.join("\n"))
                 .unwrap_or_default();
             opencode::evergreening_instructions(
-                &path,
-                &worktree_branch,
+                &coords.path,
+                &coords.branch,
                 &plan_md_abs,
-                &target_branch,
+                &coords.target,
                 &commits,
             )
         }
-        plans::Phase::Queued | plans::Phase::Completed | plans::Phase::Cancelled => String::new(),
+        plans::Phase::Queued | plans::Phase::Completed | plans::Phase::Cancelled => {
+            unreachable!("spawn never runs for finished plans")
+        }
     }
+}
+
+/// Named worktree coordinates for instructions text. Pure.
+struct WorktreeCoords {
+    branch: String,
+    target: String,
+    path: String,
 }
 
 /// Worktree coordinates for instructions text: the live status when the caller
@@ -163,20 +175,20 @@ fn worktree_coords(
     checkout_branch: &str,
     plan_name: &str,
     status: Option<&super::WorktreeLive>,
-) -> (String, String, String) {
+) -> WorktreeCoords {
     match status {
-        Some(live) => (
-            live.worktree_branch.clone(),
-            live.target_branch.clone(),
-            live.path.to_string_lossy().to_string(),
-        ),
-        None => (
-            crate::worktrees::branch_name(plan_name),
-            checkout_branch.to_string(),
-            crate::worktrees::worktree_path(repo_root, plan_name)
+        Some(live) => WorktreeCoords {
+            branch: live.worktree_branch.clone(),
+            target: live.target_branch.clone(),
+            path: live.path.to_string_lossy().to_string(),
+        },
+        None => WorktreeCoords {
+            branch: crate::worktrees::branch_name(plan_name),
+            target: checkout_branch.to_string(),
+            path: crate::worktrees::worktree_path(repo_root, plan_name)
                 .to_string_lossy()
                 .to_string(),
-        ),
+        },
     }
 }
 
@@ -428,39 +440,47 @@ impl AgentManager {
                 );
                 return Ok(live);
             }
-            let still_warming = super::start::is_warming(&self.state, window, key);
-            if !still_warming {
-                if let Some(live) = self.live_snapshot_for(window, key) {
-                    return Ok(live);
-                }
-                if let Some(_guard) = WarmGuard::claim(&self.state, window, key) {
-                    log::debug!(
-                        "ensure_live reclaimed {} {:?} in {:?}",
-                        key.plan,
-                        key.role,
-                        start.elapsed()
-                    );
-                    return self.ensure_live_claimed(window, key).await;
-                }
+            if !super::start::is_warming(&self.state, window, key)
+                && let Some(_guard) = WarmGuard::claim(&self.state, window, key)
+            {
+                log::debug!(
+                    "ensure_live reclaimed {} {:?} in {:?}",
+                    key.plan,
+                    key.role,
+                    start.elapsed()
+                );
+                return self.ensure_live_claimed(window, key).await;
             }
             if !settled || start.elapsed() >= ENSURE_LIVE_TIMEOUT {
                 if let Some(live) = self.live_snapshot_for(window, key) {
                     return Ok(live);
                 }
-                let snapshot_present = self.session_snapshot_for(window, key).is_some();
-                log::warn!(
-                    "ensure_live timeout {} {:?} after {:?}: still_warming={} snapshot_present={}",
-                    key.plan,
-                    key.role,
-                    start.elapsed(),
-                    still_warming,
-                    snapshot_present
-                );
+                self.log_start_timeout("ensure_live", window, key, start.elapsed());
                 return Err(AgentError::RequestFailed {
                     raw: "agent is still starting, try again".to_string(),
                 });
             }
         }
+    }
+
+    /// One warn-log for every start wait that expires: which wait, which
+    /// session, how long, plus whether a warm still holds the slot and
+    /// whether any session row exists. Same shape for live, history, and
+    /// warm waits so the log greps uniformly.
+    fn log_start_timeout(
+        &self,
+        wait: &str,
+        window: &str,
+        key: &SessionKey,
+        elapsed: std::time::Duration,
+    ) {
+        log::warn!(
+            "{wait} timeout window={window} {} {:?} after {elapsed:?}: still_warming={} snapshot_present={}",
+            key.plan,
+            key.role,
+            super::start::is_warming(&self.state, window, key),
+            self.session_snapshot_for(window, key).is_some()
+        );
     }
 
     /// Spawn path assuming the warm claim is already held. Shared by
@@ -483,13 +503,8 @@ impl AgentManager {
             name: key.plan.clone(),
             phase: role_phase(key.role),
         };
-        let is_pending = lock_backend(&self.state)
-            .map(|backend| {
-                backend.windows.get(window).is_some_and(|win| {
-                    win.pending_scoping.contains_key(&key.plan) && key.role == SessionRole::Scoping
-                })
-            })
-            .unwrap_or(false);
+        let is_pending =
+            key.role == SessionRole::Scoping && self.is_pending_scoping(window, &key.plan);
         if !plan_ref.path(&repo_root).is_dir() && !is_pending {
             return Err(AgentError::NoSession {
                 raw: "plan is gone".to_string(),
@@ -526,16 +541,7 @@ impl AgentManager {
             let settled =
                 super::start::wait_while_warming(&self.state, window, &session, WARM_TIMEOUT).await;
             if !settled {
-                let still_warming = super::start::is_warming(&self.state, window, &session);
-                let snapshot_present = self.session_snapshot_for(window, &session).is_some();
-                log::warn!(
-                    "history wait timeout window={window} {} {:?} after {:?}: still_warming={} snapshot_present={}",
-                    session.plan,
-                    session.role,
-                    wait_start.elapsed(),
-                    still_warming,
-                    snapshot_present
-                );
+                self.log_start_timeout("history wait", window, &session, wait_start.elapsed());
                 let raw = "agent is still starting, try again".to_string();
                 self.emit_history_failed(window, &session, raw.clone());
                 return Err(AgentError::RequestFailed { raw });
@@ -749,16 +755,7 @@ impl AgentManager {
         if settled {
             return Ok(());
         }
-        let still_warming = super::start::is_warming(&self.state, window, key);
-        let snapshot_present = self.session_snapshot_for(window, key).is_some();
-        log::warn!(
-            "history wait timeout window={window} {} {:?} after {:?}: still_warming={} snapshot_present={}",
-            key.plan,
-            key.role,
-            wait_start.elapsed(),
-            still_warming,
-            snapshot_present
-        );
+        self.log_start_timeout("history wait", window, key, wait_start.elapsed());
         Err(AgentError::RequestFailed {
             raw: "history is still loading, try again".to_string(),
         })

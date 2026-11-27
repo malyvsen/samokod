@@ -41,8 +41,10 @@ const EVERGREENING_PROMPT: &str = include_str!("prompts/evergreening.md");
 const REBASING_PROMPT: &str = include_str!("prompts/rebasing.md");
 
 /// Extra spawn env pinning all agents plus a per-session instructions
-/// file carrying the role instructions. Writes the file so it exists before
-/// the process spawns. Pure apart from the file write at the spawn edge.
+/// file carrying the role instructions. Impure spawn edge: writes the
+/// file so it exists before the process spawns, then returns the env.
+/// The one write site: every spawn and history replay funnels through
+/// here.
 pub fn session_env(
     window: &str,
     key: &SessionKey,
@@ -82,12 +84,12 @@ pub fn agent_config(plan: &PlanRef, instructions: &Path) -> String {
             EXECUTING_AGENT: {
                 "mode": "primary",
                 "description": "Executes one approved plan.",
-                "permissions": executing_permissions(),
+                "permissions": work_permissions(),
             },
             EVERGREENING_AGENT: {
                 "mode": "primary",
                 "description": "Cleans up one executed plan.",
-                "permissions": evergreening_permissions(),
+                "permissions": work_permissions(),
             },
             REBASING_AGENT: {
                 "mode": "primary",
@@ -185,22 +187,35 @@ fn edit_rules(rules: &[(&str, &str)]) -> Vec<Value> {
         .collect()
 }
 
+/// Shared read plus shell plus question-deny shell around per-agent edit
+/// and subagent rules. Array order is the contract: OpenCode grants the
+/// last matching rule.
+fn with_shell_and_questions(mut permissions: Vec<Value>) -> Vec<Value> {
+    permissions.push(rule("shell", "*", "allow"));
+    permissions.push(rule("question", "*", "deny"));
+    permissions
+}
+
+/// Base read access every agent gets.
+fn read_access() -> Vec<Value> {
+    vec![
+        rule("read", "*", "allow"),
+        rule("external_directory", "*", "allow"),
+    ]
+}
+
 /// Scoping edits stay inside its plan scope, except state and
 /// attachments; the shell stays fully allowed for investigation.
 fn scoping_permissions(plan: &PlanRef) -> Vec<Value> {
     let scope = plan.scope_glob();
-    let mut permissions = vec![
-        rule("read", "*", "allow"),
-        rule("external_directory", "*", "allow"),
-    ];
+    let mut permissions = read_access();
     permissions.extend(edit_rules(&[
         ("*", "deny"),
         (scope.as_str(), "allow"),
         (STATE_DENY_GLOB, "deny"),
         (ATTACHMENTS_DENY_GLOB, "deny"),
     ]));
-    permissions.push(rule("shell", "*", "allow"));
-    permissions.push(rule("question", "*", "deny"));
+    let mut permissions = with_shell_and_questions(permissions);
     permissions.extend(
         SCOPING_SUBAGENT_RULES
             .iter()
@@ -214,34 +229,16 @@ fn scoping_permissions(plan: &PlanRef) -> Vec<Value> {
 /// V2 has no built-in `scout`, so only `explore` is allowed.
 const SCOPING_SUBAGENT_RULES: [(&str, &str); 2] = [("*", "deny"), ("explore", "allow")];
 
-/// Executing runs an approved plan, so the shell is fully allowed. Edits
-/// ask inside `.samokod` to stop casual rewrites of app state through the
-/// obvious path; shell bypass is accepted. The bare `.samokod` key covers
-/// the directory entry itself, since `.samokod/**` only matches paths
-/// starting with `.samokod/`, and state plus attachments deny.
-fn executing_permissions() -> Vec<Value> {
-    let mut permissions = vec![
-        rule("read", "*", "allow"),
-        rule("external_directory", "*", "allow"),
-    ];
+/// Executing and evergreening run in the same worktree, so they share the
+/// work edit shape: the shell is fully allowed, edits ask inside
+/// `.samokod` to stop casual rewrites of app state through the obvious
+/// path (shell bypass is accepted). The bare `.samokod` key covers the
+/// directory entry itself, since `.samokod/**` only matches paths starting
+/// with `.samokod/`, and state plus attachments deny.
+fn work_permissions() -> Vec<Value> {
+    let mut permissions = read_access();
     permissions.extend(edit_rules(&WORK_EDIT_RULES));
-    permissions.push(rule("shell", "*", "allow"));
-    permissions.push(rule("question", "*", "deny"));
-    permissions
-}
-
-/// Evergreening runs in the same worktree as executing, so it shares the
-/// work edit shape: everything editable except state and attachments, with
-/// the `.samokod` ask guard and no permission questions.
-fn evergreening_permissions() -> Vec<Value> {
-    let mut permissions = vec![
-        rule("read", "*", "allow"),
-        rule("external_directory", "*", "allow"),
-    ];
-    permissions.extend(edit_rules(&WORK_EDIT_RULES));
-    permissions.push(rule("shell", "*", "allow"));
-    permissions.push(rule("question", "*", "deny"));
-    permissions
+    with_shell_and_questions(permissions)
 }
 
 /// Shared executing and evergreening edit shape. Denies land last so deny
@@ -260,13 +257,9 @@ const WORK_EDIT_RULES: [(&str, &str); 5] = [
 /// and no subagent research: rebasing is a focused conflict-resolution
 /// task.
 fn rebasing_permissions() -> Vec<Value> {
-    let mut permissions = vec![
-        rule("read", "*", "allow"),
-        rule("external_directory", "*", "allow"),
-    ];
+    let mut permissions = read_access();
     permissions.extend(edit_rules(&REBASING_EDIT_RULES));
-    permissions.push(rule("shell", "*", "allow"));
-    permissions.push(rule("question", "*", "deny"));
+    let mut permissions = with_shell_and_questions(permissions);
     permissions.push(rule("subagent", "*", "deny"));
     permissions
 }

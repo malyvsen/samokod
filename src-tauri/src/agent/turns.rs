@@ -74,18 +74,7 @@ impl AgentManager {
             // Working title from the user's text. Set-once; headings win;
             // empty stays `Untitled`.
             store_first_title(&self.state, window, &repo_root, &session.plan, &text);
-            let pending_match = match lock_backend(&self.state) {
-                Some(backend) => backend
-                    .windows
-                    .get(window)
-                    .map(|win| win.pending_scoping.contains_key(&session.plan))
-                    .unwrap_or(false),
-                None => {
-                    log::warn!("failed to check pending session: state poisoned");
-                    false
-                }
-            };
-            if pending_match {
+            if self.is_pending_scoping(window, &session.plan) {
                 plans::materialize_scoping(&repo_root, &session.plan)?;
                 carry_pending_title(&self.state, window, &repo_root, &session.plan);
                 match lock_backend(&self.state) {
@@ -367,15 +356,7 @@ pub(crate) fn handle_notification(
     // already show their bubble, so mapping them outside a replay would
     // double-add every prompt.
     if let Some(chunk) = crate::updates::user_text_of(&notification.update)
-        && lock_backend(state)
-            .map(|backend| {
-                backend
-                    .windows
-                    .get(window)
-                    .map(|win| win.is_history_loading(key))
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false)
+        && super::start::is_history_loading(state, window, key)
     {
         emit_event(
             app,
@@ -498,45 +479,34 @@ pub(crate) fn handle_notification(
         // Already streamed as user text above while replaying; outside a
         // replay the pre-match guard skips it. Explicit no-op so replayed
         // bubbles never log as unhandled.
-        acp::SessionUpdate::Plan(_)
-        | acp::SessionUpdate::PlanUpdate(_)
-        | acp::SessionUpdate::PlanRemoved(_)
-        | acp::SessionUpdate::AvailableCommandsUpdate(_)
-        | acp::SessionUpdate::CurrentModeUpdate(_)
-        | acp::SessionUpdate::SessionInfoUpdate(_)
-        | acp::SessionUpdate::Notice(_)
-        | acp::SessionUpdate::CompactionUpdate(_)
-        | acp::SessionUpdate::CompactionSummaryChunk(_)
-        | acp::SessionUpdate::SubagentUpdate(_)
-        | acp::SessionUpdate::SessionMessage(_)
-        | acp::SessionUpdate::SessionMessageChunk(_) => {
-            ignore_update(window, key, notification);
+        update => {
+            // Single taxonomy owner: `updates` decides rendered versus
+            // ignored; this match only routes. Known-but-unrendered kinds
+            // log structurally, future kinds warn with the full payload.
+            if crate::updates::is_rendered(update) {
+                return;
+            }
+            match crate::updates::update_kind(update) {
+                Some(_) => ignore_update(window, key, notification),
+                None => log::warn!("unknown session update: {update:?}"),
+            }
         }
-        // Future protocol drift: a known label is routine, an unknown one
-        // warns with the full payload.
-        update => match crate::updates::update_kind(update) {
-            Some(kind) => log::debug!("unhandled session update: {kind}"),
-            None => log::warn!("unknown session update: {update:?}"),
-        },
     }
 }
 
-/// Explicit ignore for known-but-unrendered updates (available commands,
-/// session info with its compaction marker and retry status, plan,
-/// current mode, notices, compaction, child sessions and inter-session
-/// messages). Rendering stays identical: one structural debug log with
-/// the notification `_meta` (child association, `opencode/retry`,
-/// `opencode/compaction`) so vendor drift is visible.
+/// Explicit ignore for known-but-unrendered updates. Rendering stays
+/// identical: one structural debug log from `updates::ignore_detail`
+/// (kind, summary, `_meta` keys with `opencode/retry`,
+/// `opencode/compaction`, and child association) so vendor drift is
+/// visible.
 fn ignore_update(window: &str, key: &SessionKey, notification: &acp::SessionNotification) {
     debug_assert!(
         !crate::updates::is_rendered(&notification.update),
         "ignore path only handles non-rendered updates"
     );
-    let kind = crate::updates::update_kind(&notification.update).unwrap_or("unknown");
-    let summary = crate::updates::ignored_summary(&notification.update);
-    let meta = crate::updates::notification_meta_summary(notification);
+    let detail = crate::updates::ignore_detail(notification);
     log::debug!(
-        "ignoring session update window={window} session={}::{:?} {kind} {summary} {meta}",
+        "ignoring session update window={window} session={}::{:?} {detail}",
         key.plan,
         key.role
     );

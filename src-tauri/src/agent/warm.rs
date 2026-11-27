@@ -5,7 +5,6 @@ use crate::plans;
 use crate::types::{AgentError, SessionKey};
 
 use super::AgentManager;
-use super::lock_backend;
 use super::start::WarmGuard;
 
 impl AgentManager {
@@ -20,9 +19,7 @@ impl AgentManager {
             session.plan,
             session.role
         );
-        let repo_root = lock_backend(&self.state)
-            .and_then(|backend| backend.windows.get(window)?.repo_root.clone());
-        let Some(repo_root) = repo_root else {
+        let Some((repo_root, _)) = self.reopen_snapshot(window) else {
             log::debug!("skipping warm window={window}: no repository open");
             return Ok(());
         };
@@ -42,9 +39,7 @@ impl AgentManager {
             );
             return Ok(());
         }
-        if let Some((connection, _, _, _)) = self.session_snapshot_for(window, &session)
-            && !connection.is_incoming_closed()
-        {
+        if self.live_snapshot_for(window, &session).is_some() {
             log::debug!(
                 "skipping warm window={window} for {} {:?}: already live",
                 session.plan,
@@ -52,14 +47,8 @@ impl AgentManager {
             );
             return Ok(());
         }
-        if lock_backend(&self.state)
-            .map(|backend| {
-                backend
-                    .windows
-                    .get(window)
-                    .map(|win| win.history_started(&session))
-                    .unwrap_or(false)
-            })
+        if self
+            .with_window(window, |win| win.history_started(&session))
             .unwrap_or(false)
         {
             log::debug!(

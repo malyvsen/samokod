@@ -68,10 +68,7 @@ impl AgentManager {
                             .get(&key)
                             .map(|live| live.last_roles.clone())
                             .unwrap_or_default();
-                        let moved: Vec<ConfigRole> = ConfigRole::ALL
-                            .into_iter()
-                            .filter(|role| role.get(&current) != role.get(&roles))
-                            .collect();
+                        let moved = moved_roles(&current, &roles);
                         if let Some(live) = win.sessions.get_mut(&key) {
                             live.last_roles = roles.clone();
                         }
@@ -113,35 +110,40 @@ impl AgentManager {
         if moved.is_empty() {
             return;
         }
-        if let Some(repo) = self.current_repo(window) {
-            for role in moved {
-                crate::repo_state::set_role(&repo, *role, role.get(roles).map(String::as_str));
+        let repo = self.current_repo(window);
+        let prefs_dir = self.prefs_dir();
+        let mut prefs = prefs_dir.as_ref().map(|dir| crate::prefs::load_prefs(dir));
+        for role in moved {
+            let value = role.get(roles).map(String::as_str);
+            if let Some(repo) = repo.as_ref() {
+                crate::repo_state::set_role(repo, *role, value);
+            }
+            if let Some(prefs) = prefs.as_mut() {
+                crate::prefs::record_global_choice(prefs, *role, value);
             }
         }
-        let Some(dir) = self.prefs_dir() else {
-            return;
-        };
-        let mut prefs = crate::prefs::load_prefs(&dir);
-        for role in moved {
-            crate::prefs::record_global_choice(
-                &mut prefs,
-                *role,
-                role.get(roles).map(String::as_str),
-            );
-        }
-        if let Err(error) = crate::prefs::save_prefs(&dir, &prefs) {
+        if let (Some(dir), Some(prefs)) = (prefs_dir, prefs)
+            && let Err(error) = crate::prefs::save_prefs(&dir, &prefs)
+        {
             log::warn!("failed to save global defaults: {error}");
         }
     }
+}
+
+/// Roles whose stored value moved between two snapshots. Pure.
+fn moved_roles(before: &RepoState, after: &RepoState) -> Vec<ConfigRole> {
+    ConfigRole::ALL
+        .into_iter()
+        .filter(|role| role.get(before) != role.get(after))
+        .collect()
 }
 
 /// Reapply the effective default model then effort on one fresh session
 /// (effort-last, since a model switch can reshape effort options). Each
 /// absent or inapplicable role is skipped with a warn-log while the open
 /// continues on defaults. Returns the refreshed option list and the
-/// applied roles for `last_roles`. Spawn and global change share this
-/// round-trip shape with `send_config_option`; one log shape via
-/// `log_roles`.
+/// applied roles for `last_roles`. Shares the `send_config_option`
+/// round-trip with the global change path; one log shape via `log_roles`.
 pub(crate) async fn reapply_defaults(
     connection: &ConnectionTo<Agent>,
     session_id: &acp::SessionId,

@@ -7,13 +7,6 @@
 use agent_client_protocol::schema::ProtocolVersion;
 pub use agent_client_protocol::v1::ConnectionTo;
 pub use agent_client_protocol::v1::Responder;
-#[cfg(test)]
-pub use agent_client_protocol::v1::schema::{
-    AvailableCommand, AvailableCommandsUpdate, CompactionStatus, CompactionSummaryChunk,
-    CompactionUpdate, ConfigOptionUpdate, ContentChunk, CurrentModeUpdate, Notice, NoticeSeverity,
-    Plan, PlanRemoved, PlanUpdate, PlanUpdateContent, SessionConfigSelectOption, SessionInfoUpdate,
-    SessionMessage, SessionMessageChunk, SubagentUpdate, ToolCallUpdateFields, UsageUpdate,
-};
 pub use agent_client_protocol::v1::schema::{
     CancelNotification, CloseSessionRequest, ContentBlock, LoadSessionRequest, Meta,
     PermissionOption, PermissionOptionId, PermissionOptionKind, PromptRequest,
@@ -266,6 +259,7 @@ fn is_executable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::v1::schema::UsageUpdate;
 
     #[test]
     fn initialize_advertises_no_fs_or_terminal() {
