@@ -541,16 +541,43 @@ fn read_state_file(path: &Path) -> Option<PlanState> {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
         Err(error) => {
-            log::warn!("failed to read {}: {error}", path.display());
+            log::log!(
+                state_parse_log_level(path),
+                "failed to read {}: {error}",
+                path.display()
+            );
             return None;
         }
     };
     match serde_json::from_str(&text) {
         Ok(state) => Some(state),
         Err(error) => {
-            log::warn!("failed to parse {}: {error}", path.display());
+            log::log!(
+                state_parse_log_level(path),
+                "failed to parse {}: {error}",
+                path.display()
+            );
             None
         }
+    }
+}
+
+/// Log level for `state.json` read/parse failures: finished plans are
+/// expected to carry legacy files, so they stay quiet; genuinely corrupt
+/// active plans still warn. Pure.
+fn state_parse_log_level(path: &Path) -> log::Level {
+    let phase = path.parent().and_then(|dir| dir.parent()).and_then(|dir| {
+        dir.file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string)
+    });
+    match phase.as_deref() {
+        Some(name)
+            if name == Phase::Completed.dir_name() || name == Phase::Cancelled.dir_name() =>
+        {
+            log::Level::Debug
+        }
+        _ => log::Level::Warn,
     }
 }
 /// Sort rank for the plans list: scoping, executing, queued, rebasing,
@@ -1580,5 +1607,58 @@ mod tests {
             Some("ses_rebasing")
         );
         assert_eq!(reloaded.entered_at, Some(before));
+    }
+
+    #[test]
+    fn finished_plans_log_state_failures_at_debug() {
+        let root = Path::new("/repos/demo/.samokod/plans");
+        for phase in [Phase::Completed, Phase::Cancelled] {
+            let path = root
+                .join(phase.dir_name())
+                .join("2026-09-26.08-41-03")
+                .join(STATE_FILE);
+            assert_eq!(state_parse_log_level(&path), log::Level::Debug);
+        }
+    }
+
+    #[test]
+    fn active_plans_log_state_failures_at_warn() {
+        let root = Path::new("/repos/demo/.samokod/plans");
+        for phase in [
+            Phase::Scoping,
+            Phase::Executing,
+            Phase::Queued,
+            Phase::Rebasing,
+            Phase::Evergreening,
+        ] {
+            let path = root
+                .join(phase.dir_name())
+                .join("2026-09-26.08-41-03")
+                .join(STATE_FILE);
+            assert_eq!(state_parse_log_level(&path), log::Level::Warn);
+        }
+        assert_eq!(
+            state_parse_log_level(Path::new("/tmp/state.json")),
+            log::Level::Warn
+        );
+    }
+
+    #[test]
+    fn legacy_string_state_falls_back_to_default() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        ensure_structure(root).expect("ensure");
+        for phase in [Phase::Scoping, Phase::Completed] {
+            let plan = PlanRef {
+                name: "2026-09-26.08-41-03".to_string(),
+                phase,
+            };
+            std::fs::create_dir_all(plan.path(root)).expect("mkdir");
+            std::fs::write(plan.path(root).join(STATE_FILE), r#"{"scoping":"ses_old"}"#)
+                .expect("write legacy state");
+            let state = load_state(&plan.path(root));
+            assert_eq!(state.session(SessionRole::Scoping), None);
+            assert!(!state.prompted);
+        }
     }
 }
