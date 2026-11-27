@@ -1,6 +1,5 @@
 // OpenCode-specific edge driver: agent definitions injected at spawn plus
-// role instructions duplicated as ACP `systemPrompt` and an `instructions`
-// file. `acp.rs` stays protocol-only.
+// role instructions via an `instructions` file. `acp.rs` stays protocol-only.
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -40,9 +39,8 @@ const EVERGREENING_PROMPT: &str = include_str!("prompts/evergreening.md");
 const REBASING_PROMPT: &str = include_str!("prompts/rebasing.md");
 
 /// Extra spawn env pinning all agents plus a per-session instructions
-/// file carrying the same text as ACP `systemPrompt` (which OpenCode
-/// ignores). Writes the file so it exists before the process spawns. Pure
-/// apart from the file write at the spawn edge.
+/// file carrying the role instructions. Writes the file so it exists before
+/// the process spawns. Pure apart from the file write at the spawn edge.
 pub fn session_env(
     window: &str,
     key: &SessionKey,
@@ -63,9 +61,8 @@ pub fn agent_env(plan: &PlanRef, instructions: &Path) -> HashMap<String, String>
 }
 
 /// Full agent config as inline JSON. Permissions only, no `system` field:
-/// role guidance travels as ACP `systemPrompt` on `session/new` so
-/// OpenCode's per-model base prompt stays intact, plus a per-session
-/// `instructions` file carrying the same text. The path must be absolute;
+/// role guidance travels via a per-session `instructions` file so OpenCode's
+/// per-model base prompt stays intact. The path must be absolute;
 /// OpenCode resolves relative `instructions` against the workspace.
 /// Native V2 shape: `agents` plus an ordered
 /// `permissions` array per agent (last match wins), `shell` for shell
@@ -118,8 +115,7 @@ pub fn instructions_path(window: &str, key: &SessionKey) -> PathBuf {
 }
 
 /// Write role instructions for OpenCode's `instructions` source. Best
-/// effort: logs and keeps the session on failure since the same text still
-/// travels as ACP `systemPrompt`.
+/// effort: logs on failure and keeps the session.
 pub fn write_instructions_file(path: &Path, system: &str) {
     if let Err(error) = std::fs::write(path, system) {
         log::warn!(

@@ -25,7 +25,7 @@ use super::session::{ActivePlan, spawn_system_text};
 use super::{AgentManager, WorktreeLive, lock_backend};
 
 /// Minimal trigger waking an auto-started agent. Role instructions already
-/// travel as `systemPrompt` on `session/new`, so automatic starts send no
+/// travel via the `instructions` file, so automatic starts send no
 /// user text.
 const AUTO_START_TRIGGER: &str = "Proceed.";
 
@@ -560,7 +560,7 @@ impl AgentManager {
 
     /// Shared spawn-plus-trigger for the three agent-start transitions
     /// (`Execute`, `BeginEvergreening`, `StartRebasing`): spawn the session
-    /// with role instructions as `systemPrompt`, then send a minimal trigger
+    /// with role instructions via the `instructions` file, then send a minimal
     /// so the agent wakes. The caller moves the plan and drops the old live
     /// session first; the plan name travels inside `active` so the prompted
     /// flag follows it. `status` carries fresh worktree coordinates for the

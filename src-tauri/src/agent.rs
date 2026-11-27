@@ -2638,7 +2638,7 @@ mod tests {
                     .await
                     .map_err(|error| acp::internal_error(error.to_string()))?;
                 let response = connection
-                    .send_request(acp::build_new_session_request(&cwd_owned, "test system"))
+                    .send_request(acp::build_new_session_request(&cwd_owned))
                     .block_task()
                     .await
                     .map_err(|error| acp::internal_error(error.to_string()))?;

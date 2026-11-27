@@ -49,7 +49,7 @@ impl AgentManager {
     /// Send one plain-text prompt, spawning the session lazily on its
     /// first message. Streams arrive as events; the turn end arrives as
     /// done or failed. User-initiated turns send only the user's text; role
-    /// instructions already travel as `systemPrompt` on `session/new`. A
+    /// instructions already travel via the `instructions` file. A
     /// reserved pending scoping session materializes its directory here,
     /// before the `ensure_live` path.
     pub async fn send_prompt(

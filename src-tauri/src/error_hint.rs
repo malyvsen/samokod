@@ -12,7 +12,6 @@ pub enum ErrorHintKind {
     ApprovalStalled,
     NoSavedSession,
     StillStarting,
-    UpgradeOpencode,
     PlainRetry,
 }
 
@@ -78,19 +77,6 @@ pub fn classify_error(raw: &str) -> ErrorHint {
             kind: ErrorHintKind::StillStarting,
             text: "the agent is still starting - wait a moment, then retry".to_string(),
             retryable: true,
-        };
-    }
-    if (lowered.contains("systemprompt") || lowered.contains("system_prompt"))
-        && (lowered.contains("invalid")
-            || lowered.contains("unknown")
-            || lowered.contains("unrecognized")
-            || lowered.contains("unexpected"))
-    {
-        return ErrorHint {
-            kind: ErrorHintKind::UpgradeOpencode,
-            text: "upgrade opencode (`npm install -g opencode-ai`) to a version with ACP systemPrompt support"
-                .to_string(),
-            retryable: false,
         };
     }
     ErrorHint {
@@ -174,16 +160,6 @@ mod tests {
         assert_eq!(hint.kind, ErrorHintKind::NoSavedSession);
         assert!(!hint.retryable);
         assert!(!hint.text.to_lowercase().contains("plan is gone"));
-    }
-
-    #[test]
-    fn old_binary_system_prompt_needs_upgrade() {
-        let hint = classify_error(
-            "session/new failed: Invalid params (-32602): unknown field `systemPrompt`",
-        );
-        assert_eq!(hint.kind, ErrorHintKind::UpgradeOpencode);
-        assert!(!hint.retryable);
-        assert!(hint.text.contains("upgrade opencode"));
     }
 
     #[test]

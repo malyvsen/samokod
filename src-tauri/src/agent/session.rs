@@ -303,11 +303,10 @@ impl AgentManager {
     }
 
     /// Spawn a fresh agent process scoped to one plan and open a session on
-    /// it with role instructions as `systemPrompt` plus the same text in an
-    /// `instructions` file: pin the agent mode, reapply the effective default
-    /// model then effort (effort-last, since a model switch can reshape
-    /// effort options). Shared by lazy first prompts and the eager executing
-    /// start.
+    /// it with role instructions via the `instructions` file: pin the agent
+    /// mode, reapply the effective default model then effort (effort-last,
+    /// since a model switch can reshape effort options). Shared by lazy
+    /// first prompts and the eager executing start.
     pub(crate) async fn spawn_session(
         &self,
         window: &str,
@@ -326,7 +325,7 @@ impl AgentManager {
         let connection = self.ensure_connection_for(window, &key, env).await?;
         let cwd = plan.cwd(repo_root);
         let response = connection
-            .send_request(acp::build_new_session_request(&cwd, system))
+            .send_request(acp::build_new_session_request(&cwd))
             .block_task()
             .await
             .map_err(|error| AgentError::RequestFailed {
@@ -543,9 +542,8 @@ impl AgentManager {
         Ok((connection, session_id))
     }
 
-    /// Restore a past session's history via `session/load` with the same
-    /// role instructions as `session/new`: the replay streams through the
-    /// same global notification path as live turns, so the transcript
+    /// Restore a past session's history via `session/load`: the replay
+    /// streams through the same global notification path as live turns, so the transcript
     /// rebuilds with no extra mapping except user bubbles. Single-flights
     /// on the history slot; a live turn owns its session, so replays never
     /// run over a working key. Finished plans replay read-only history the
@@ -667,7 +665,7 @@ impl AgentManager {
         );
         let cwd = plan.cwd(&repo_root);
         match connection
-            .send_request(acp::build_load_session_request(&session_id, &cwd, &system))
+            .send_request(acp::build_load_session_request(&session_id, &cwd))
             .block_task()
             .await
         {

@@ -9,8 +9,8 @@ pub use agent_client_protocol::v1::schema::{
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionConfigId, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigOptionValue, SessionConfigSelectOptions, SessionConfigValueId, SessionId,
-    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, StopReason, SystemPrompt,
-    SystemPromptMode, TextContent, ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind,
+    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, StopReason, TextContent,
+    ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 use agent_client_protocol::v1::schema::{ClientCapabilities, InitializeRequest, NewSessionRequest};
 #[cfg(test)]
@@ -47,27 +47,18 @@ pub fn build_initialize_request() -> InitializeRequest {
     InitializeRequest::new(ProtocolVersion::V1).client_capabilities(ClientCapabilities::default())
 }
 
-/// Build the ACP `session/new` request for a repository root with role
-/// instructions as `systemPrompt` in append mode. No MCP servers are
+/// Build the ACP `session/new` request for a repository root. Role
+/// instructions travel via the `instructions` file. No MCP servers are
 /// passed; OpenCode owns them.
-pub fn build_new_session_request(cwd: &Path, system: &str) -> NewSessionRequest {
-    NewSessionRequest::new(cwd).system_prompt(
-        SystemPrompt::new(vec![ContentBlock::from(system)]).mode(SystemPromptMode::Append),
-    )
+pub fn build_new_session_request(cwd: &Path) -> NewSessionRequest {
+    NewSessionRequest::new(cwd)
 }
 
-/// Build the ACP `session/load` request restoring a past session with
-/// role instructions as `systemPrompt` in append mode. Replay notifications
-/// flow through the existing global handler; no separate session handle is
-/// created.
-pub fn build_load_session_request(
-    session_id: &str,
-    cwd: &Path,
-    system: &str,
-) -> LoadSessionRequest {
-    LoadSessionRequest::new(SessionId::new(session_id), cwd).system_prompt(
-        SystemPrompt::new(vec![ContentBlock::from(system)]).mode(SystemPromptMode::Append),
-    )
+/// Build the ACP `session/load` request restoring a past session. Replay
+/// notifications flow through the existing global handler; no separate
+/// session handle is created.
+pub fn build_load_session_request(session_id: &str, cwd: &Path) -> LoadSessionRequest {
+    LoadSessionRequest::new(SessionId::new(session_id), cwd)
 }
 
 /// Build a `session/set_config_option` request from a string config id and value id.
@@ -361,28 +352,6 @@ mod tests {
         .expect("cost is optional");
         assert!(update.cost.is_none());
         assert_eq!(update.used, 1);
-    }
-
-    #[test]
-    fn system_prompt_serializes_as_append() {
-        let request = build_new_session_request(Path::new("/repo"), "role instructions");
-        let value = serde_json::to_value(&request).expect("serialize");
-        assert_eq!(value["systemPrompt"]["mode"], "append");
-        assert_eq!(
-            value["systemPrompt"]["content"][0]["text"],
-            "role instructions"
-        );
-    }
-
-    #[test]
-    fn load_resends_system_prompt_as_append() {
-        let request = build_load_session_request("sess-1", Path::new("/repo"), "role instructions");
-        let value = serde_json::to_value(&request).expect("serialize");
-        assert_eq!(value["systemPrompt"]["mode"], "append");
-        assert_eq!(
-            value["systemPrompt"]["content"][0]["text"],
-            "role instructions"
-        );
     }
 
     fn fake_opencode_in(dir: &Path) -> PathBuf {
