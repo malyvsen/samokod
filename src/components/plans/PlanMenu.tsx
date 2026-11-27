@@ -23,11 +23,26 @@ export function PlanMenu({
 	const scopingWorking =
 		plan.sessions.find((status) => status.role === "scoping")?.working ?? false;
 	const paused = plan.manual;
-	const everOn = plan.evergreen;
-	const total = planTotalCost(plan);
 	const finished = plan.phase === "completed" || plan.phase === "cancelled";
-	const breakdown =
-		total === null ? null : <CostBreakdown plan={plan} total={total} />;
+	const isScoping = plan.phase === "scoping";
+	const showEvergreen =
+		isScoping ||
+		plan.phase === "executing" ||
+		plan.phase === "queued" ||
+		plan.phase === "rebasing";
+	const executeBlocked = scopingWorking || !plan.has_plan_md;
+	const total = planTotalCost(plan);
+	const toggleEvergreen = () => onSetEvergreen(plan.name, !plan.evergreen);
+	const costRows =
+		total === null ? (
+			finished ? (
+				<div className="dopt static">
+					<span>No cost recorded</span>
+				</div>
+			) : null
+		) : (
+			<CostBreakdown plan={plan} total={total} />
+		);
 
 	return (
 		<span className="hact" ref={rootRef}>
@@ -45,40 +60,37 @@ export function PlanMenu({
 			</button>
 			{open ? (
 				<span className="pdrop" role="menu">
-					{!finished && plan.phase === "scoping" ? (
+					{!finished && isScoping ? (
 						<>
-							<EvergreenOption
-								on={everOn}
-								onToggle={() => onSetEvergreen(plan.name, !everOn)}
-							/>
+							<EvergreenOption on={plan.evergreen} onToggle={toggleEvergreen} />
 							<div className="dsep" />
 							<button
 								className="dopt"
 								type="button"
 								role="menuitem"
-								disabled={scopingWorking || !plan.has_plan_md}
+								disabled={executeBlocked}
 								onClick={() => {
 									setOpen(false);
 									onExecute(target);
 								}}
 								title={
-									scopingWorking || !plan.has_plan_md
+									executeBlocked
 										? "Plan must be written before execution"
 										: "Move to executing and start the agent"
 								}
 							>
 								Execute
 							</button>
-							{breakdown === null ? null : (
+							{costRows === null ? null : (
 								<>
 									<div className="dsep" />
-									{breakdown}
+									{costRows}
 									<div className="dsep" />
 								</>
 							)}
 						</>
 					) : null}
-					{!finished && plan.phase !== "scoping" ? (
+					{!finished && !isScoping ? (
 						<>
 							<button
 								className={`dopt${paused ? "" : " on"}`}
@@ -97,30 +109,22 @@ export function PlanMenu({
 								</span>
 								Auto-advance
 							</button>
-							{plan.phase === "executing" ||
-							plan.phase === "queued" ||
-							plan.phase === "rebasing" ? (
+							{showEvergreen ? (
 								<EvergreenOption
-									on={everOn}
-									onToggle={() => onSetEvergreen(plan.name, !everOn)}
+									on={plan.evergreen}
+									onToggle={toggleEvergreen}
 								/>
 							) : null}
 							<div className="dsep" />
-							{breakdown === null ? null : (
+							{costRows === null ? null : (
 								<>
-									{breakdown}
+									{costRows}
 									<div className="dsep" />
 								</>
 							)}
 						</>
 					) : null}
-					{finished
-						? (breakdown ?? (
-								<div className="dopt static">
-									<span>No cost recorded</span>
-								</div>
-							))
-						: null}
+					{finished ? costRows : null}
 					{finished ? null : (
 						<button
 							className="dopt danger"

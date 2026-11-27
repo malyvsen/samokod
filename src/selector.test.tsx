@@ -125,7 +125,7 @@ describe("settings selectors", () => {
 		expect(screen.queryByLabelText("Session Mode")).not.toBeInTheDocument();
 	});
 
-	test("shows remaining categories as extras", () => {
+	test("shows the effort option", () => {
 		render(selectors(customIds, false, vi.fn()));
 		expect(screen.getByLabelText("Effort")).toBeInTheDocument();
 	});

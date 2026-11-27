@@ -1,9 +1,8 @@
 import type { RepoDefaults } from "../bindings";
 import type { Chats } from "../sessions/store";
 import {
-	EffortPlaceholder,
-	ModelPlaceholder,
 	OptionDropdown,
+	OptionPlaceholder,
 	pendingOptions,
 	splitOptions,
 } from "./selectors";
@@ -22,7 +21,7 @@ export function SettingsPanel({
 	const live = liveOptionsFrom(chats);
 	const { model, effort } =
 		live === null ? pendingOptions(defaults) : splitOptions(live);
-	const frozen = live === null;
+	const controlsDisabled = live === null || disabled;
 	return (
 		<>
 			<div className="sect">
@@ -30,11 +29,11 @@ export function SettingsPanel({
 				{model !== undefined ? (
 					<OptionDropdown
 						option={model}
-						disabled={frozen || disabled}
+						disabled={controlsDisabled}
 						onChange={onChange}
 					/>
 				) : (
-					<ModelPlaceholder />
+					<OptionPlaceholder label="Model unavailable" />
 				)}
 			</div>
 			<div className="sect">
@@ -42,11 +41,11 @@ export function SettingsPanel({
 				{effort !== undefined ? (
 					<OptionDropdown
 						option={effort}
-						disabled={frozen || disabled}
+						disabled={controlsDisabled}
 						onChange={onChange}
 					/>
 				) : (
-					<EffortPlaceholder />
+					<OptionPlaceholder label="Effort unavailable" />
 				)}
 			</div>
 		</>

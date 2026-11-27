@@ -445,9 +445,8 @@ pub(crate) fn handle_notification(
                     live.cost = cost;
                     live.ctx_pct = ctx_pct;
                 }
-                Some(root)
+                root
             });
-            let repo_root = repo_root.unwrap_or(None);
             push_sorted(state, app, window);
             if let (Some(repo_root), Some(cost)) = (repo_root, incoming) {
                 super::session_ids::record_cost(&repo_root, key, cost);

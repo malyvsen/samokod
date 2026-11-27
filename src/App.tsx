@@ -154,6 +154,8 @@ export function App() {
 
 	const entry = selectedEntry(plans, selectedKey);
 	const readOnly = isReadOnly(entry);
+	const phase = entry?.phase ?? null;
+	const inPicker = repoRoot === null;
 	useSessionStart(selectedKey, chats, readOnly);
 	const planMd = usePlanMd(selectedKey, chat?.working ?? false);
 	const isScoping = selectedKey?.role === "scoping";
@@ -281,7 +283,7 @@ export function App() {
 	// Picker marks come from the initial list plus the global
 	// `open_repos_changed` handler above.
 	useEffect(() => {
-		if (repoRoot !== null) return;
+		if (!inPicker) return;
 		let cancelled = false;
 		listOpenRepos()
 			.then((repos) => {
@@ -294,10 +296,10 @@ export function App() {
 		return () => {
 			cancelled = true;
 		};
-	}, [repoRoot]);
+	}, [inPicker]);
 
 	useEffect(() => {
-		if (repoRoot === null) return;
+		if (inPicker) return;
 		function onFocus() {
 			refreshBranch()
 				.then((fetched) => {
@@ -311,7 +313,7 @@ export function App() {
 		return () => {
 			window.removeEventListener("focus", onFocus);
 		};
-	}, [repoRoot]);
+	}, [inPicker]);
 
 	const transcript = chat?.transcript ?? [];
 	const { scrollRef, onScroll } = usePinnedTranscript(selectedId, transcript);
@@ -650,7 +652,7 @@ export function App() {
 	}
 
 	async function handleNewPlan() {
-		if (repoRoot === null) return;
+		if (inPicker) return;
 		const current = selectedRef.current;
 		const currentDraft =
 			current === null ? null : (draft.draftFor(current) ?? null);
@@ -789,7 +791,7 @@ export function App() {
 			</div>
 			<div className="aurora b" />
 			<div className="grain" />
-			{repoRoot === null ? (
+			{inPicker ? (
 				<RepoPicker
 					title="SAMOKOD"
 					subtitle="open a git repository to start planning"
@@ -843,7 +845,7 @@ export function App() {
 								turn={liveTurnOf(chat)}
 								onStop={readOnly ? null : handleStop}
 								session={selectedKey}
-								phase={entry?.phase ?? null}
+								phase={phase}
 								onHistoryRetry={
 									chat?.start.kind === "failed" ? handleHistoryRetry : null
 								}
@@ -878,7 +880,7 @@ export function App() {
 								)}
 								{readOnly && (
 									<div className="ro-note">
-										This session is read-only - Plan is {entry?.phase}.
+										This session is read-only - Plan is {phase}.
 									</div>
 								)}
 							</Transcript>

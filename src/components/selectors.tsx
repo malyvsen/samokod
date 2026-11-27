@@ -9,42 +9,28 @@ export function pendingOptions(defaults: RepoDefaults): {
 	model: ConfigOptionView;
 	effort: ConfigOptionView;
 } {
-	const modelValue = defaults.model ?? null;
-	const effortValue = defaults.effort ?? null;
 	return {
-		model:
-			modelValue === null
-				? {
-						id: "model",
-						name: "Model",
-						currentValue: "",
-						options: [],
-						category: "model",
-					}
-				: {
-						id: "model",
-						name: "Model",
-						currentValue: modelValue,
-						options: [{ value: modelValue, name: modelValue }],
-						category: "model",
-					},
-		effort:
-			effortValue === null
-				? {
-						id: "effort",
-						name: "Effort",
-						currentValue: "",
-						options: [],
-						category: "thought_level",
-					}
-				: {
-						id: "effort",
-						name: "Effort",
-						currentValue: effortValue,
-						options: [{ value: effortValue, name: effortValue }],
-						category: "thought_level",
-					},
+		model: frozenOption("model", "Model", defaults.model, "model"),
+		effort: frozenOption("effort", "Effort", defaults.effort, "thought_level"),
 	};
+}
+
+function frozenOption(
+	id: string,
+	name: string,
+	value: string | null | undefined,
+	category: string,
+): ConfigOptionView {
+	const current = value ?? null;
+	return current === null
+		? { id, name, currentValue: "", options: [], category }
+		: {
+				id,
+				name,
+				currentValue: current,
+				options: [{ value: current, name: current }],
+				category,
+			};
 }
 
 export function splitOptions(options: ConfigOptionView[]): {
@@ -132,21 +118,11 @@ export function OptionDropdown({
 	);
 }
 
-export function EffortPlaceholder() {
+export function OptionPlaceholder({ label }: { label: string }) {
 	return (
 		<span className="dwrap">
 			<button className="dsel" type="button" disabled>
-				<span className="dlabel">Effort unavailable</span>
-			</button>
-		</span>
-	);
-}
-
-export function ModelPlaceholder() {
-	return (
-		<span className="dwrap">
-			<button className="dsel" type="button" disabled>
-				<span className="dlabel">Model unavailable</span>
+				<span className="dlabel">{label}</span>
 			</button>
 		</span>
 	);

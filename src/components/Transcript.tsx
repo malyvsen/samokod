@@ -69,6 +69,9 @@ export function Transcript({
 			? null
 			: (toolCallId: string, optionId: string) =>
 					onAnswer(session, toolCallId, optionId);
+	// Finished plans lock approval cards with the real phase in the tooltip.
+	const approvalLock =
+		phase === "completed" || phase === "cancelled" ? `Plan is ${phase}` : null;
 	// Run positions are stable because a turn only appends, so position
 	// keys keep box and row expansion intact across streaming chunks and
 	// live-freeze transitions. The session key resets expansion when the
@@ -89,7 +92,7 @@ export function Transcript({
 							onAnswer={boundAnswer}
 							live={index === liveIndex ? timing : null}
 							onStop={onStop}
-							phase={phase}
+							approvalLock={approvalLock}
 						/>
 					) : (
 						<ItemRow
@@ -97,7 +100,7 @@ export function Transcript({
 							item={group.item}
 							onRetry={onRetry}
 							onAnswer={boundAnswer}
-							phase={phase}
+							approvalLock={approvalLock}
 						/>
 					),
 				)}
@@ -176,14 +179,14 @@ function WorkBox({
 	onAnswer,
 	live = null,
 	onStop = null,
-	phase,
+	approvalLock,
 }: {
 	items: [RunItem, ...RunItem[]];
 	onRetry: (() => void) | null;
 	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
 	live?: LiveTiming | null;
 	onStop?: (() => void) | null;
-	phase: Phase | null;
+	approvalLock: string | null;
 }) {
 	const isLive = live !== null;
 	const hasUnresolvedApproval = items.some(
@@ -251,7 +254,7 @@ function WorkBox({
 						item={item}
 						onRetry={onRetry}
 						onAnswer={onAnswer}
-						phase={phase}
+						approvalLock={approvalLock}
 					/>
 				))}
 			</div>
@@ -344,18 +347,23 @@ function RunRow({
 	item,
 	onRetry,
 	onAnswer,
-	phase,
+	approvalLock,
 }: {
 	item: RunItem;
 	onRetry: (() => void) | null;
 	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
-	phase: Phase | null;
+	approvalLock: string | null;
 }) {
 	if (item.kind === "thought") {
 		return <ThoughtRow ms={item.ms} text={item.text} at={item.at} />;
 	}
 	return (
-		<ItemRow item={item} onRetry={onRetry} onAnswer={onAnswer} phase={phase} />
+		<ItemRow
+			item={item}
+			onRetry={onRetry}
+			onAnswer={onAnswer}
+			approvalLock={approvalLock}
+		/>
 	);
 }
 
@@ -397,12 +405,12 @@ function ItemRow({
 	item,
 	onRetry,
 	onAnswer,
-	phase,
+	approvalLock,
 }: {
 	item: Exclude<TranscriptItem, { kind: "thought" }>;
 	onRetry: (() => void) | null;
 	onAnswer: ((toolCallId: string, optionId: string) => void) | null;
-	phase: Phase | null;
+	approvalLock: string | null;
 }) {
 	switch (item.kind) {
 		case "user":
@@ -450,9 +458,6 @@ function ItemRow({
 			const reject = permission.options.find(
 				(option: PermissionOptionView) => option.kind === "reject",
 			);
-			const readOnly = phase === "completed" || phase === "cancelled";
-			const readOnlyTitle =
-				readOnly && phase !== null ? `Plan is ${phase}` : undefined;
 			return (
 				<div className="drow appr">
 					{item.at !== undefined && (
@@ -464,8 +469,10 @@ function ItemRow({
 							<button
 								className="tbtn primary"
 								type="button"
-								disabled={item.resolved || readOnly || onAnswer === null}
-								title={readOnlyTitle}
+								disabled={
+									item.resolved || approvalLock !== null || onAnswer === null
+								}
+								title={approvalLock ?? undefined}
 								onClick={() => onAnswer?.(permission.tool_call_id, allow.id)}
 							>
 								allow once
@@ -475,8 +482,10 @@ function ItemRow({
 							<button
 								className="tbtn danger"
 								type="button"
-								disabled={item.resolved || readOnly || onAnswer === null}
-								title={readOnlyTitle}
+								disabled={
+									item.resolved || approvalLock !== null || onAnswer === null
+								}
+								title={approvalLock ?? undefined}
 								onClick={() => onAnswer?.(permission.tool_call_id, reject.id)}
 							>
 								reject
@@ -549,8 +558,8 @@ function EmptyHint({
 	);
 }
 
-/// Copy for the empty transcript, one row per start phase. The unknown
-/// entry flickers only before the preparing event, so it shares the
+/// Copy for the empty transcript, one row per start phase. The null
+/// start only exists before the preparing event, so it shares the
 /// preparing copy for one steady line.
 function emptyHintCopy(
 	start: SessionStart | null,
