@@ -542,7 +542,7 @@ fn read_state_file(path: &Path) -> Option<PlanState> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
         Err(error) => {
             log::log!(
-                state_parse_log_level(path),
+                state_failure_log_level(path),
                 "failed to read {}: {error}",
                 path.display()
             );
@@ -553,7 +553,7 @@ fn read_state_file(path: &Path) -> Option<PlanState> {
         Ok(state) => Some(state),
         Err(error) => {
             log::log!(
-                state_parse_log_level(path),
+                state_failure_log_level(path),
                 "failed to parse {}: {error}",
                 path.display()
             );
@@ -562,24 +562,25 @@ fn read_state_file(path: &Path) -> Option<PlanState> {
     }
 }
 
-/// Log level for `state.json` read/parse failures: finished plans are
-/// expected to carry legacy files, so they stay quiet; genuinely corrupt
+/// Log level for `state.json` read/parse failures: finished plans may
+/// carry old string-form files, so they stay quiet; genuinely corrupt
 /// active plans still warn. Pure.
-fn state_parse_log_level(path: &Path) -> log::Level {
-    let phase = path.parent().and_then(|dir| dir.parent()).and_then(|dir| {
-        dir.file_name()
-            .and_then(|name| name.to_str())
-            .map(str::to_string)
-    });
-    match phase.as_deref() {
-        Some(name)
-            if name == Phase::Completed.dir_name() || name == Phase::Cancelled.dir_name() =>
-        {
-            log::Level::Debug
-        }
-        _ => log::Level::Warn,
+fn state_failure_log_level(path: &Path) -> log::Level {
+    let finished = path
+        .parent()
+        .and_then(|plan| plan.parent())
+        .and_then(|phase| phase.file_name())
+        .and_then(|name| name.to_str())
+        .is_some_and(|dir| {
+            dir == Phase::Completed.dir_name() || dir == Phase::Cancelled.dir_name()
+        });
+    if finished {
+        log::Level::Debug
+    } else {
+        log::Level::Warn
     }
 }
+
 /// Sort rank for the plans list: scoping, executing, queued, rebasing,
 /// evergreening, completed, cancelled.
 pub fn phase_rank(phase: Phase) -> u8 {
@@ -1617,7 +1618,7 @@ mod tests {
                 .join(phase.dir_name())
                 .join("2026-09-26.08-41-03")
                 .join(STATE_FILE);
-            assert_eq!(state_parse_log_level(&path), log::Level::Debug);
+            assert_eq!(state_failure_log_level(&path), log::Level::Debug);
         }
     }
 
@@ -1635,10 +1636,10 @@ mod tests {
                 .join(phase.dir_name())
                 .join("2026-09-26.08-41-03")
                 .join(STATE_FILE);
-            assert_eq!(state_parse_log_level(&path), log::Level::Warn);
+            assert_eq!(state_failure_log_level(&path), log::Level::Warn);
         }
         assert_eq!(
-            state_parse_log_level(Path::new("/tmp/state.json")),
+            state_failure_log_level(Path::new("/tmp/state.json")),
             log::Level::Warn
         );
     }

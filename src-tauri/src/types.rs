@@ -401,8 +401,8 @@ pub struct OpenRepoEntry {
 }
 
 impl AppEvent {
-    /// Log level for the emit line: turn lifecycle stays at `info` so the
-    /// log file greps for queue recipes, high-volume per-chunk progress
+    /// Log level for the emit line: turn lifecycle stays at `info` so it
+    /// stays greppable in the log file, high-volume per-chunk progress
     /// drops to `debug`. Pure.
     pub fn log_level(&self) -> log::Level {
         match self {
