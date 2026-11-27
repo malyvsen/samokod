@@ -179,7 +179,6 @@ pub struct SessionStatusView {
 }
 
 /// Spend totals for one session, mirrored from the latest `UsageUpdate`.
-/// `ctx_pct` matches the `SpendTick` event field name.
 #[derive(Debug, Clone, Serialize, PartialEq, Default, Type)]
 pub struct SpendStatusView {
     pub cost: f64,
@@ -306,11 +305,6 @@ pub enum AppEvent {
         todos: Vec<TodoView>,
         changes: Vec<TodoChangeView>,
     },
-    SpendTick {
-        session: SessionKey,
-        cost: f64,
-        ctx_pct: f64,
-    },
     BranchChanged {
         branch: String,
     },
@@ -408,8 +402,7 @@ impl AppEvent {
         match self {
             AppEvent::AgentText { .. }
             | AppEvent::AgentThought { .. }
-            | AppEvent::ToolLine { .. }
-            | AppEvent::SpendTick { .. } => log::Level::Debug,
+            | AppEvent::ToolLine { .. } => log::Level::Debug,
             _ => log::Level::Info,
         }
     }
@@ -459,9 +452,6 @@ impl AppEvent {
             }
             AppEvent::TodosChanged { session, .. } => {
                 format!("todos_changed session={}::{:?}", session.plan, session.role)
-            }
-            AppEvent::SpendTick { session, .. } => {
-                format!("spend_tick session={}::{:?}", session.plan, session.role)
             }
             AppEvent::SessionReset { session } => {
                 format!("session_reset session={}::{:?}", session.plan, session.role)
@@ -605,11 +595,6 @@ mod tests {
             AppEvent::ToolLine {
                 session: key.clone(),
                 line,
-            },
-            AppEvent::SpendTick {
-                session: key.clone(),
-                cost: 1.0,
-                ctx_pct: 2.0,
             },
         ] {
             assert_eq!(event.log_level(), log::Level::Debug);

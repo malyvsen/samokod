@@ -52,7 +52,7 @@ export type AppEvent_Deserialize = { type: "agent_text"; session: SessionKey; ch
  *  Replayed user message chunk. Only emitted while a session's history
  *  loads.
  */
-{ type: "user_text"; session: SessionKey; chunk: string } | { type: "tool_line"; session: SessionKey; line: ToolLineView } | { type: "turn_done"; session: SessionKey } | { type: "turn_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "agent_exited"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "permission_asked"; session: SessionKey; permission: PermissionView } | { type: "permission_resolved"; session: SessionKey; tool_call_id: string } | { type: "config_options"; session: SessionKey; options: ConfigOptionView_Deserialize[] } | { type: "todos_changed"; session: SessionKey; todos: TodoView[]; changes: TodoChangeView[] } | { type: "spend_tick"; session: SessionKey; cost: number | null; ctx_pct: number | null } | { type: "branch_changed"; branch: string } | { type: "session_reset"; session: SessionKey } | 
+{ type: "user_text"; session: SessionKey; chunk: string } | { type: "tool_line"; session: SessionKey; line: ToolLineView } | { type: "turn_done"; session: SessionKey } | { type: "turn_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "agent_exited"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "permission_asked"; session: SessionKey; permission: PermissionView } | { type: "permission_resolved"; session: SessionKey; tool_call_id: string } | { type: "config_options"; session: SessionKey; options: ConfigOptionView_Deserialize[] } | { type: "todos_changed"; session: SessionKey; todos: TodoView[]; changes: TodoChangeView[] } | { type: "branch_changed"; branch: string } | { type: "session_reset"; session: SessionKey } | 
 /**
  *  History load started for one session. Emitted immediately after the
  *  history slot is claimed, before the slow session-ID probes: the
@@ -98,7 +98,7 @@ export type AppEvent_Serialize = { type: "agent_text"; session: SessionKey; chun
  *  Replayed user message chunk. Only emitted while a session's history
  *  loads.
  */
-{ type: "user_text"; session: SessionKey; chunk: string } | { type: "tool_line"; session: SessionKey; line: ToolLineView } | { type: "turn_done"; session: SessionKey } | { type: "turn_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "agent_exited"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "permission_asked"; session: SessionKey; permission: PermissionView } | { type: "permission_resolved"; session: SessionKey; tool_call_id: string } | { type: "config_options"; session: SessionKey; options: ConfigOptionView_Serialize[] } | { type: "todos_changed"; session: SessionKey; todos: TodoView[]; changes: TodoChangeView[] } | { type: "spend_tick"; session: SessionKey; cost: number | null; ctx_pct: number | null } | { type: "branch_changed"; branch: string } | { type: "session_reset"; session: SessionKey } | 
+{ type: "user_text"; session: SessionKey; chunk: string } | { type: "tool_line"; session: SessionKey; line: ToolLineView } | { type: "turn_done"; session: SessionKey } | { type: "turn_failed"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "agent_exited"; session: SessionKey; raw: string; hint: string; retryable: boolean } | { type: "permission_asked"; session: SessionKey; permission: PermissionView } | { type: "permission_resolved"; session: SessionKey; tool_call_id: string } | { type: "config_options"; session: SessionKey; options: ConfigOptionView_Serialize[] } | { type: "todos_changed"; session: SessionKey; todos: TodoView[]; changes: TodoChangeView[] } | { type: "branch_changed"; branch: string } | { type: "session_reset"; session: SessionKey } | 
 /**
  *  History load started for one session. Emitted immediately after the
  *  history slot is claimed, before the slow session-ID probes: the
@@ -430,10 +430,7 @@ export type SessionStatusView_Serialize = {
 	todos: TodoView[],
 };
 
-/**
- *  Spend totals for one session, mirrored from the latest `UsageUpdate`.
- *  `ctx_pct` matches the `SpendTick` event field name.
- */
+/**  Spend totals for one session, mirrored from the latest `UsageUpdate`. */
 export type SpendStatusView = {
 	cost: number | null,
 	ctx_pct: number | null,

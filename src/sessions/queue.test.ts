@@ -2,9 +2,9 @@ import { renderHook } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 import { testKey } from "../fixtures";
 import {
-	drainCandidate,
 	moveQueuedItem,
 	queueReducer,
+	resolveDrain,
 	useSessionQueues,
 } from "./queue";
 
@@ -186,24 +186,42 @@ describe("moveQueuedItem", () => {
 	});
 });
 
-describe("drainCandidate", () => {
+describe("resolveDrain", () => {
 	const head = { id: "1", text: "first" };
 	const second = { id: "2", text: "second" };
 	test("idle with head and no edit drains", () => {
-		expect(drainCandidate([head], null, "idle")).toEqual(head);
+		expect(resolveDrain([head], null, "idle")).toEqual({ kind: "drain", head });
 	});
 	test("idle empty never drains", () => {
-		expect(drainCandidate([], null, "idle")).toBeNull();
+		expect(resolveDrain([], null, "idle")).toEqual({
+			kind: "blocked",
+			reason: "empty-queue",
+		});
 	});
 	test("non-idle never drains", () => {
-		expect(drainCandidate([head], null, "working")).toBeNull();
-		expect(drainCandidate([head], null, "approval")).toBeNull();
-		expect(drainCandidate([head], null, "failed")).toBeNull();
+		expect(resolveDrain([head], null, "working")).toEqual({
+			kind: "blocked",
+			reason: "non-idle",
+		});
+		expect(resolveDrain([head], null, "approval")).toEqual({
+			kind: "blocked",
+			reason: "non-idle",
+		});
+		expect(resolveDrain([head], null, "failed")).toEqual({
+			kind: "blocked",
+			reason: "non-idle",
+		});
 	});
 	test("editing head holds the drain", () => {
-		expect(drainCandidate([head, second], "1", "idle")).toBeNull();
+		expect(resolveDrain([head, second], "1", "idle")).toEqual({
+			kind: "blocked",
+			reason: "editing-head",
+		});
 	});
 	test("editing non-head still drains", () => {
-		expect(drainCandidate([head, second], "2", "idle")).toEqual(head);
+		expect(resolveDrain([head, second], "2", "idle")).toEqual({
+			kind: "drain",
+			head,
+		});
 	});
 });

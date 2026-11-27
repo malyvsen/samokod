@@ -570,25 +570,6 @@ describe("plan", () => {
 		);
 	});
 
-	test("background spend_tick refresh keeps focus", async () => {
-		await openChat(api);
-		const box = textbox();
-		box.focus();
-		emitAppEvent(api, {
-			type: "spend_tick",
-			session: { plan: "other-plan", role: "scoping" },
-			cost: 1.24,
-			ctx_pct: 38.4,
-		});
-		emitAppEvent(api, {
-			type: "plans_changed",
-			plans: [testEntry()],
-			selected: { plan: "other-plan", role: "scoping" },
-		});
-		expect(document.activeElement).toBe(box);
-		expect(textbox()).toBeInTheDocument();
-	});
-
 	test("selecting a row swaps transcript while scoping shows the plan", async () => {
 		api.openRepo.mockResolvedValue({
 			repo_root: "/repo",

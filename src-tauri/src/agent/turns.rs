@@ -431,12 +431,12 @@ pub(crate) fn handle_notification(
         }
         acp::SessionUpdate::UsageUpdate(update) => {
             // A missing cost means "no info", never zero: keep the last
-            // total for live state, ticks, and storage.
+            // total for live state and storage.
             let incoming = update.cost.as_ref().map(|cost| cost.amount);
             let ctx_pct = context_pct(update.used, update.size);
             // Snapshot the repo root under the lock, then persist after it
             // is released so file IO never runs under the mutex.
-            let outcome = lock_backend(state).and_then(|mut backend| {
+            let repo_root = lock_backend(state).and_then(|mut backend| {
                 let win = backend.windows.get_mut(window)?;
                 let root = win.repo_root.clone();
                 let kept = win.sessions.get(key).map(|live| live.cost).unwrap_or(0.0);
@@ -445,18 +445,9 @@ pub(crate) fn handle_notification(
                     live.cost = cost;
                     live.ctx_pct = ctx_pct;
                 }
-                Some((root, cost))
+                Some(root)
             });
-            let (repo_root, cost) = outcome.unwrap_or((None, incoming.unwrap_or(0.0)));
-            emit_event(
-                app,
-                window,
-                AppEvent::SpendTick {
-                    session: key.clone(),
-                    cost,
-                    ctx_pct,
-                },
-            );
+            let repo_root = repo_root.unwrap_or(None);
             push_sorted(state, app, window);
             if let (Some(repo_root), Some(cost)) = (repo_root, incoming) {
                 super::session_ids::record_cost(&repo_root, key, cost);

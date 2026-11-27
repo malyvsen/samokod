@@ -144,15 +144,6 @@ export type QueueAction =
 			direction: QueueMoveDirection;
 	  };
 
-export function drainCandidate(
-	items: QueuedMessage[],
-	editingId: string | null,
-	status: AgentStatus,
-): QueuedMessage | null {
-	const decision = resolveDrain(items, editingId, status);
-	return decision.kind === "drain" ? decision.head : null;
-}
-
 export function moveQueuedItem(
 	items: QueuedMessage[],
 	id: string,

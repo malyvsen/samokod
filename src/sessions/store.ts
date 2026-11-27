@@ -353,10 +353,6 @@ export function applySessionEvent(
 					live: replaying ? chat.live : null,
 				};
 			});
-		case "spend_tick":
-			// Spend lives on the plans-list session status (the hover
-			// tooltip); per-chat totals are obsolete.
-			return chats;
 		case "session_reset":
 			return updateEntry(chats, event.session, (chat) => ({
 				...chat,
