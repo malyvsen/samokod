@@ -45,11 +45,11 @@ pub fn session_env(
     window: &str,
     key: &SessionKey,
     plan: &PlanRef,
-    system: &str,
+    instructions: &str,
 ) -> HashMap<String, String> {
-    let instructions = instructions_path(window, key);
-    write_instructions_file(&instructions, system);
-    agent_env(plan, &instructions)
+    let path = instructions_path(window, key);
+    write_instructions_file(&path, instructions);
+    agent_env(plan, &path)
 }
 
 /// Extra spawn env pinning all agents. Pure: JSON only, no process access.
@@ -116,8 +116,8 @@ pub fn instructions_path(window: &str, key: &SessionKey) -> PathBuf {
 
 /// Write role instructions for OpenCode's `instructions` source. Best
 /// effort: logs on failure and keeps the session.
-pub fn write_instructions_file(path: &Path, system: &str) {
-    if let Err(error) = std::fs::write(path, system) {
+pub fn write_instructions_file(path: &Path, instructions: &str) {
+    if let Err(error) = std::fs::write(path, instructions) {
         log::warn!(
             "failed to write instructions file {}: {error}",
             path.display()
@@ -271,19 +271,19 @@ pub fn plan_display(plan: &PlanRef) -> String {
     format!(".samokod/plans/{}/{}", plan.phase.dir_name(), plan.name)
 }
 
-/// Scoping instructions with the plan dir filled in. System text for
-/// `session/new`, never rendered. Pure.
-pub fn scoping_system(plan_dir: &str) -> String {
+/// Scoping instructions with the plan dir filled in. Pure.
+pub fn scoping_instructions(plan_dir: &str) -> String {
     SCOPING_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
-/// Executing role and instructions. System text for `session/new`. Pure.
-pub fn executing_system(plan_dir: &str) -> String {
+/// Executing instructions with the plan dir filled in. Pure.
+pub fn executing_instructions(plan_dir: &str) -> String {
     EXECUTING_PROMPT.replace("{{PLAN_DIR}}", plan_dir)
 }
 
-/// Evergreening role and instructions. System text for `session/new`. Pure.
-pub fn evergreening_system(
+/// Evergreening instructions with worktree coordinates and landed commits
+/// filled in. Pure.
+pub fn evergreening_instructions(
     worktree_path: &str,
     worktree_branch: &str,
     plan_md_abs_path: &str,
@@ -298,8 +298,8 @@ pub fn evergreening_system(
         .replace("{{COMMITS}}", commits)
 }
 
-/// Rebasing role and instructions. System text for `session/new`. Pure.
-pub fn rebasing_system(
+/// Rebasing instructions with worktree coordinates filled in. Pure.
+pub fn rebasing_instructions(
     worktree_branch: &str,
     target_branch: &str,
     worktree_path: &str,
@@ -400,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn all_agents_are_primary_without_system_field() {
+    fn all_agents_are_primary_without_system_or_prompt() {
         let config = config(&test_plan());
         for agent in [
             SCOPING_AGENT,
@@ -679,103 +679,96 @@ mod tests {
     }
 
     #[test]
-    fn evergreening_system_fills_every_placeholder() {
-        let system = evergreening_system(
+    fn evergreening_instructions_fills_every_placeholder() {
+        let instructions = evergreening_instructions(
             "/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature",
             "samokod/shiny-feature",
             "/repo/.samokod/plans/evergreening/2026-09-26.14-53-26.shiny-feature/plan.md",
             "feature",
             "0923748 feat: blabla\n009fb12 fix: blabla",
         );
-        assert!(system.contains("/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature"));
-        assert!(system.contains("samokod/shiny-feature"));
-        assert!(system.contains(
+        assert!(
+            instructions.contains("/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature")
+        );
+        assert!(instructions.contains("samokod/shiny-feature"));
+        assert!(instructions.contains(
             "/repo/.samokod/plans/evergreening/2026-09-26.14-53-26.shiny-feature/plan.md"
         ));
-        assert!(system.contains("feature"));
-        assert!(system.contains("0923748 feat: blabla"));
-        assert!(system.contains("009fb12 fix: blabla"));
-        assert!(!system.contains("{{WORKTREE_PATH}}"));
-        assert!(!system.contains("{{WORKTREE_BRANCH}}"));
-        assert!(!system.contains("{{PLAN_MD_ABS_PATH}}"));
-        assert!(!system.contains("{{TARGET_BRANCH}}"));
-        assert!(!system.contains("{{COMMITS}}"));
+        assert!(instructions.contains("feature"));
+        assert!(instructions.contains("0923748 feat: blabla"));
+        assert!(instructions.contains("009fb12 fix: blabla"));
     }
 
     #[test]
-    fn rebasing_system_fills_every_placeholder() {
-        let system = rebasing_system(
+    fn rebasing_instructions_fills_every_placeholder() {
+        let instructions = rebasing_instructions(
             "samokod/shiny-feature",
             "feature",
             "/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature",
             "/repo/.samokod/plans/rebasing/2026-09-26.14-53-26.shiny-feature/plan.md",
         );
-        assert!(system.contains("samokod/shiny-feature"));
-        assert!(system.contains("`feature`"));
-        assert!(system.contains("/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature"));
-        assert!(!system.contains("{{WORKTREE_BRANCH}}"));
-        assert!(!system.contains("{{TARGET_BRANCH}}"));
-        assert!(!system.contains("{{WORKTREE_PATH}}"));
-        assert!(!system.contains("{{PLAN_MD_ABS_PATH}}"));
+        assert!(instructions.contains("samokod/shiny-feature"));
+        assert!(instructions.contains("`feature`"));
+        assert!(
+            instructions.contains("/repo/.samokod/worktrees/2026-09-26.14-53-26.shiny-feature")
+        );
     }
 
     #[test]
-    fn scoping_system_names_plan_path() {
-        let system = scoping_system(".samokod/plans/scoping/ts");
-        assert!(system.contains(".samokod/plans/scoping/ts/plan.md"));
-        assert!(!system.contains("{{PLAN_DIR}}"));
+    fn scoping_instructions_names_plan_path() {
+        let instructions = scoping_instructions(".samokod/plans/scoping/ts");
+        assert!(instructions.contains(".samokod/plans/scoping/ts/plan.md"));
     }
 
     #[test]
-    fn executing_system_names_plan_path() {
-        let system = executing_system(".samokod/plans/executing/ts.slug");
-        assert!(system.contains(".samokod/plans/executing/ts.slug/plan.md"));
-        assert!(!system.contains("{{PLAN_DIR}}"));
+    fn executing_instructions_names_plan_path() {
+        let instructions = executing_instructions(".samokod/plans/executing/ts.slug");
+        assert!(instructions.contains(".samokod/plans/executing/ts.slug/plan.md"));
     }
 
     #[test]
-    fn scoping_system_enforces_commit_per_step() {
-        let system = scoping_system(".samokod/plans/scoping/ts");
-        assert!(system.contains("scoping agent"));
-        assert!(system.contains("starts with the word Commit"));
-        assert!(system.contains("(non-commit step)"));
-        assert!(system.contains("never be broken"));
+    fn scoping_instructions_enforces_commit_per_step() {
+        let instructions = scoping_instructions(".samokod/plans/scoping/ts");
+        assert!(instructions.contains("scoping agent"));
+        assert!(instructions.contains("starts with the word Commit"));
+        assert!(instructions.contains("(non-commit step)"));
+        assert!(instructions.contains("never be broken"));
     }
 
     #[test]
-    fn scoping_system_resolves_unknowns_without_manual_steps() {
-        let system = scoping_system(".samokod/plans/scoping/ts");
-        assert!(system.contains("Run every experiment"));
-        assert!(system.contains("no spikes"));
-        assert!(system.contains("what must hold"));
-        assert!(system.contains("visually confirm"));
-        assert!(system.contains("automated proxy"));
+    fn scoping_instructions_resolves_unknowns_without_manual_steps() {
+        let instructions = scoping_instructions(".samokod/plans/scoping/ts");
+        assert!(instructions.contains("Run every experiment"));
+        assert!(instructions.contains("no spikes"));
+        assert!(instructions.contains("what must hold"));
+        assert!(instructions.contains("visually confirm"));
+        assert!(instructions.contains("automated proxy"));
     }
 
     #[test]
-    fn executing_system_commits_per_step_with_clean_tree() {
-        let system = executing_system(".samokod/plans/executing/ts.slug");
-        assert!(system.contains("executing agent"));
-        assert!(system.contains("commit immediately"));
-        assert!(system.contains("Never batch"));
-        assert!(system.contains("git status --short"));
-        assert!(system.contains("must come back clean"));
-        assert!(system.contains("no commit stays red"));
+    fn executing_instructions_commits_per_step_with_clean_tree() {
+        let instructions = executing_instructions(".samokod/plans/executing/ts.slug");
+        assert!(instructions.contains("executing agent"));
+        assert!(instructions.contains("commit immediately"));
+        assert!(instructions.contains("Never batch"));
+        assert!(instructions.contains("git status --short"));
+        assert!(instructions.contains("must come back clean"));
+        assert!(instructions.contains("no commit stays red"));
     }
 
     #[test]
-    fn all_systems_leave_no_placeholders() {
+    fn all_instructions_leave_no_placeholders() {
         let dir = ".samokod/plans/scoping/ts";
-        let systems = [
-            scoping_system(dir),
-            executing_system(dir),
-            rebasing_system(
+        let instructions_list = [
+            scoping_instructions(dir),
+            executing_instructions(dir),
+            rebasing_instructions(
                 "samokod/ts",
                 "main",
                 "/repo/worktree",
                 "/repo/.samokod/plans/rebasing/ts/plan.md",
             ),
-            evergreening_system(
+            evergreening_instructions(
                 "/repo/worktree",
                 "samokod/ts",
                 "/repo/.samokod/plans/evergreening/ts/plan.md",
@@ -783,9 +776,9 @@ mod tests {
                 "abc feat: x",
             ),
         ];
-        for system in &systems {
-            assert!(!system.contains("{{"));
-            assert!(!system.contains("}}"));
+        for instructions in &instructions_list {
+            assert!(!instructions.contains("{{"));
+            assert!(!instructions.contains("}}"));
         }
     }
 
@@ -856,11 +849,11 @@ mod tests {
             role: SessionRole::Scoping,
         };
         let plan = test_plan();
-        let system = scoping_system(".samokod/plans/scoping/ts");
-        let env = session_env("main", &key, &plan, &system);
+        let instructions = scoping_instructions(".samokod/plans/scoping/ts");
+        let env = session_env("main", &key, &plan, &instructions);
         let path = instructions_path("main", &key);
         let back = std::fs::read_to_string(&path).expect("read back");
-        assert_eq!(back, system);
+        assert_eq!(back, instructions);
         let content = env.get(CONFIG_CONTENT_ENV).expect("config content");
         let parsed: Value = serde_json::from_str(content).expect("valid JSON");
         assert_eq!(
@@ -871,13 +864,13 @@ mod tests {
     }
 
     #[test]
-    fn instructions_file_roundtrips_system_text() {
+    fn instructions_file_roundtrips_text() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("role.md");
-        let system = scoping_system(".samokod/plans/scoping/ts");
-        write_instructions_file(&path, &system);
+        let instructions = scoping_instructions(".samokod/plans/scoping/ts");
+        write_instructions_file(&path, &instructions);
         let back = std::fs::read_to_string(&path).expect("read back");
-        assert_eq!(back, system);
-        assert!(!back.contains("{{PLAN_DIR}}"));
+        assert_eq!(back, instructions);
+        assert!(!back.contains("{{"));
     }
 }

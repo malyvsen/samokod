@@ -21,7 +21,7 @@ use crate::plans::{self, Phase};
 use crate::types::{AgentError, PlansUpdate, SessionKey, SessionRole};
 
 use super::queue;
-use super::session::{ActivePlan, spawn_system_text};
+use super::session::{ActivePlan, spawn_instructions_text};
 use super::{AgentManager, WorktreeLive, lock_backend};
 
 /// Minimal trigger waking an auto-started agent. Role instructions already
@@ -560,8 +560,8 @@ impl AgentManager {
 
     /// Shared spawn-plus-trigger for the three agent-start transitions
     /// (`Execute`, `BeginEvergreening`, `StartRebasing`): spawn the session
-    /// with role instructions via the `instructions` file, then send a minimal
-    /// so the agent wakes. The caller moves the plan and drops the old live
+    /// with role instructions via the `instructions` file, then send a
+    /// minimal trigger so the agent wakes. The caller moves the plan and drops the old live
     /// session first; the plan name travels inside `active` so the prompted
     /// flag follows it. `status` carries fresh worktree coordinates for the
     /// rebasing and evergreening starts. Follows its own move only.
@@ -574,14 +574,14 @@ impl AgentManager {
         active: ActivePlan,
         status: Option<&WorktreeLive>,
     ) -> Result<PlansUpdate, AgentError> {
-        let system = spawn_system_text(&active, repo_root, branch, status);
+        let instructions = spawn_instructions_text(&active, repo_root, branch, status);
         let plan_name = active.name.clone();
         let role = active.role().ok_or_else(|| AgentError::RequestFailed {
             raw: "cannot open a session for a finished plan".to_string(),
         })?;
         let agent = opencode::agent_for(role);
         let (connection, session_id, key) = self
-            .spawn_session(window, repo_root, branch, active, agent, &system)
+            .spawn_session(window, repo_root, branch, active, agent, &instructions)
             .await?;
         self.select_if_viewed(window, acted_plan, key.clone());
         self.mark_prompted(window, &plan_name);

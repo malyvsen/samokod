@@ -98,14 +98,15 @@ impl ActivePlan {
     }
 }
 
-/// System instructions for a fresh ACP session. Pure: placeholders filled,
-/// no IO. Scoping uses the repo-relative display path, executing the
-/// absolute plan dir, rebasing the worktree path plus branches, evergreening
-/// those plus the landed commits. `status` carries fresh worktree coordinates
-/// when the caller already holds them (transition core); without it the
-/// coordinates derive from the plan name and checkout branch with empty
-/// commits. Prefer `system_text_for`, which fetches the live status.
-pub(crate) fn spawn_system_text(
+/// Role instructions for a fresh agent session, written to the
+/// `instructions` file. Pure: placeholders filled, no IO. Scoping uses the
+/// repo-relative display path, executing the absolute plan dir, rebasing the
+/// worktree path plus branches, evergreening those plus the landed commits.
+/// `status` carries fresh worktree coordinates when the caller already holds
+/// them (transition core); without it the coordinates derive from the plan
+/// name and checkout branch with empty commits. Prefer
+/// `instructions_text_for`, which fetches the live status.
+pub(crate) fn spawn_instructions_text(
     plan: &ActivePlan,
     repo_root: &Path,
     checkout_branch: &str,
@@ -114,7 +115,7 @@ pub(crate) fn spawn_system_text(
     match plan.phase {
         plans::Phase::Scoping => {
             let display = opencode::plan_display(&plan.plan_ref());
-            opencode::scoping_system(&display)
+            opencode::scoping_instructions(&display)
         }
         plans::Phase::Executing => {
             let plan_dir_abs = plan
@@ -122,7 +123,7 @@ pub(crate) fn spawn_system_text(
                 .path(repo_root)
                 .to_string_lossy()
                 .to_string();
-            opencode::executing_system(&plan_dir_abs)
+            opencode::executing_instructions(&plan_dir_abs)
         }
         plans::Phase::Rebasing => {
             let plan_md_abs = plan
@@ -132,7 +133,7 @@ pub(crate) fn spawn_system_text(
                 .to_string();
             let (worktree_branch, target_branch, path) =
                 worktree_coords(repo_root, checkout_branch, &plan.name, status);
-            opencode::rebasing_system(&worktree_branch, &target_branch, &path, &plan_md_abs)
+            opencode::rebasing_instructions(&worktree_branch, &target_branch, &path, &plan_md_abs)
         }
         plans::Phase::Evergreening => {
             let plan_md_abs = plan
@@ -145,7 +146,7 @@ pub(crate) fn spawn_system_text(
             let commits = status
                 .map(|live| live.commits.join("\n"))
                 .unwrap_or_default();
-            opencode::evergreening_system(
+            opencode::evergreening_instructions(
                 &path,
                 &worktree_branch,
                 &plan_md_abs,
@@ -157,7 +158,7 @@ pub(crate) fn spawn_system_text(
     }
 }
 
-/// Worktree coordinates for system text: the live status when the caller
+/// Worktree coordinates for instructions text: the live status when the caller
 /// holds it, else derived from the plan name and checkout branch. Pure.
 fn worktree_coords(
     repo_root: &Path,
@@ -185,7 +186,7 @@ impl AgentManager {
     /// Role instructions for spawning or reloading: live worktree
     /// coordinates for rebasing and evergreening, derived coordinates when
     /// the worktree is gone so spawning never blocks on status.
-    pub(crate) fn system_text_for(
+    pub(crate) fn instructions_text_for(
         &self,
         window: &str,
         repo_root: &Path,
@@ -210,7 +211,7 @@ impl AgentManager {
         } else {
             None
         };
-        spawn_system_text(plan, repo_root, branch, status.as_ref())
+        spawn_instructions_text(plan, repo_root, branch, status.as_ref())
     }
 }
 
@@ -314,14 +315,14 @@ impl AgentManager {
         branch: &str,
         plan: ActivePlan,
         agent: &str,
-        system: &str,
+        instructions: &str,
     ) -> Result<(ConnectionTo<Agent>, String, SessionKey), AgentError> {
         let spawn_start = std::time::Instant::now();
         let key = plan.key().ok_or_else(|| AgentError::RequestFailed {
             raw: "cannot open a session for a finished plan".to_string(),
         })?;
         let effective = self.config_defaults(repo_root);
-        let env = opencode::session_env(window, &key, &plan.plan_ref(), system);
+        let env = opencode::session_env(window, &key, &plan.plan_ref(), instructions);
         let connection = self.ensure_connection_for(window, &key, env).await?;
         let cwd = plan.cwd(repo_root);
         let response = connection
@@ -505,8 +506,8 @@ impl AgentManager {
     /// `ensure_live` (which claims) and `warm_session` (which holds its
     /// own claim). Pending scoping names spawn without a directory; the
     /// first prompt materializes it later. Warmed sessions compute the same
-    /// system text as the transition core so the agent wakes with the full
-    /// role instructions and no prompt yet.
+    /// instructions text as the transition core so the agent wakes with the
+    /// full role instructions and no prompt yet.
     pub(crate) async fn ensure_live_claimed(
         &self,
         window: &str,
@@ -534,17 +535,17 @@ impl AgentManager {
             });
         }
         let plan = ActivePlan::for_session(key);
-        let system = self.system_text_for(window, &repo_root, &branch, &plan);
+        let instructions = self.instructions_text_for(window, &repo_root, &branch, &plan);
         let agent = opencode::agent_for(key.role);
         let (connection, session_id, _) = self
-            .spawn_session(window, &repo_root, &branch, plan, agent, &system)
+            .spawn_session(window, &repo_root, &branch, plan, agent, &instructions)
             .await?;
         Ok((connection, session_id))
     }
 
     /// Restore a past session's history via `session/load`: the replay
-    /// streams through the same global notification path as live turns, so the transcript
-    /// rebuilds with no extra mapping except user bubbles. Single-flights
+    /// streams through the same global notification path as live turns, so
+    /// the transcript rebuilds with no extra mapping except user bubbles. Single-flights
     /// on the history slot; a live turn owns its session, so replays never
     /// run over a working key. Finished plans replay read-only history the
     /// same way. Plans without a persisted ID have no past at all (a
@@ -639,8 +640,8 @@ impl AgentManager {
                 .await;
         };
         let plan = ActivePlan::for_session(&session);
-        let system = self.system_text_for(window, &repo_root, &branch, &plan);
-        let env = opencode::session_env(window, &session, &plan.plan_ref(), &system);
+        let instructions = self.instructions_text_for(window, &repo_root, &branch, &plan);
+        let env = opencode::session_env(window, &session, &plan.plan_ref(), &instructions);
         let connection = match self.ensure_connection_for(window, &session, env).await {
             Ok(connection) => connection,
             Err(error) => {
@@ -1150,35 +1151,35 @@ mod tests {
     }
 
     #[test]
-    fn system_text_names_role_paths_without_placeholders() {
+    fn instructions_text_names_role_paths_without_placeholders() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         crate::plans::ensure_structure(root).expect("ensure");
 
         let scoping = ActivePlan::new("ts".to_string(), plans::Phase::Scoping);
-        let scoping_system = spawn_system_text(&scoping, root, "main", None);
-        assert!(scoping_system.contains(".samokod/plans/scoping/ts/plan.md"));
-        assert!(!scoping_system.contains("{{"));
+        let scoping_instructions = spawn_instructions_text(&scoping, root, "main", None);
+        assert!(scoping_instructions.contains(".samokod/plans/scoping/ts/plan.md"));
+        assert!(!scoping_instructions.contains("{{"));
 
         let executing = ActivePlan::new("ts.slug".to_string(), plans::Phase::Executing);
-        let executing_system = spawn_system_text(&executing, root, "main", None);
-        assert!(executing_system.contains("ts.slug/plan.md"));
-        assert!(!executing_system.contains("{{"));
+        let executing_instructions = spawn_instructions_text(&executing, root, "main", None);
+        assert!(executing_instructions.contains("ts.slug/plan.md"));
+        assert!(!executing_instructions.contains("{{"));
 
         let rebasing = ActivePlan::new("ts".to_string(), plans::Phase::Rebasing);
-        let rebasing_system = spawn_system_text(&rebasing, root, "main", None);
-        assert!(rebasing_system.contains("samokod/ts"));
-        assert!(rebasing_system.contains("main"));
-        assert!(!rebasing_system.contains("{{"));
+        let rebasing_instructions = spawn_instructions_text(&rebasing, root, "main", None);
+        assert!(rebasing_instructions.contains("samokod/ts"));
+        assert!(rebasing_instructions.contains("main"));
+        assert!(!rebasing_instructions.contains("{{"));
 
         let evergreening = ActivePlan::new("ts".to_string(), plans::Phase::Evergreening);
-        let evergreening_system = spawn_system_text(&evergreening, root, "main", None);
-        assert!(evergreening_system.contains("samokod/ts"));
-        assert!(!evergreening_system.contains("{{"));
+        let evergreening_instructions = spawn_instructions_text(&evergreening, root, "main", None);
+        assert!(evergreening_instructions.contains("samokod/ts"));
+        assert!(!evergreening_instructions.contains("{{"));
     }
 
     #[test]
-    fn system_text_prefers_live_worktree_coordinates() {
+    fn instructions_text_prefers_live_worktree_coordinates() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
         crate::plans::ensure_structure(root).expect("ensure");
@@ -1186,15 +1187,16 @@ mod tests {
         let status = live_status(&worktree, vec!["0923748 feat: blabla".to_string()]);
 
         let rebasing = ActivePlan::new("ts".to_string(), plans::Phase::Rebasing);
-        let rebasing_system = spawn_system_text(&rebasing, root, "main", Some(&status));
-        assert!(rebasing_system.contains("samokod/ts"));
-        assert!(rebasing_system.contains("feature"));
-        assert!(rebasing_system.contains(&worktree.to_string_lossy().to_string()));
-        assert!(!rebasing_system.contains("{{"));
+        let rebasing_instructions = spawn_instructions_text(&rebasing, root, "main", Some(&status));
+        assert!(rebasing_instructions.contains("samokod/ts"));
+        assert!(rebasing_instructions.contains("feature"));
+        assert!(rebasing_instructions.contains(&worktree.to_string_lossy().to_string()));
+        assert!(!rebasing_instructions.contains("{{"));
 
         let evergreening = ActivePlan::new("ts".to_string(), plans::Phase::Evergreening);
-        let evergreening_system = spawn_system_text(&evergreening, root, "main", Some(&status));
-        assert!(evergreening_system.contains("0923748 feat: blabla"));
-        assert!(!evergreening_system.contains("{{COMMITS}}"));
+        let evergreening_instructions =
+            spawn_instructions_text(&evergreening, root, "main", Some(&status));
+        assert!(evergreening_instructions.contains("0923748 feat: blabla"));
+        assert!(!evergreening_instructions.contains("{{COMMITS}}"));
     }
 }
