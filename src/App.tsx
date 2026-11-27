@@ -845,9 +845,7 @@ export function App() {
 								session={selectedKey}
 								phase={entry?.phase ?? null}
 								onHistoryRetry={
-									chat?.start.kind === "failed" && chat.start.error.retryable
-										? handleHistoryRetry
-										: null
+									chat?.start.kind === "failed" ? handleHistoryRetry : null
 								}
 							>
 								{selectedKey !== null && !readOnly && (

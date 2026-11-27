@@ -95,10 +95,10 @@ describe("transcript agent header", () => {
 });
 
 describe("transcript start copy", () => {
-	test("missing entry shows opening session", () => {
+	test("missing entry shares the preparing copy", () => {
 		render(emptyTranscript(null));
-		expect(screen.getByText(/opening session/)).toBeInTheDocument();
-		expect(screen.getByText("getting session ready")).toBeInTheDocument();
+		expect(screen.getByText(/fresh session/)).toBeInTheDocument();
+		expect(screen.getByText("preparing session")).toBeInTheDocument();
 	});
 
 	test("preparing shows fresh session preparing", () => {

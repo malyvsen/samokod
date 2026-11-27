@@ -76,8 +76,8 @@ describe("history", () => {
 		expect(api.loadHistory).toHaveBeenCalledTimes(2);
 	});
 
-	test("non-retryable history hides retry", async () => {
-		await openChat(api);
+	test("non-retryable history still offers retry", async () => {
+		const user = await openChat(api);
 		emitAppEvent(api, {
 			type: "history_failed",
 			session: testKey(),
@@ -90,9 +90,8 @@ describe("history", () => {
 				"this plan's history is unavailable - it predates session recording or was pruned",
 			),
 		).toBeInTheDocument();
-		expect(
-			screen.queryByRole("button", { name: "retry" }),
-		).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "retry" }));
+		expect(api.loadHistory).toHaveBeenCalledTimes(2);
 	});
 
 	test("restored history renders in the transcript", async () => {

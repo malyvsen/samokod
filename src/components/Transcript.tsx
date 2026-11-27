@@ -549,16 +549,16 @@ function EmptyHint({
 	);
 }
 
-/// Copy for the empty transcript, one row per start phase.
+/// Copy for the empty transcript, one row per start phase. The unknown
+/// entry flickers only before the preparing event, so it shares the
+/// preparing copy for one steady line.
 function emptyHintCopy(
 	start: SessionStart | null,
 ): { header: string; sub: string } | null {
-	if (start === null) {
-		return { header: "opening session", sub: "getting session ready" };
+	if (start === null || start.kind === "preparing") {
+		return { header: "fresh session", sub: "preparing session" };
 	}
 	switch (start.kind) {
-		case "preparing":
-			return { header: "fresh session", sub: "preparing session" };
 		case "replaying":
 			return { header: "loading history", sub: "replaying past messages" };
 		case "idle":
