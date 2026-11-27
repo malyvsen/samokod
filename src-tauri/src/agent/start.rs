@@ -1,6 +1,9 @@
 // Session-start coordination: one owner for the `warming` /
-// `history_loading` / `history_loaded` claims, one generic wait, and
-// named timeouts. Every claim has a guard whose drop settles it.
+// `history_loading` / `history_loaded` claims, one generic wait over
+// shared flag snapshots, and named timeouts. Every claim has a guard
+// whose drop settles it. All polling funnels through `wait_until` with
+// one timeout source per wait (`ENSURE_LIVE_TIMEOUT`, `HISTORY_TIMEOUT`,
+// `WARM_TIMEOUT`); callers never inline their own lock plus poll blocks.
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -38,6 +41,65 @@ pub(crate) async fn wait_until(timeout: Duration, mut predicate: impl FnMut() ->
             return false;
         }
     }
+}
+
+/// Snapshot: true while a background warm runs for the key. Short
+/// critical section; closed windows and poisoned locks read as not
+/// warming so waiters stop instead of hanging. Pure read.
+pub(crate) fn is_warming(state: &Arc<Mutex<BackendState>>, window: &str, key: &SessionKey) -> bool {
+    lock_backend(state)
+        .map(|backend| {
+            backend
+                .windows
+                .get(window)
+                .map(|win| win.is_warming(key))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
+/// Snapshot: true while a history replay runs for the key. Short
+/// critical section; closed windows and poisoned locks read as not
+/// loading so waiters stop instead of hanging. Pure read.
+pub(crate) fn is_history_loading(
+    state: &Arc<Mutex<BackendState>>,
+    window: &str,
+    key: &SessionKey,
+) -> bool {
+    lock_backend(state)
+        .map(|backend| {
+            backend
+                .windows
+                .get(window)
+                .map(|win| win.is_history_loading(key))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
+/// Wait until no warm runs for the key. True when the slot cleared within
+/// `timeout`, false on expiry. Callers pass `WARM_TIMEOUT` (history
+/// replay waits on a racing warm) or the remaining `ENSURE_LIVE_TIMEOUT`
+/// budget (live waits on a racing warm).
+pub(crate) async fn wait_while_warming(
+    state: &Arc<Mutex<BackendState>>,
+    window: &str,
+    key: &SessionKey,
+    timeout: Duration,
+) -> bool {
+    wait_until(timeout, || !is_warming(state, window, key)).await
+}
+
+/// Wait until no history replay runs for the key. True when the replay
+/// settled within `timeout`, false on expiry. Callers pass
+/// `HISTORY_TIMEOUT`.
+pub(crate) async fn wait_while_history_loading(
+    state: &Arc<Mutex<BackendState>>,
+    window: &str,
+    key: &SessionKey,
+    timeout: Duration,
+) -> bool {
+    wait_until(timeout, || !is_history_loading(state, window, key)).await
 }
 
 impl WindowState {
@@ -342,5 +404,44 @@ mod tests {
         assert!(HistoryGuard::claim(&state, "gone", &key).is_none());
         let backend = lock_backend(&state).expect("lock");
         assert!(!backend.windows.contains_key("gone"));
+    }
+
+    #[test]
+    fn snapshots_read_clear_on_missing_windows() {
+        let state = Arc::new(Mutex::new(BackendState::default()));
+        let key = key();
+        assert!(!is_warming(&state, "gone", &key));
+        assert!(!is_history_loading(&state, "gone", &key));
+        lock_backend(&state).expect("lock").ensure_window("main");
+        assert!(!is_warming(&state, "main", &key));
+        assert!(!is_history_loading(&state, "main", &key));
+    }
+
+    #[tokio::test]
+    async fn waits_settle_once_guards_release() {
+        let state = Arc::new(Mutex::new(BackendState::default()));
+        let key = key();
+        lock_backend(&state).expect("lock").ensure_window("main");
+        let warm = WarmGuard::claim(&state, "main", &key).expect("warm");
+        let history = HistoryGuard::claim(&state, "main", &key).expect("history");
+        assert!(is_warming(&state, "main", &key));
+        assert!(is_history_loading(&state, "main", &key));
+        drop(warm);
+        assert!(wait_while_warming(&state, "main", &key, Duration::from_millis(200)).await);
+        assert!(!is_warming(&state, "main", &key));
+        history.finish();
+        assert!(wait_while_history_loading(&state, "main", &key, Duration::from_millis(200)).await);
+        assert!(!is_history_loading(&state, "main", &key));
+    }
+
+    #[tokio::test]
+    async fn waits_time_out_on_held_flags() {
+        let state = Arc::new(Mutex::new(BackendState::default()));
+        let key = key();
+        lock_backend(&state).expect("lock").ensure_window("main");
+        let _warm = WarmGuard::claim(&state, "main", &key).expect("warm");
+        let _history = HistoryGuard::claim(&state, "main", &key).expect("history");
+        assert!(!wait_while_warming(&state, "main", &key, Duration::from_millis(60)).await);
+        assert!(!wait_while_history_loading(&state, "main", &key, Duration::from_millis(60)).await);
     }
 }

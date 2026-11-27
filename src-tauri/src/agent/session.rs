@@ -439,15 +439,7 @@ impl AgentManager {
             let remaining = ENSURE_LIVE_TIMEOUT.saturating_sub(start.elapsed());
             let settled = wait_until(remaining, || {
                 self.live_snapshot_for(window, key).is_some()
-                    || lock_backend(&self.state)
-                        .map(|backend| {
-                            backend
-                                .windows
-                                .get(window)
-                                .map(|win| !win.is_warming(key))
-                                .unwrap_or(true)
-                        })
-                        .unwrap_or(true)
+                    || !super::start::is_warming(&self.state, window, key)
             })
             .await;
             if let Some(live) = self.live_snapshot_for(window, key) {
@@ -459,15 +451,7 @@ impl AgentManager {
                 );
                 return Ok(live);
             }
-            let still_warming = lock_backend(&self.state)
-                .map(|backend| {
-                    backend
-                        .windows
-                        .get(window)
-                        .map(|win| win.is_warming(key))
-                        .unwrap_or(false)
-                })
-                .unwrap_or(false);
+            let still_warming = super::start::is_warming(&self.state, window, key);
             if !still_warming {
                 if let Some(live) = self.live_snapshot_for(window, key) {
                     return Ok(live);
@@ -560,39 +544,12 @@ impl AgentManager {
         // Serialize a racing warm: history replays wait for the connection
         // to settle instead of silently skipping and leaving the transcript
         // empty forever under the fire-once `useSessionStart`.
-        if lock_backend(&self.state)
-            .map(|backend| {
-                backend
-                    .windows
-                    .get(window)
-                    .map(|win| win.is_warming(&session))
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false)
-        {
+        if super::start::is_warming(&self.state, window, &session) {
             let wait_start = std::time::Instant::now();
-            let settled = wait_until(WARM_TIMEOUT, || {
-                lock_backend(&self.state)
-                    .map(|backend| {
-                        backend
-                            .windows
-                            .get(window)
-                            .map(|win| !win.is_warming(&session))
-                            .unwrap_or(true)
-                    })
-                    .unwrap_or(true)
-            })
-            .await;
+            let settled =
+                super::start::wait_while_warming(&self.state, window, &session, WARM_TIMEOUT).await;
             if !settled {
-                let still_warming = lock_backend(&self.state)
-                    .map(|backend| {
-                        backend
-                            .windows
-                            .get(window)
-                            .map(|win| win.is_warming(&session))
-                            .unwrap_or(false)
-                    })
-                    .unwrap_or(false);
+                let still_warming = super::start::is_warming(&self.state, window, &session);
                 let snapshot_present = self.session_snapshot_for(window, &session).is_some();
                 log::warn!(
                     "history wait timeout window={window} {} {:?} after {:?}: still_warming={} snapshot_present={}",
@@ -809,30 +766,13 @@ impl AgentManager {
         key: &SessionKey,
     ) -> Result<(), AgentError> {
         let wait_start = std::time::Instant::now();
-        let settled = wait_until(HISTORY_TIMEOUT, || {
-            lock_backend(&self.state)
-                .map(|backend| {
-                    backend
-                        .windows
-                        .get(window)
-                        .map(|win| !win.is_history_loading(key))
-                        .unwrap_or(true)
-                })
-                .unwrap_or(true)
-        })
-        .await;
+        let settled =
+            super::start::wait_while_history_loading(&self.state, window, key, HISTORY_TIMEOUT)
+                .await;
         if settled {
             return Ok(());
         }
-        let still_warming = lock_backend(&self.state)
-            .map(|backend| {
-                backend
-                    .windows
-                    .get(window)
-                    .map(|win| win.is_warming(key))
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
+        let still_warming = super::start::is_warming(&self.state, window, key);
         let snapshot_present = self.session_snapshot_for(window, key).is_some();
         log::warn!(
             "history wait timeout window={window} {} {:?} after {:?}: still_warming={} snapshot_present={}",
