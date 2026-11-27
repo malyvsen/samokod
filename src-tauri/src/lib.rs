@@ -25,7 +25,7 @@ mod worktrees;
 use std::path::PathBuf;
 
 use tauri::{AppHandle, Emitter, Manager, State, Window};
-use tauri_plugin_log::{Target, TargetKind};
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 use tauri_specta::{Builder, collect_commands};
 
@@ -506,6 +506,9 @@ pub fn run() {
             let mut log_builder = tauri_plugin_log::Builder::new()
                 .level(log_level(attach_value.as_deref()))
                 .clear_targets()
+                // Hours of active turns, bounded at ~12 MB on disk.
+                .max_file_size(2_000_000)
+                .rotation_strategy(RotationStrategy::KeepSome(5))
                 .target(Target::new(TargetKind::LogDir { file_name: None }));
             if cli::attach_terminal_opt_in(attach_value.as_deref()) {
                 log_builder = log_builder.target(Target::new(TargetKind::Stdout));
