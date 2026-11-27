@@ -102,9 +102,9 @@ impl ActivePlan {
 /// no IO. Scoping uses the repo-relative display path, executing the
 /// absolute plan dir, rebasing the worktree path plus branches, evergreening
 /// those plus the landed commits. `status` carries fresh worktree coordinates
-/// when the caller already holds them (transition core, warmed spawns);
-/// without it the coordinates derive from the plan name and checkout branch
-/// with empty commits.
+/// when the caller already holds them (transition core); without it the
+/// coordinates derive from the plan name and checkout branch with empty
+/// commits. Prefer `system_text_for`, which fetches the live status.
 pub(crate) fn spawn_system_text(
     plan: &ActivePlan,
     repo_root: &Path,
@@ -181,6 +181,39 @@ fn worktree_coords(
     }
 }
 
+impl AgentManager {
+    /// Role instructions for spawning or reloading: live worktree
+    /// coordinates for rebasing and evergreening, derived coordinates when
+    /// the worktree is gone so spawning never blocks on status.
+    pub(crate) fn system_text_for(
+        &self,
+        window: &str,
+        repo_root: &Path,
+        branch: &str,
+        plan: &ActivePlan,
+    ) -> String {
+        let status = if matches!(
+            plan.phase,
+            plans::Phase::Rebasing | plans::Phase::Evergreening
+        ) {
+            match self.worktree_status_for(window, repo_root, &plan.name) {
+                Ok(live) => Some(live),
+                Err(error) => {
+                    log::warn!(
+                        "loaded {} {} uses derived coordinates: {error}",
+                        plan.phase.dir_name(),
+                        plan.name
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        spawn_system_text(plan, repo_root, branch, status.as_ref())
+    }
+}
+
 /// One live agent session: its own `opencode acp` process, connection, ACP
 /// session id, and turn state.
 pub(crate) struct LiveSession {
@@ -235,6 +268,7 @@ impl AgentManager {
     /// frontend-side; the row turns gray.
     pub(crate) async fn drop_live(&self, window: &str, key: &SessionKey) {
         let snapshot = self.session_snapshot_for(window, key);
+        opencode::remove_instructions_file(window, key);
         match lock_backend(&self.state) {
             Some(mut backend) => {
                 if let Some(win) = backend.windows.get_mut(window) {
@@ -269,10 +303,11 @@ impl AgentManager {
     }
 
     /// Spawn a fresh agent process scoped to one plan and open a session on
-    /// it with role instructions as `systemPrompt`: pin the agent mode,
-    /// reapply the effective default model then effort (effort-last, since a
-    /// model switch can reshape effort options). Shared by lazy first
-    /// prompts and the eager executing start.
+    /// it with role instructions as `systemPrompt` plus the same text in an
+    /// `instructions` file: pin the agent mode, reapply the effective default
+    /// model then effort (effort-last, since a model switch can reshape
+    /// effort options). Shared by lazy first prompts and the eager executing
+    /// start.
     pub(crate) async fn spawn_session(
         &self,
         window: &str,
@@ -287,9 +322,8 @@ impl AgentManager {
             raw: "cannot open a session for a finished plan".to_string(),
         })?;
         let effective = self.config_defaults(repo_root);
-        let connection = self
-            .ensure_connection_for(window, &key, opencode::agent_env(&plan.plan_ref()))
-            .await?;
+        let env = opencode::session_env(window, &key, &plan.plan_ref(), system);
+        let connection = self.ensure_connection_for(window, &key, env).await?;
         let cwd = plan.cwd(repo_root);
         let response = connection
             .send_request(acp::build_new_session_request(&cwd, system))
@@ -501,25 +535,7 @@ impl AgentManager {
             });
         }
         let plan = ActivePlan::for_session(key);
-        let status = if matches!(
-            plan.phase,
-            plans::Phase::Rebasing | plans::Phase::Evergreening
-        ) {
-            match self.worktree_status_for(window, &repo_root, &plan.name) {
-                Ok(live) => Some(live),
-                Err(error) => {
-                    log::warn!(
-                        "warmed {} {} uses derived coordinates: {error}",
-                        plan.phase.dir_name(),
-                        plan.name
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        let system = spawn_system_text(&plan, &repo_root, &branch, status.as_ref());
+        let system = self.system_text_for(window, &repo_root, &branch, &plan);
         let agent = opencode::agent_for(key.role);
         let (connection, session_id, _) = self
             .spawn_session(window, &repo_root, &branch, plan, agent, &system)
@@ -625,10 +641,9 @@ impl AgentManager {
                 .await;
         };
         let plan = ActivePlan::for_session(&session);
-        let connection = match self
-            .ensure_connection_for(window, &session, opencode::agent_env(&plan.plan_ref()))
-            .await
-        {
+        let system = self.system_text_for(window, &repo_root, &branch, &plan);
+        let env = opencode::session_env(window, &session, &plan.plan_ref(), &system);
+        let connection = match self.ensure_connection_for(window, &session, env).await {
             Ok(connection) => connection,
             Err(error) => {
                 let raw = error.to_string();
@@ -651,25 +666,6 @@ impl AgentManager {
             },
         );
         let cwd = plan.cwd(&repo_root);
-        let status = if matches!(
-            plan.phase,
-            plans::Phase::Rebasing | plans::Phase::Evergreening
-        ) {
-            match self.worktree_status_for(window, &repo_root, &plan.name) {
-                Ok(live) => Some(live),
-                Err(error) => {
-                    log::warn!(
-                        "loaded {} {} uses derived coordinates: {error}",
-                        plan.phase.dir_name(),
-                        plan.name
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        let system = spawn_system_text(&plan, &repo_root, &branch, status.as_ref());
         match connection
             .send_request(acp::build_load_session_request(&session_id, &cwd, &system))
             .block_task()

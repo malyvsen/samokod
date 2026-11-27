@@ -1,11 +1,13 @@
 // OpenCode-specific edge driver: agent definitions injected at spawn plus
-// role instructions sent as ACP `systemPrompt`. `acp.rs` stays protocol-only.
+// role instructions duplicated as ACP `systemPrompt` and an `instructions`
+// file. `acp.rs` stays protocol-only.
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
 use crate::plans::PlanRef;
-use crate::types::SessionRole;
+use crate::types::{SessionKey, SessionRole};
 
 pub const SCOPING_AGENT: &str = "samokod-scoping";
 pub const EXECUTING_AGENT: &str = "samokod-executing";
@@ -37,19 +39,40 @@ const EXECUTING_PROMPT: &str = include_str!("prompts/executing.md");
 const EVERGREENING_PROMPT: &str = include_str!("prompts/evergreening.md");
 const REBASING_PROMPT: &str = include_str!("prompts/rebasing.md");
 
+/// Extra spawn env pinning all agents plus a per-session instructions
+/// file carrying the same text as ACP `systemPrompt` (which OpenCode
+/// ignores). Writes the file so it exists before the process spawns. Pure
+/// apart from the file write at the spawn edge.
+pub fn session_env(
+    window: &str,
+    key: &SessionKey,
+    plan: &PlanRef,
+    system: &str,
+) -> HashMap<String, String> {
+    let instructions = instructions_path(window, key);
+    write_instructions_file(&instructions, system);
+    agent_env(plan, &instructions)
+}
+
 /// Extra spawn env pinning all agents. Pure: JSON only, no process access.
-pub fn agent_env(plan: &PlanRef) -> HashMap<String, String> {
-    HashMap::from([(CONFIG_CONTENT_ENV.to_string(), agent_config(plan))])
+pub fn agent_env(plan: &PlanRef, instructions: &Path) -> HashMap<String, String> {
+    HashMap::from([(
+        CONFIG_CONTENT_ENV.to_string(),
+        agent_config(plan, instructions),
+    )])
 }
 
 /// Full agent config as inline JSON. Permissions only, no `system` field:
 /// role guidance travels as ACP `systemPrompt` on `session/new` so
-/// OpenCode's per-model base prompt stays intact. Native V2 shape: `agents` plus an ordered
+/// OpenCode's per-model base prompt stays intact, plus a per-session
+/// `instructions` file carrying the same text. The path must be absolute;
+/// OpenCode resolves relative `instructions` against the workspace.
+/// Native V2 shape: `agents` plus an ordered
 /// `permissions` array per agent (last match wins), `shell` for shell
 /// commands, `subagent` for child agents, and `experimental.todo` so the
 /// `todowrite` tool exists (off by default in V2). Pure.
-pub fn agent_config(plan: &PlanRef) -> String {
-    serde_json::json!({
+pub fn agent_config(plan: &PlanRef, instructions: &Path) -> String {
+    let mut root = serde_json::json!({
         "experimental": { "todo": true },
         "agents": {
             SCOPING_AGENT: {
@@ -73,8 +96,68 @@ pub fn agent_config(plan: &PlanRef) -> String {
                 "permissions": rebasing_permissions(),
             },
         },
-    })
-    .to_string()
+    });
+    root["instructions"] = serde_json::json!([instructions.to_string_lossy().to_string()]);
+    root.to_string()
+}
+
+/// Deterministic temp path for one session's instructions file. Pure.
+pub fn instructions_path(window: &str, key: &SessionKey) -> PathBuf {
+    let role = match key.role {
+        SessionRole::Scoping => "scoping",
+        SessionRole::Executing => "executing",
+        SessionRole::Evergreening => "evergreening",
+        SessionRole::Rebasing => "rebasing",
+    };
+    std::env::temp_dir().join(format!(
+        "samokod-{}-{}-{}.md",
+        sanitize_filename_component(window),
+        sanitize_filename_component(&key.plan),
+        role
+    ))
+}
+
+/// Write role instructions for OpenCode's `instructions` source. Best
+/// effort: logs and keeps the session on failure since the same text still
+/// travels as ACP `systemPrompt`.
+pub fn write_instructions_file(path: &Path, system: &str) {
+    if let Err(error) = std::fs::write(path, system) {
+        log::warn!(
+            "failed to write instructions file {}: {error}",
+            path.display()
+        );
+    }
+}
+
+/// Best-effort cleanup for one session's instructions file.
+pub fn remove_instructions_file(window: &str, key: &SessionKey) {
+    let path = instructions_path(window, key);
+    if let Err(error) = std::fs::remove_file(&path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        log::warn!(
+            "failed to remove instructions file {}: {error}",
+            path.display()
+        );
+    }
+}
+
+fn sanitize_filename_component(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if cleaned.is_empty() {
+        "unnamed".to_string()
+    } else {
+        cleaned
+    }
 }
 
 /// One ordered V2 permission rule. Array order is the contract: OpenCode
@@ -246,7 +329,8 @@ mod tests {
     }
 
     fn config(plan: &PlanRef) -> Value {
-        serde_json::from_str(&agent_config(plan)).expect("valid JSON")
+        serde_json::from_str(&agent_config(plan, Path::new("/tmp/samokod-test.md")))
+            .expect("valid JSON")
     }
 
     /// Mirror of OpenCode's find-last wildcard match: the last rule whose
@@ -665,5 +749,83 @@ mod tests {
             phase: Phase::Executing,
         };
         assert_eq!(plan_display(&executing), ".samokod/plans/executing/ts.slug");
+    }
+
+    #[test]
+    fn instructions_path_is_deterministic_and_sanitized() {
+        let key = SessionKey {
+            plan: "2026-09-26.ts".to_string(),
+            role: SessionRole::Scoping,
+        };
+        let first = instructions_path("main", &key);
+        let second = instructions_path("main", &key);
+        assert_eq!(first, second);
+        assert!(first.is_absolute());
+        assert_eq!(first.extension().and_then(|ext| ext.to_str()), Some("md"));
+        assert_eq!(
+            first.file_name().and_then(|name| name.to_str()),
+            Some("samokod-main-2026-09-26_ts-scoping.md")
+        );
+        let evil = SessionKey {
+            plan: "../evil".to_string(),
+            role: SessionRole::Executing,
+        };
+        let path = instructions_path("win/dow", &evil);
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("filename");
+        assert_eq!(name, "samokod-win_dow-___evil-executing.md");
+        assert!(path.is_absolute());
+    }
+
+    #[test]
+    fn instructions_config_carries_session_path() {
+        let plan = test_plan();
+        let abs = std::env::temp_dir().join("samokod-test-instructions.md");
+        let parsed: Value = serde_json::from_str(&agent_config(&plan, &abs)).expect("valid JSON");
+        assert_eq!(
+            parsed["instructions"],
+            serde_json::json!([abs.to_string_lossy().to_string()])
+        );
+        let env = agent_env(&plan, &abs);
+        let content = env.get(CONFIG_CONTENT_ENV).expect("config content");
+        let parsed: Value = serde_json::from_str(content).expect("valid JSON");
+        assert_eq!(
+            parsed["instructions"],
+            serde_json::json!([abs.to_string_lossy().to_string()])
+        );
+    }
+
+    #[test]
+    fn session_env_writes_file_before_returning() {
+        let key = SessionKey {
+            plan: "2026-09-26.ts".to_string(),
+            role: SessionRole::Scoping,
+        };
+        let plan = test_plan();
+        let system = scoping_system(".samokod/plans/scoping/ts");
+        let env = session_env("main", &key, &plan, &system);
+        let path = instructions_path("main", &key);
+        let back = std::fs::read_to_string(&path).expect("read back");
+        assert_eq!(back, system);
+        let content = env.get(CONFIG_CONTENT_ENV).expect("config content");
+        let parsed: Value = serde_json::from_str(content).expect("valid JSON");
+        assert_eq!(
+            parsed["instructions"],
+            serde_json::json!([path.to_string_lossy().to_string()])
+        );
+        std::fs::remove_file(&path).expect("cleanup");
+    }
+
+    #[test]
+    fn instructions_file_roundtrips_system_text() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("role.md");
+        let system = scoping_system(".samokod/plans/scoping/ts");
+        write_instructions_file(&path, &system);
+        let back = std::fs::read_to_string(&path).expect("read back");
+        assert_eq!(back, system);
+        assert!(!back.contains("{{PLAN_DIR}}"));
     }
 }
