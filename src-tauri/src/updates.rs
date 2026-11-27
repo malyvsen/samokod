@@ -1,6 +1,13 @@
 // Pure mappings for ACP session updates and tool calls. Every tool
 // execution becomes one `▸` status line shaped as `{label}: {body}`.
-use crate::acp::{ContentBlock, SessionUpdate, ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind};
+// Rendered updates (agent text and thought, user replay, tool call and
+// update, usage, config options) feed the transcript; every other
+// `SessionUpdate` variant routes to one explicit ignore with a structural
+// debug log so protocol drift stays visible. Rendering never changes here.
+use crate::acp::{
+    ContentBlock, Meta, SessionNotification, SessionUpdate, ToolCall, ToolCallStatus,
+    ToolCallUpdate, ToolKind,
+};
 use crate::types::{ToolKindLabel, ToolLineView, ToolStatus};
 
 /// Skill titles arrive as `Loaded skill: X`; only `X` is shown.
@@ -54,7 +61,7 @@ fn text_of_block(block: &ContentBlock) -> Option<String> {
 }
 
 /// Short label for a session update. `None` means the protocol sent a variant
-/// this client never enumerated. Pure.
+/// this client never enumerated: future drift, not a known ignore. Pure.
 pub fn update_kind(update: &SessionUpdate) -> Option<&'static str> {
     match update {
         SessionUpdate::UserMessageChunk(_) => Some("user_message_chunk"),
@@ -63,13 +70,167 @@ pub fn update_kind(update: &SessionUpdate) -> Option<&'static str> {
         SessionUpdate::ToolCall(_) => Some("tool_call"),
         SessionUpdate::ToolCallUpdate(_) => Some("tool_call_update"),
         SessionUpdate::Plan(_) => Some("plan"),
+        SessionUpdate::PlanUpdate(_) => Some("plan_update"),
+        SessionUpdate::PlanRemoved(_) => Some("plan_removed"),
         SessionUpdate::AvailableCommandsUpdate(_) => Some("available_commands"),
         SessionUpdate::CurrentModeUpdate(_) => Some("current_mode"),
         SessionUpdate::ConfigOptionUpdate(_) => Some("config_option"),
         SessionUpdate::SessionInfoUpdate(_) => Some("session_info"),
         SessionUpdate::UsageUpdate(_) => Some("usage"),
+        SessionUpdate::Notice(_) => Some("notice"),
+        SessionUpdate::CompactionUpdate(_) => Some("compaction"),
+        SessionUpdate::CompactionSummaryChunk(_) => Some("compaction_summary_chunk"),
+        SessionUpdate::SubagentUpdate(_) => Some("subagent"),
+        SessionUpdate::SessionMessage(_) => Some("session_message"),
+        SessionUpdate::SessionMessageChunk(_) => Some("session_message_chunk"),
         _ => None,
     }
+}
+
+/// True when the update feeds the transcript (streamed text and thought,
+/// user replay, tool call and update, usage, config options). Everything
+/// else is an explicit ignore. Pure.
+pub fn is_rendered(update: &SessionUpdate) -> bool {
+    match update {
+        SessionUpdate::UserMessageChunk(_)
+        | SessionUpdate::AgentMessageChunk(_)
+        | SessionUpdate::AgentThoughtChunk(_)
+        | SessionUpdate::ToolCall(_)
+        | SessionUpdate::ToolCallUpdate(_)
+        | SessionUpdate::UsageUpdate(_)
+        | SessionUpdate::ConfigOptionUpdate(_) => true,
+        SessionUpdate::Plan(_)
+        | SessionUpdate::PlanUpdate(_)
+        | SessionUpdate::PlanRemoved(_)
+        | SessionUpdate::AvailableCommandsUpdate(_)
+        | SessionUpdate::CurrentModeUpdate(_)
+        | SessionUpdate::SessionInfoUpdate(_)
+        | SessionUpdate::Notice(_)
+        | SessionUpdate::CompactionUpdate(_)
+        | SessionUpdate::CompactionSummaryChunk(_)
+        | SessionUpdate::SubagentUpdate(_)
+        | SessionUpdate::SessionMessage(_)
+        | SessionUpdate::SessionMessageChunk(_) => false,
+        _ => false,
+    }
+}
+
+/// Structural one-line summary for an ignored update: counts, ids, and
+/// present meta keys, never full payloads. Rendered updates report
+/// `rendered:<kind>` so callers can log uniformly. Pure.
+pub fn ignored_summary(update: &SessionUpdate) -> String {
+    match update {
+        SessionUpdate::Plan(plan) => format!("plan entries={}", plan.entries.len()),
+        SessionUpdate::PlanUpdate(_) => "plan_update replace".to_string(),
+        SessionUpdate::PlanRemoved(_) => "plan_removed".to_string(),
+        SessionUpdate::AvailableCommandsUpdate(update) => {
+            format!(
+                "available_commands count={}",
+                update.available_commands.len()
+            )
+        }
+        SessionUpdate::CurrentModeUpdate(update) => {
+            format!("current_mode id={}", update.current_mode_id)
+        }
+        SessionUpdate::SessionInfoUpdate(update) => {
+            let title = if update.title.is_undefined() {
+                "absent"
+            } else if update.title.is_null() {
+                "cleared"
+            } else {
+                "set"
+            };
+            format!(
+                "session_info title={title} meta_keys=[{}]",
+                meta_keys(update.meta.as_ref()).join(",")
+            )
+        }
+        SessionUpdate::Notice(notice) => {
+            format!(
+                "notice severity={:?} title_len={}",
+                notice.severity,
+                notice.title.len()
+            )
+        }
+        SessionUpdate::CompactionUpdate(update) => format!(
+            "compaction id={} status={:?}",
+            update.compaction_id, update.status
+        ),
+        SessionUpdate::CompactionSummaryChunk(update) => {
+            format!("compaction_summary_chunk id={}", update.compaction_id)
+        }
+        SessionUpdate::SubagentUpdate(update) => format!(
+            "subagent session={} meta_keys=[{}]",
+            update.session_id,
+            meta_keys(update.meta.value()).join(",")
+        ),
+        SessionUpdate::SessionMessage(message) => {
+            format!("session_message id={}", message.message_id)
+        }
+        SessionUpdate::SessionMessageChunk(chunk) => {
+            format!("session_message_chunk id={}", chunk.message_id)
+        }
+        other => match update_kind(other) {
+            Some(kind) => format!("rendered:{kind}"),
+            None => "unknown".to_string(),
+        },
+    }
+}
+
+/// OpenCode extension keys carried in `_meta`, logged structurally so
+/// vendor drift stays visible without changing rendering.
+pub const RETRY_META_KEY: &str = "opencode/retry";
+pub const COMPACTION_META_KEY: &str = "opencode/compaction";
+
+/// Sorted `_meta` key list for structural logging. Pure.
+pub fn meta_keys(meta: Option<&Meta>) -> Vec<String> {
+    let mut keys: Vec<String> = meta
+        .map(|meta| meta.keys().cloned().collect())
+        .unwrap_or_default();
+    keys.sort();
+    keys
+}
+
+/// Raw value at one `_meta` key, when present. Pure.
+pub fn meta_value<'a>(meta: Option<&'a Meta>, key: &str) -> Option<&'a serde_json::Value> {
+    meta?.get(key)
+}
+
+/// `opencode/retry` marker (retry status) as a short string, when present.
+/// Pure.
+pub fn retry_marker_of(meta: Option<&Meta>) -> Option<String> {
+    meta_value(meta, RETRY_META_KEY).map(|value| value.to_string())
+}
+
+/// `opencode/compaction` marker as a short string, when present. Pure.
+pub fn compaction_marker_of(meta: Option<&Meta>) -> Option<String> {
+    meta_value(meta, COMPACTION_META_KEY).map(|value| value.to_string())
+}
+
+/// Child session id announced by a subagent update, when present. Pure.
+pub fn subagent_session_of(update: &SessionUpdate) -> Option<String> {
+    match update {
+        SessionUpdate::SubagentUpdate(update) => Some(update.session_id.to_string()),
+        _ => None,
+    }
+}
+
+/// Notification-level `_meta` summary: key list plus the OpenCode retry
+/// and compaction markers and any child/subagent association, when
+/// present. Empty string means no meta at all. Pure.
+pub fn notification_meta_summary(notification: &SessionNotification) -> String {
+    let meta = notification.meta.as_ref();
+    let mut parts = vec![format!("keys=[{}]", meta_keys(meta).join(","))];
+    if let Some(retry) = retry_marker_of(meta) {
+        parts.push(format!("retry={retry}"));
+    }
+    if let Some(compaction) = compaction_marker_of(meta) {
+        parts.push(format!("compaction={compaction}"));
+    }
+    if let Some(child) = subagent_session_of(&notification.update) {
+        parts.push(format!("child={child}"));
+    }
+    parts.join(" ")
 }
 
 /// Merge a partial update onto the stored call. Partial updates only carry
@@ -222,7 +383,13 @@ fn to_tool_status(status: ToolCallStatus) -> ToolStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp::{ContentChunk, TextContent, ToolCallStatus, ToolCallUpdateFields};
+    use crate::acp::{
+        AvailableCommand, AvailableCommandsUpdate, CompactionStatus, CompactionSummaryChunk,
+        CompactionUpdate, ConfigOptionUpdate, ContentChunk, CurrentModeUpdate, Notice,
+        NoticeSeverity, Plan, PlanRemoved, PlanUpdate, PlanUpdateContent, SessionInfoUpdate,
+        SessionMessage, SessionMessageChunk, SubagentUpdate, TextContent, ToolCallStatus,
+        ToolCallUpdateFields, UsageUpdate,
+    };
 
     #[test]
     fn agent_chunk_extracts_text() {
@@ -540,5 +707,154 @@ mod tests {
                 .status(ToolCallStatus::Completed);
             assert_eq!(format_tool_line(&call).text, expected, "{kind:?}");
         }
+    }
+
+    #[test]
+    fn every_variant_has_a_kind() {
+        let updates = vec![
+            SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new("do things"),
+            ))),
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new("hello"),
+            ))),
+            SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new("considering"),
+            ))),
+            SessionUpdate::ToolCall(ToolCall::new("id-1", "title")),
+            SessionUpdate::ToolCallUpdate(ToolCallUpdate::new("id-1", ToolCallUpdateFields::new())),
+            SessionUpdate::Plan(Plan::new(vec![])),
+            SessionUpdate::PlanUpdate(PlanUpdate::new(PlanUpdateContent::markdown(
+                "plan-1", "# plan",
+            ))),
+            SessionUpdate::PlanRemoved(PlanRemoved::new("plan-1")),
+            SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(vec![
+                AvailableCommand::new("research", "research the codebase"),
+            ])),
+            SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new("build")),
+            SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(vec![])),
+            SessionUpdate::SessionInfoUpdate(SessionInfoUpdate::new()),
+            SessionUpdate::UsageUpdate(UsageUpdate::new(1, 2)),
+            SessionUpdate::Notice(Notice::new(NoticeSeverity::Info, "heads up")),
+            SessionUpdate::CompactionUpdate(CompactionUpdate::new(
+                "compaction-1",
+                CompactionStatus::Completed,
+            )),
+            SessionUpdate::CompactionSummaryChunk(CompactionSummaryChunk::new(
+                "compaction-1",
+                ContentBlock::Text(TextContent::new("summary")),
+            )),
+            SessionUpdate::SubagentUpdate(SubagentUpdate::new("ses_child")),
+            SessionUpdate::SessionMessage(SessionMessage::new("msg-1")),
+            SessionUpdate::SessionMessageChunk(SessionMessageChunk::new(
+                "msg-1",
+                ContentBlock::Text(TextContent::new("chunk")),
+            )),
+        ];
+        let kinds: Vec<Option<&str>> = updates.iter().map(update_kind).collect();
+        assert!(
+            kinds.iter().all(|kind| kind.is_some()),
+            "every backend variant enumerates, got {kinds:?}"
+        );
+        assert_eq!(update_kind(&updates[0]), Some("user_message_chunk"));
+        assert_eq!(update_kind(&updates[5]), Some("plan"));
+        assert_eq!(update_kind(&updates[8]), Some("available_commands"));
+        assert_eq!(update_kind(&updates[9]), Some("current_mode"));
+        assert_eq!(update_kind(&updates[11]), Some("session_info"));
+        assert_eq!(update_kind(&updates[12]), Some("usage"));
+        assert_eq!(update_kind(&updates[13]), Some("notice"));
+        assert_eq!(update_kind(&updates[14]), Some("compaction"));
+        assert_eq!(update_kind(&updates[16]), Some("subagent"));
+    }
+
+    #[test]
+    fn only_transcript_updates_render() {
+        for update in [
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new("hello"),
+            ))),
+            SessionUpdate::ToolCall(ToolCall::new("id-1", "title")),
+            SessionUpdate::UsageUpdate(UsageUpdate::new(1, 2)),
+            SessionUpdate::ConfigOptionUpdate(ConfigOptionUpdate::new(vec![])),
+        ] {
+            assert!(is_rendered(&update), "{update:?} renders");
+        }
+        for update in [
+            SessionUpdate::Plan(Plan::new(vec![])),
+            SessionUpdate::AvailableCommandsUpdate(AvailableCommandsUpdate::new(vec![])),
+            SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new("build")),
+            SessionUpdate::SessionInfoUpdate(SessionInfoUpdate::new()),
+            SessionUpdate::Notice(Notice::new(NoticeSeverity::Info, "heads up")),
+            SessionUpdate::SubagentUpdate(SubagentUpdate::new("ses_child")),
+        ] {
+            assert!(!is_rendered(&update), "{update:?} stays ignored");
+            assert_eq!(agent_text_of(&update), None);
+            assert_eq!(thought_text_of(&update), None);
+            assert_eq!(user_text_of(&update), None);
+        }
+    }
+
+    #[test]
+    fn ignored_summaries_stay_structural() {
+        let summary = ignored_summary(&SessionUpdate::AvailableCommandsUpdate(
+            AvailableCommandsUpdate::new(vec![AvailableCommand::new("research", "research")]),
+        ));
+        assert!(summary.contains("count=1"), "{summary}");
+        let summary = ignored_summary(&SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(
+            "build",
+        )));
+        assert!(summary.contains("build"), "{summary}");
+        let summary = ignored_summary(&SessionUpdate::SessionInfoUpdate(SessionInfoUpdate::new()));
+        assert!(summary.contains("session_info"), "{summary}");
+        let summary = ignored_summary(&SessionUpdate::Plan(Plan::new(vec![])));
+        assert!(summary.contains("entries=0"), "{summary}");
+        let summary = ignored_summary(&SessionUpdate::Notice(Notice::new(
+            NoticeSeverity::Warning,
+            "heads up",
+        )));
+        assert!(summary.contains("notice"), "{summary}");
+        let summary = ignored_summary(&SessionUpdate::CompactionUpdate(CompactionUpdate::new(
+            "compaction-1",
+            CompactionStatus::InProgress,
+        )));
+        assert!(summary.contains("compaction-1"), "{summary}");
+        let summary = ignored_summary(&SessionUpdate::SubagentUpdate(SubagentUpdate::new(
+            "ses_child",
+        )));
+        assert!(summary.contains("ses_child"), "{summary}");
+        assert_eq!(
+            subagent_session_of(&SessionUpdate::SubagentUpdate(SubagentUpdate::new(
+                "ses_child"
+            ))),
+            Some("ses_child".to_string())
+        );
+        assert_eq!(
+            subagent_session_of(&SessionUpdate::Plan(Plan::new(vec![]))),
+            None
+        );
+    }
+
+    #[test]
+    fn notification_meta_parses_retry_compaction_and_child() {
+        let mut meta = Meta::new();
+        meta.insert(
+            RETRY_META_KEY.to_string(),
+            serde_json::json!({"attempt": 2}),
+        );
+        meta.insert(
+            COMPACTION_META_KEY.to_string(),
+            serde_json::json!("completed"),
+        );
+        let notification =
+            SessionNotification::new("ses_1", SessionUpdate::Plan(Plan::new(vec![]))).meta(meta);
+        let summary = notification_meta_summary(&notification);
+        assert!(summary.contains("opencode/retry"), "{summary}");
+        assert!(summary.contains("opencode/compaction"), "{summary}");
+        assert!(retry_marker_of(notification.meta.as_ref()).is_some());
+        assert!(compaction_marker_of(notification.meta.as_ref()).is_some());
+        let bare = SessionNotification::new("ses_1", SessionUpdate::Plan(Plan::new(vec![])));
+        assert_eq!(meta_keys(bare.meta.as_ref()), Vec::<String>::new());
+        assert_eq!(retry_marker_of(bare.meta.as_ref()), None);
+        assert_eq!(notification_meta_summary(&bare), "keys=[]");
     }
 }

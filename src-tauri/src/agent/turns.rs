@@ -493,13 +493,53 @@ pub(crate) fn handle_notification(
             );
         }
         acp::SessionUpdate::AgentMessageChunk(_) | acp::SessionUpdate::AgentThoughtChunk(_) => {}
-        // Already streamed as agent text or thought above. Known-but-unrendered kinds
-        // are routine; an unknown kind means protocol drift.
+        // Already streamed as agent text or thought above.
+        acp::SessionUpdate::UserMessageChunk(_) => {}
+        // Already streamed as user text above while replaying; outside a
+        // replay the pre-match guard skips it. Explicit no-op so replayed
+        // bubbles never log as unhandled.
+        acp::SessionUpdate::Plan(_)
+        | acp::SessionUpdate::PlanUpdate(_)
+        | acp::SessionUpdate::PlanRemoved(_)
+        | acp::SessionUpdate::AvailableCommandsUpdate(_)
+        | acp::SessionUpdate::CurrentModeUpdate(_)
+        | acp::SessionUpdate::SessionInfoUpdate(_)
+        | acp::SessionUpdate::Notice(_)
+        | acp::SessionUpdate::CompactionUpdate(_)
+        | acp::SessionUpdate::CompactionSummaryChunk(_)
+        | acp::SessionUpdate::SubagentUpdate(_)
+        | acp::SessionUpdate::SessionMessage(_)
+        | acp::SessionUpdate::SessionMessageChunk(_) => {
+            ignore_update(window, key, notification);
+        }
+        // Future protocol drift: a known label is routine, an unknown one
+        // warns with the full payload.
         update => match crate::updates::update_kind(update) {
             Some(kind) => log::debug!("unhandled session update: {kind}"),
             None => log::warn!("unknown session update: {update:?}"),
         },
     }
+}
+
+/// Explicit ignore for known-but-unrendered updates (available commands,
+/// session info with its compaction marker and retry status, plan,
+/// current mode, notices, compaction, child sessions and inter-session
+/// messages). Rendering stays identical: one structural debug log with
+/// the notification `_meta` (child association, `opencode/retry`,
+/// `opencode/compaction`) so vendor drift is visible.
+fn ignore_update(window: &str, key: &SessionKey, notification: &acp::SessionNotification) {
+    debug_assert!(
+        !crate::updates::is_rendered(&notification.update),
+        "ignore path only handles non-rendered updates"
+    );
+    let kind = crate::updates::update_kind(&notification.update).unwrap_or("unknown");
+    let summary = crate::updates::ignored_summary(&notification.update);
+    let meta = crate::updates::notification_meta_summary(notification);
+    log::debug!(
+        "ignoring session update window={window} session={}::{:?} {kind} {summary} {meta}",
+        key.plan,
+        key.role
+    );
 }
 
 /// Shared title store: writes either the pending-map value (no dir) or

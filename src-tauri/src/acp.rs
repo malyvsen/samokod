@@ -7,20 +7,24 @@
 use agent_client_protocol::schema::ProtocolVersion;
 pub use agent_client_protocol::v1::ConnectionTo;
 pub use agent_client_protocol::v1::Responder;
-pub use agent_client_protocol::v1::schema::{
-    CancelNotification, CloseSessionRequest, ContentBlock, LoadSessionRequest, PermissionOption,
-    PermissionOptionId, PermissionOptionKind, PromptRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-    SessionConfigId, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
-    SessionConfigOptionValue, SessionConfigSelectOptions, SessionConfigValueId, SessionId,
-    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, StopReason, TextContent,
-    ToolCall, ToolCallStatus, ToolCallUpdate, ToolKind,
-};
-use agent_client_protocol::v1::schema::{ClientCapabilities, InitializeRequest, NewSessionRequest};
 #[cfg(test)]
 pub use agent_client_protocol::v1::schema::{
-    ContentChunk, SessionConfigSelectOption, ToolCallUpdateFields, UsageUpdate,
+    AvailableCommand, AvailableCommandsUpdate, CompactionStatus, CompactionSummaryChunk,
+    CompactionUpdate, ConfigOptionUpdate, ContentChunk, CurrentModeUpdate, Notice, NoticeSeverity,
+    Plan, PlanRemoved, PlanUpdate, PlanUpdateContent, SessionConfigSelectOption, SessionInfoUpdate,
+    SessionMessage, SessionMessageChunk, SubagentUpdate, ToolCallUpdateFields, UsageUpdate,
 };
+pub use agent_client_protocol::v1::schema::{
+    CancelNotification, CloseSessionRequest, ContentBlock, LoadSessionRequest, Meta,
+    PermissionOption, PermissionOptionId, PermissionOptionKind, PromptRequest,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionConfigId, SessionConfigKind, SessionConfigOption,
+    SessionConfigOptionCategory, SessionConfigOptionValue, SessionConfigSelectOptions,
+    SessionConfigValueId, SessionId, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, StopReason, TextContent, ToolCall, ToolCallStatus,
+    ToolCallUpdate, ToolKind,
+};
+use agent_client_protocol::v1::schema::{ClientCapabilities, InitializeRequest, NewSessionRequest};
 pub use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, Client};
 pub use agent_client_protocol::{on_receive_notification, on_receive_request};
 use std::collections::HashSet;
